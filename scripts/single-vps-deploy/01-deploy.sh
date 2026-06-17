@@ -24,7 +24,8 @@ export KUBECONFIG=/etc/rancher/k3s/k3s.yaml
 curl -fsSL https://raw.githubusercontent.com/helm/helm/main/scripts/get-helm-3 | bash
 curl -fsSL "https://github.com/helmfile/helmfile/releases/download/v${HELMFILE_V}/helmfile_${HELMFILE_V}_linux_amd64.tar.gz" \
   | tar -xz -C /usr/local/bin helmfile
-helm plugin install https://github.com/databus23/helm-diff
+# Idempotent: the plugin persists across a k3s wipe, so skip if already present.
+helm plugin list 2>/dev/null | grep -q '^diff' || helm plugin install https://github.com/databus23/helm-diff
 
 echo "==> [2/4] Installing cert-manager and ClusterIssuer"
 kubectl apply -f https://github.com/cert-manager/cert-manager/releases/download/v1.16.2/cert-manager.yaml
