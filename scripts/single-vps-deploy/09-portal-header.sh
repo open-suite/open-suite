@@ -52,9 +52,16 @@ echo "==> [2/3] Nextcloud sidecar (proxy + sub_filter, same-origin header)"
 # ConfigMap: nginx.conf (proxy NC on :8081, inject script, serve the JS) + the JS.
 NGINX_CONF=$(cat <<'NGINX'
 worker_processes 1;
+# nginx-unprivileged runs as uid 101; keep all writable paths under /tmp.
+pid /tmp/nginx.pid;
 events { worker_connections 1024; }
 http {
   include /etc/nginx/mime.types;
+  client_body_temp_path /tmp/client_temp;
+  proxy_temp_path /tmp/proxy_temp;
+  fastcgi_temp_path /tmp/fastcgi_temp;
+  uwsgi_temp_path /tmp/uwsgi_temp;
+  scgi_temp_path /tmp/scgi_temp;
   server {
     listen 8081;
     client_max_body_size 0;
