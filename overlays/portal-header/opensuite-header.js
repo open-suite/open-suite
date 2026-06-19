@@ -78,6 +78,11 @@
       // and push content down, since our bar replaces that nav entirely.
       "html.ko-on-bridge .ant-layout-header{display:none !important;}",
       "html.ko-on-bridge body{padding-top:" + HEADER_HEIGHT + "px !important;}",
+      // Nextcloud Calendar's new-event popover can be taller than the viewport,
+      // pushing its footer (the Save button) off-screen. Cap the scrollable
+      // content region so the popover stays short and the footer is reachable.
+      // (These classes only exist in NC Calendar, so this is a no-op elsewhere.)
+      ".event-popover__content{max-height:40vh !important;overflow-y:auto !important;}",
     ].join("");
     document.head.appendChild(s);
   }
