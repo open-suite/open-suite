@@ -44,5 +44,5 @@ bash "${DIR}/08-work-eu-portal.sh"
 
 echo ""
 echo "############################################################"
-echo "# work-eu deployed: https://bureaublad.${DOMAIN}"
+echo "# Keep Office deployed: https://bridge.${DOMAIN}"
 echo "############################################################"

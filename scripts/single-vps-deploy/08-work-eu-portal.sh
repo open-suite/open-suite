@@ -70,4 +70,4 @@ kubectl -n mb-bureaublad rollout status deploy/bureaublad-backend --timeout=120s
 kubectl -n mb-bureaublad rollout status deploy/bureaublad-frontend --timeout=180s
 
 echo ""
-echo "Keep Office portal + calendar live at https://bureaublad.${DOMAIN}"
+echo "Keep Office portal + calendar live at https://bridge.${DOMAIN}"
