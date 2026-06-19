@@ -114,6 +114,20 @@ kubectl -n mb-nextcloud patch deploy nextcloud --type strategic -p '{
 kubectl -n mb-nextcloud patch svc nextcloud --type json \
   -p '[{"op":"replace","path":"/spec/ports/0/targetPort","value":8081}]'
 
+# The base NetworkPolicy only admits ingress on 8080; the sidecar listens on
+# 8081, so mirror every ingress rule to also allow 8081 (idempotent).
+kubectl -n mb-nextcloud get netpol nextcloud -o json | python3 -c '
+import json, sys
+o = json.load(sys.stdin)
+for rule in o["spec"].get("ingress", []):
+    ports = rule.setdefault("ports", [])
+    if not any(p.get("port") == 8081 for p in ports):
+        ports.append({"port": 8081, "protocol": "TCP"})
+for k in ("creationTimestamp","resourceVersion","uid","managedFields","generation"):
+    o.get("metadata",{}).pop(k, None)
+print(json.dumps(o))
+' | kubectl apply -f -
+
 kubectl -n mb-nextcloud rollout status deploy/nextcloud --timeout=180s
 
 echo "==> [3/3] Done — Keep Office header injected across apps"
