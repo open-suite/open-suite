@@ -1,5 +1,5 @@
 /*
- * Keep Office portal header — the single, shared top navigation.
+ * Open Suite portal header — the single, shared top navigation.
  *
  * Injected same-origin into every surface (the bridge portal itself, plus
  * Nextcloud, Meet, Element, Docs, Grist, ...) so navigation is identical
@@ -23,7 +23,7 @@
   var HEADER_ID = "ko-portal-header";
   var HEADER_HEIGHT = 48; // px
 
-  // host = "meet.keepoffice.ritzademo.com" -> base = "keepoffice.ritzademo.com"
+  // host = "meet.opensuite.ritzademo.com" -> base = "opensuite.ritzademo.com"
   var host = window.location.hostname;
   var base = host.indexOf(".") === -1 ? host : host.slice(host.indexOf(".") + 1);
   var origin = function (sub) { return window.location.protocol + "//" + sub + "." + base; };
@@ -72,8 +72,17 @@
       "#" + HEADER_ID + " .ko-item.ko-open .ko-menu{display:flex;}",
       "#" + HEADER_ID + " .ko-menu a{color:#cdd6e0;text-decoration:none;padding:8px 10px;border-radius:6px;white-space:nowrap;}",
       "#" + HEADER_ID + " .ko-menu a:hover{background:rgba(255,255,255,.10);color:#fff;}",
-      // Push the page down so the fixed header never covers app chrome.
-      "html.ko-has-header{margin-top:" + HEADER_HEIGHT + "px !important;}",
+      // The bar overlays the top of apps (no document offset), so full-height
+      // apps like Nextcloud Calendar keep their full viewport and their popovers
+      // aren't clipped. On the bridge portal we instead hide its built-in nav
+      // and push content down, since our bar replaces that nav entirely.
+      "html.ko-on-bridge .ant-layout-header{display:none !important;}",
+      "html.ko-on-bridge body{padding-top:" + HEADER_HEIGHT + "px !important;}",
+      // Nextcloud Calendar's new-event popover can be taller than the viewport,
+      // pushing its footer (the Save button) off-screen. Cap the scrollable
+      // content region so the popover stays short and the footer is reachable.
+      // (These classes only exist in NC Calendar, so this is a no-op elsewhere.)
+      ".event-popover__content{max-height:40vh !important;overflow-y:auto !important;}",
     ].join("");
     document.head.appendChild(s);
   }
@@ -125,7 +134,10 @@
     if (document.getElementById(HEADER_ID)) return;
     if (!document.body) return;
     injectStyles();
-    document.documentElement.classList.add("ko-has-header");
+    // On the bridge portal, take over from its built-in nav (hide it + offset).
+    if (host.indexOf("bridge.") === 0) {
+      document.documentElement.classList.add("ko-on-bridge");
+    }
 
     var bar = document.createElement("nav");
     bar.id = HEADER_ID;
@@ -133,7 +145,7 @@
     var brand = document.createElement("a");
     brand.className = "ko-brand";
     brand.href = origin("bridge");
-    brand.innerHTML = '<span class="ko-mark">K</span><span>Keep Office</span>';
+    brand.innerHTML = '<span class="ko-mark">O</span><span>Open Suite</span>';
     bar.appendChild(brand);
 
     NAV.forEach(function (item) { bar.appendChild(buildItem(item)); });

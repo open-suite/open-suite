@@ -1,11 +1,11 @@
 #!/usr/bin/env bash
 # Usage: sudo ./deploy.sh <domain> <email> <master-password>
 #
-# Single happy-path deploy for work-eu on a fresh Ubuntu 24.04 VPS (k3s).
-# Runs the MinBZK base stack (scripts 01-07) then the work-eu layer (08):
+# Single happy-path deploy for open-suite on a fresh Ubuntu 24.04 VPS (k3s).
+# Runs the MinBZK base stack (scripts 01-07) then the open-suite layer (08):
 # patched portal + Nextcloud calendar wiring.
 #
-# Run this from a checkout of the work-eu repo on the target VPS, as root.
+# Run this from a checkout of the open-suite repo on the target VPS, as root.
 # Every step is idempotent, so re-running is safe.
 set -euo pipefail
 
@@ -40,10 +40,10 @@ bash "${DIR}/04-nextcloud-office.sh"
 bash "${DIR}/05-docs.sh"
 bash "${DIR}/06-grist.sh"
 bash "${DIR}/07-session-lifetimes.sh" "${DOMAIN}"
-bash "${DIR}/08-work-eu-portal.sh"
+bash "${DIR}/08-open-suite-portal.sh"
 bash "${DIR}/09-portal-header.sh"
 
 echo ""
 echo "############################################################"
-echo "# Keep Office deployed: https://bridge.${DOMAIN}"
+echo "# Open Suite deployed: https://bridge.${DOMAIN}"
 echo "############################################################"

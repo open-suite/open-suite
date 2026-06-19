@@ -48,7 +48,7 @@ cd /root
 git clone https://github.com/MinBZK/mijn-bureau-infra
 cd mijn-bureau-infra
 
-# Apply our local patches over the vendored MinBZK infra (Keep Office branding, etc.).
+# Apply our local patches over the vendored MinBZK infra (Open Suite branding, etc.).
 REPO_ROOT="$(cd "$(dirname "$0")/../.." && pwd)"
 for p in "${REPO_ROOT}"/patches/local/*.patch; do
   [ -e "$p" ] || continue
@@ -60,7 +60,7 @@ cat > helmfile/environments/demo/mijnbureau.yaml.gotmpl <<YAML
 ---
 global:
   domain: "${DOMAIN}"
-  # Keep Office serves the portal at bridge.DOMAIN (upstream default: bureaublad).
+  # Open Suite serves the portal at bridge.DOMAIN (upstream default: bureaublad).
   # This one value also drives the portal's Keycloak client redirect URIs and the
   # cross-app "open portal" buttons, so they all move together.
   hostname:

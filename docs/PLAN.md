@@ -1,4 +1,4 @@
-# work-eu — Plan
+# open-suite — Plan
 
 ## 1. What this is
 

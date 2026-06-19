@@ -1,0 +1,568 @@
+diff --git a/helmfile/apps/bureaublad/helmfile-child.yaml.gotmpl b/helmfile/apps/bureaublad/helmfile-child.yaml.gotmpl
+index a4602e2..26869cb 100644
+--- a/helmfile/apps/bureaublad/helmfile-child.yaml.gotmpl
++++ b/helmfile/apps/bureaublad/helmfile-child.yaml.gotmpl
+@@ -8,7 +8,7 @@ releases:
+     {{- if .Values.application.bureaublad.namespace }}
+     namespace: {{ .Values.application.bureaublad.namespace }}
+     {{- end }}
+-    installed: {{ and (eq .Environment.Name "demo") (.Values.application.bureaublad.enabled) | toYaml }}
++    installed: {{ and (or (eq .Environment.Name "demo") (eq .Environment.Name "runner")) (.Values.application.bureaublad.enabled) | toYaml }}
+     values:
+       - "values-redis.yaml.gotmpl"
+ 
+@@ -18,7 +18,7 @@ releases:
+     {{- if .Values.application.bureaublad.namespace }}
+     namespace: {{ .Values.application.bureaublad.namespace }}
+     {{- end }}
+-    {{- if and (eq .Environment.Name "demo") (.Values.application.bureaublad.enabled) }}
++    {{- if and (or (eq .Environment.Name "demo") (eq .Environment.Name "runner")) (.Values.application.bureaublad.enabled) }}
+     needs:
+       - {{ if .Values.application.bureaublad.namespace }}{{ .Values.application.bureaublad.namespace }}/{{ end }}bureaublad-redis
+     {{- end }}
+diff --git a/helmfile/apps/conversations/helmfile-child.yaml.gotmpl b/helmfile/apps/conversations/helmfile-child.yaml.gotmpl
+index f12d51a..9f44d77 100644
+--- a/helmfile/apps/conversations/helmfile-child.yaml.gotmpl
++++ b/helmfile/apps/conversations/helmfile-child.yaml.gotmpl
+@@ -11,7 +11,7 @@ releases:
+     values:
+       - "../common/values-cluster-ingress.yaml.gotmpl"
+       - "values-conversations.yaml.gotmpl"
+-    {{- if and (eq .Environment.Name "demo") ( .Values.application.conversations.enabled) }}
++    {{- if and (or (eq .Environment.Name "demo") (eq .Environment.Name "runner")) ( .Values.application.conversations.enabled) }}
+     needs:
+       - {{ if .Values.application.conversations.namespace }}{{ .Values.application.conversations.namespace }}/{{ end }}conversations-redis
+       {{- if eq (.Values.database.default.provider | default "bitnami") "cnpg" }}
+@@ -27,7 +27,7 @@ releases:
+     {{- if .Values.application.conversations.namespace }}
+     namespace: {{ .Values.application.conversations.namespace }}
+     {{- end }}
+-    installed: {{ and (eq .Environment.Name "demo") ( .Values.application.conversations.enabled) (ne (.Values.database.default.provider | default "bitnami") "cnpg") | toYaml }}
++    installed: {{ and (or (eq .Environment.Name "demo") (eq .Environment.Name "runner")) ( .Values.application.conversations.enabled) (ne (.Values.database.default.provider | default "bitnami") "cnpg") | toYaml }}
+     values:
+       - "values-postgresql.yaml.gotmpl"
+ 
+@@ -36,7 +36,7 @@ releases:
+     {{- if .Values.application.conversations.namespace }}
+     namespace: {{ .Values.application.conversations.namespace }}
+     {{- end }}
+-    installed: {{ and (eq .Environment.Name "demo") ( .Values.application.conversations.enabled) (eq (.Values.database.default.provider | default "bitnami") "cnpg") | toYaml }}
++    installed: {{ and (or (eq .Environment.Name "demo") (eq .Environment.Name "runner")) ( .Values.application.conversations.enabled) (eq (.Values.database.default.provider | default "bitnami") "cnpg") | toYaml }}
+     values:
+       - "values-cnpg-cluster-credentials.yaml.gotmpl"
+ 
+@@ -45,7 +45,7 @@ releases:
+     {{- if .Values.application.conversations.namespace }}
+     namespace: {{ .Values.application.conversations.namespace }}
+     {{- end }}
+-    installed: {{ and (eq .Environment.Name "demo") ( .Values.application.conversations.enabled) (eq (.Values.database.default.provider | default "bitnami") "cnpg") | toYaml }}
++    installed: {{ and (or (eq .Environment.Name "demo") (eq .Environment.Name "runner")) ( .Values.application.conversations.enabled) (eq (.Values.database.default.provider | default "bitnami") "cnpg") | toYaml }}
+     needs:
+       - {{ if .Values.application.conversations.namespace }}{{ .Values.application.conversations.namespace }}/{{ end }}conversations-cluster-credentials
+     values:
+@@ -57,7 +57,7 @@ releases:
+     {{- if .Values.application.conversations.namespace }}
+     namespace: {{ .Values.application.conversations.namespace }}
+     {{- end }}
+-    installed: {{ and (eq .Environment.Name "demo") ( .Values.application.conversations.enabled) | toYaml }}
++    installed: {{ and (or (eq .Environment.Name "demo") (eq .Environment.Name "runner")) ( .Values.application.conversations.enabled) | toYaml }}
+     values:
+       - "values-redis.yaml.gotmpl"
+ 
+diff --git a/helmfile/apps/docs/helmfile-child.yaml.gotmpl b/helmfile/apps/docs/helmfile-child.yaml.gotmpl
+index e2c4c68..1128fd3 100644
+--- a/helmfile/apps/docs/helmfile-child.yaml.gotmpl
++++ b/helmfile/apps/docs/helmfile-child.yaml.gotmpl
+@@ -8,7 +8,7 @@ releases:
+     {{- if .Values.application.docs.namespace }}
+     namespace: {{ .Values.application.docs.namespace }}
+     {{- end }}
+-    installed: {{ and (eq .Environment.Name "demo") (.Values.application.docs.enabled) (ne (.Values.database.default.provider | default "bitnami") "cnpg") | toYaml }}
++    installed: {{ and (or (eq .Environment.Name "demo") (eq .Environment.Name "runner")) (.Values.application.docs.enabled) (ne (.Values.database.default.provider | default "bitnami") "cnpg") | toYaml }}
+     values:
+       - "values-postgresql.yaml.gotmpl"
+ 
+@@ -17,7 +17,7 @@ releases:
+     {{- if .Values.application.docs.namespace }}
+     namespace: {{ .Values.application.docs.namespace }}
+     {{- end }}
+-    installed: {{ and (eq .Environment.Name "demo") (.Values.application.docs.enabled) (eq (.Values.database.default.provider | default "bitnami") "cnpg") | toYaml }}
++    installed: {{ and (or (eq .Environment.Name "demo") (eq .Environment.Name "runner")) (.Values.application.docs.enabled) (eq (.Values.database.default.provider | default "bitnami") "cnpg") | toYaml }}
+     values:
+       - "values-cnpg-cluster-credentials.yaml.gotmpl"
+ 
+@@ -26,7 +26,7 @@ releases:
+     {{- if .Values.application.docs.namespace }}
+     namespace: {{ .Values.application.docs.namespace }}
+     {{- end }}
+-    installed: {{ and (eq .Environment.Name "demo") (.Values.application.docs.enabled) (eq (.Values.database.default.provider | default "bitnami") "cnpg") | toYaml }}
++    installed: {{ and (or (eq .Environment.Name "demo") (eq .Environment.Name "runner")) (.Values.application.docs.enabled) (eq (.Values.database.default.provider | default "bitnami") "cnpg") | toYaml }}
+     needs:
+       - {{ if .Values.application.docs.namespace }}{{ .Values.application.docs.namespace }}/{{ end }}docs-cluster-credentials
+     values:
+@@ -38,7 +38,7 @@ releases:
+     {{- if .Values.application.docs.namespace }}
+     namespace: {{ .Values.application.docs.namespace }}
+     {{- end }}
+-    installed: {{ and (eq .Environment.Name "demo") (.Values.application.docs.enabled) | toYaml }}
++    installed: {{ and (or (eq .Environment.Name "demo") (eq .Environment.Name "runner")) (.Values.application.docs.enabled) | toYaml }}
+     values:
+       - "values-redis.yaml.gotmpl"
+ 
+@@ -48,7 +48,7 @@ releases:
+     {{- if .Values.application.docs.namespace }}
+     namespace: {{ .Values.application.docs.namespace }}
+     {{- end }}
+-    installed: {{ and (eq .Environment.Name "demo") (.Values.application.docs.enabled) | toYaml }}
++    installed: {{ and (or (eq .Environment.Name "demo") (eq .Environment.Name "runner")) (.Values.application.docs.enabled) | toYaml }}
+     values:
+       - "../common/values-cluster-ingress.yaml.gotmpl"
+       - "values-minio.yaml.gotmpl"
+@@ -59,7 +59,7 @@ releases:
+     {{- if .Values.application.docs.namespace }}
+     namespace: {{ .Values.application.docs.namespace }}
+     {{- end }}
+-    {{- if and (eq .Environment.Name "demo") (.Values.application.docs.enabled) }}
++    {{- if and (or (eq .Environment.Name "demo") (eq .Environment.Name "runner")) (.Values.application.docs.enabled) }}
+     needs:
+       {{- if eq (.Values.database.default.provider | default "bitnami") "cnpg" }}
+       - {{ if .Values.application.docs.namespace }}{{ .Values.application.docs.namespace }}/{{ end }}docs-cluster
+diff --git a/helmfile/apps/drive/helmfile-child.yaml.gotmpl b/helmfile/apps/drive/helmfile-child.yaml.gotmpl
+index 63fa65b..773b74b 100644
+--- a/helmfile/apps/drive/helmfile-child.yaml.gotmpl
++++ b/helmfile/apps/drive/helmfile-child.yaml.gotmpl
+@@ -8,7 +8,7 @@ releases:
+     {{- if .Values.application.drive.namespace }}
+     namespace: {{ .Values.application.drive.namespace }}
+     {{- end }}
+-    installed: {{ and (eq .Environment.Name "demo") ( .Values.application.drive.enabled) (ne (.Values.database.default.provider | default "bitnami") "cnpg") | toYaml }}
++    installed: {{ and (or (eq .Environment.Name "demo") (eq .Environment.Name "runner")) ( .Values.application.drive.enabled) (ne (.Values.database.default.provider | default "bitnami") "cnpg") | toYaml }}
+     values:
+       - "values-postgresql.yaml.gotmpl"
+ 
+@@ -17,7 +17,7 @@ releases:
+     {{- if .Values.application.drive.namespace }}
+     namespace: {{ .Values.application.drive.namespace }}
+     {{- end }}
+-    installed: {{ and (eq .Environment.Name "demo") ( .Values.application.drive.enabled) (eq (.Values.database.default.provider | default "bitnami") "cnpg") | toYaml }}
++    installed: {{ and (or (eq .Environment.Name "demo") (eq .Environment.Name "runner")) ( .Values.application.drive.enabled) (eq (.Values.database.default.provider | default "bitnami") "cnpg") | toYaml }}
+     values:
+       - "values-cnpg-cluster-credentials.yaml.gotmpl"
+ 
+@@ -26,7 +26,7 @@ releases:
+     {{- if .Values.application.drive.namespace }}
+     namespace: {{ .Values.application.drive.namespace }}
+     {{- end }}
+-    installed: {{ and (eq .Environment.Name "demo") ( .Values.application.drive.enabled) (eq (.Values.database.default.provider | default "bitnami") "cnpg") | toYaml }}
++    installed: {{ and (or (eq .Environment.Name "demo") (eq .Environment.Name "runner")) ( .Values.application.drive.enabled) (eq (.Values.database.default.provider | default "bitnami") "cnpg") | toYaml }}
+     needs:
+       - {{ if .Values.application.drive.namespace }}{{ .Values.application.drive.namespace }}/{{ end }}drive-cluster-credentials
+     values:
+@@ -38,7 +38,7 @@ releases:
+     {{- if .Values.application.drive.namespace }}
+     namespace: {{ .Values.application.drive.namespace }}
+     {{- end }}
+-    installed: {{ and (eq .Environment.Name "demo") ( .Values.application.drive.enabled) | toYaml }}
++    installed: {{ and (or (eq .Environment.Name "demo") (eq .Environment.Name "runner")) ( .Values.application.drive.enabled) | toYaml }}
+     values:
+       - "values-redis.yaml.gotmpl"
+ 
+@@ -48,7 +48,7 @@ releases:
+     {{- if .Values.application.drive.namespace }}
+     namespace: {{ .Values.application.drive.namespace }}
+     {{- end }}
+-    installed: {{ and (eq .Environment.Name "demo") ( .Values.application.drive.enabled) | toYaml }}
++    installed: {{ and (or (eq .Environment.Name "demo") (eq .Environment.Name "runner")) ( .Values.application.drive.enabled) | toYaml }}
+     values:
+       - "../common/values-cluster-ingress.yaml.gotmpl"
+       - "values-minio.yaml.gotmpl"
+@@ -59,7 +59,7 @@ releases:
+     {{- if .Values.application.drive.namespace }}
+     namespace: {{ .Values.application.drive.namespace }}
+     {{- end }}
+-    {{- if and (eq .Environment.Name "demo") ( .Values.application.drive.enabled) }}
++    {{- if and (or (eq .Environment.Name "demo") (eq .Environment.Name "runner")) ( .Values.application.drive.enabled) }}
+     needs:
+       {{- if eq (.Values.database.default.provider | default "bitnami") "cnpg" }}
+       - {{ if .Values.application.drive.namespace }}{{ .Values.application.drive.namespace }}/{{ end }}drive-cluster
+diff --git a/helmfile/apps/element/helmfile-child.yaml.gotmpl b/helmfile/apps/element/helmfile-child.yaml.gotmpl
+index 535a6d9..1ec1d64 100644
+--- a/helmfile/apps/element/helmfile-child.yaml.gotmpl
++++ b/helmfile/apps/element/helmfile-child.yaml.gotmpl
+@@ -8,7 +8,7 @@ releases:
+     {{- if .Values.application.element.namespace }}
+     namespace: {{ .Values.application.element.namespace }}
+     {{- end }}
+-    installed: {{ and (eq .Environment.Name "demo") ( .Values.application.element.enabled) (ne (.Values.database.default.provider | default "bitnami") "cnpg") | toYaml }}
++    installed: {{ and (or (eq .Environment.Name "demo") (eq .Environment.Name "runner")) ( .Values.application.element.enabled) (ne (.Values.database.default.provider | default "bitnami") "cnpg") | toYaml }}
+     values:
+       - "values-postgresql.yaml.gotmpl"
+ 
+@@ -17,7 +17,7 @@ releases:
+     {{- if .Values.application.element.namespace }}
+     namespace: {{ .Values.application.element.namespace }}
+     {{- end }}
+-    installed: {{ and (eq .Environment.Name "demo") ( .Values.application.element.enabled) (eq (.Values.database.default.provider | default "bitnami") "cnpg") | toYaml }}
++    installed: {{ and (or (eq .Environment.Name "demo") (eq .Environment.Name "runner")) ( .Values.application.element.enabled) (eq (.Values.database.default.provider | default "bitnami") "cnpg") | toYaml }}
+     values:
+       - "values-cnpg-cluster-credentials.yaml.gotmpl"
+ 
+@@ -26,7 +26,7 @@ releases:
+     {{- if .Values.application.element.namespace }}
+     namespace: {{ .Values.application.element.namespace }}
+     {{- end }}
+-    installed: {{ and (eq .Environment.Name "demo") ( .Values.application.element.enabled) (eq (.Values.database.default.provider | default "bitnami") "cnpg") | toYaml }}
++    installed: {{ and (or (eq .Environment.Name "demo") (eq .Environment.Name "runner")) ( .Values.application.element.enabled) (eq (.Values.database.default.provider | default "bitnami") "cnpg") | toYaml }}
+     needs:
+       - {{ if .Values.application.element.namespace }}{{ .Values.application.element.namespace }}/{{ end }}element-cluster-credentials
+     values:
+@@ -38,7 +38,7 @@ releases:
+     {{- if .Values.application.element.namespace }}
+     namespace: {{ .Values.application.element.namespace }}
+     {{- end }}
+-    installed: {{ and (eq .Environment.Name "demo") ( .Values.application.element.enabled) | toYaml }}
++    installed: {{ and (or (eq .Environment.Name "demo") (eq .Environment.Name "runner")) ( .Values.application.element.enabled) | toYaml }}
+     values:
+       - "values-redis.yaml.gotmpl"
+ 
+@@ -58,7 +58,7 @@ releases:
+     {{- if .Values.application.element.namespace }}
+     namespace: {{ .Values.application.element.namespace }}
+     {{- end }}
+-    {{- if and (eq .Environment.Name "demo") ( .Values.application.element.enabled) }}
++    {{- if and (or (eq .Environment.Name "demo") (eq .Environment.Name "runner")) ( .Values.application.element.enabled) }}
+     needs:
+       {{- if eq (.Values.database.default.provider | default "bitnami") "cnpg" }}
+       - {{ if .Values.application.element.namespace }}{{ .Values.application.element.namespace }}/{{ end }}element-cluster
+diff --git a/helmfile/apps/grist/helmfile-child.yaml.gotmpl b/helmfile/apps/grist/helmfile-child.yaml.gotmpl
+index 8f9ae69..595812e 100644
+--- a/helmfile/apps/grist/helmfile-child.yaml.gotmpl
++++ b/helmfile/apps/grist/helmfile-child.yaml.gotmpl
+@@ -8,7 +8,7 @@ releases:
+     {{- if .Values.application.grist.namespace }}
+     namespace: {{ .Values.application.grist.namespace }}
+     {{- end }}
+-    installed: {{ and (eq .Environment.Name "demo") ( .Values.application.grist.enabled) (ne (.Values.database.default.provider | default "bitnami") "cnpg") | toYaml }}
++    installed: {{ and (or (eq .Environment.Name "demo") (eq .Environment.Name "runner")) ( .Values.application.grist.enabled) (ne (.Values.database.default.provider | default "bitnami") "cnpg") | toYaml }}
+     values:
+       - "values-postgresql.yaml.gotmpl"
+ 
+@@ -17,7 +17,7 @@ releases:
+     {{- if .Values.application.grist.namespace }}
+     namespace: {{ .Values.application.grist.namespace }}
+     {{- end }}
+-    installed: {{ and (eq .Environment.Name "demo") ( .Values.application.grist.enabled) (eq (.Values.database.default.provider | default "bitnami") "cnpg") | toYaml }}
++    installed: {{ and (or (eq .Environment.Name "demo") (eq .Environment.Name "runner")) ( .Values.application.grist.enabled) (eq (.Values.database.default.provider | default "bitnami") "cnpg") | toYaml }}
+     values:
+       - "values-cnpg-cluster-credentials.yaml.gotmpl"
+ 
+@@ -26,7 +26,7 @@ releases:
+     {{- if .Values.application.grist.namespace }}
+     namespace: {{ .Values.application.grist.namespace }}
+     {{- end }}
+-    installed: {{ and (eq .Environment.Name "demo") ( .Values.application.grist.enabled) (eq (.Values.database.default.provider | default "bitnami") "cnpg") | toYaml }}
++    installed: {{ and (or (eq .Environment.Name "demo") (eq .Environment.Name "runner")) ( .Values.application.grist.enabled) (eq (.Values.database.default.provider | default "bitnami") "cnpg") | toYaml }}
+     needs:
+       - {{ if .Values.application.grist.namespace }}{{ .Values.application.grist.namespace }}/{{ end }}grist-cluster-credentials
+     values:
+@@ -38,7 +38,7 @@ releases:
+     {{- if .Values.application.grist.namespace }}
+     namespace: {{ .Values.application.grist.namespace }}
+     {{- end }}
+-    installed: {{ and (eq .Environment.Name "demo") ( .Values.application.grist.enabled) | toYaml }}
++    installed: {{ and (or (eq .Environment.Name "demo") (eq .Environment.Name "runner")) ( .Values.application.grist.enabled) | toYaml }}
+     values:
+       - "values-redis.yaml.gotmpl"
+ 
+@@ -48,7 +48,7 @@ releases:
+     {{- if .Values.application.grist.namespace }}
+     namespace: {{ .Values.application.grist.namespace }}
+     {{- end }}
+-    installed: {{ and (eq .Environment.Name "demo") ( .Values.application.grist.enabled) | toYaml }}
++    installed: {{ and (or (eq .Environment.Name "demo") (eq .Environment.Name "runner")) ( .Values.application.grist.enabled) | toYaml }}
+     values:
+       - "../common/values-cluster-ingress.yaml.gotmpl"
+       - "values-minio.yaml.gotmpl"
+@@ -59,7 +59,7 @@ releases:
+     {{- if .Values.application.grist.namespace }}
+     namespace: {{ .Values.application.grist.namespace }}
+     {{- end }}
+-    {{- if and (eq .Environment.Name "demo") ( .Values.application.grist.enabled) }}
++    {{- if and (or (eq .Environment.Name "demo") (eq .Environment.Name "runner")) ( .Values.application.grist.enabled) }}
+     needs:
+       {{- if eq (.Values.database.default.provider | default "bitnami") "cnpg" }}
+       - {{ if .Values.application.grist.namespace }}{{ .Values.application.grist.namespace }}/{{ end }}grist-cluster
+diff --git a/helmfile/apps/keycloak/helmfile-child.yaml.gotmpl b/helmfile/apps/keycloak/helmfile-child.yaml.gotmpl
+index 6fcc7fa..05019c8 100644
+--- a/helmfile/apps/keycloak/helmfile-child.yaml.gotmpl
++++ b/helmfile/apps/keycloak/helmfile-child.yaml.gotmpl
+@@ -9,7 +9,7 @@ releases:
+     namespace: {{ .Values.application.keycloak.namespace }}
+     {{- end }}
+     installed: {{ .Values.application.keycloak.enabled }}
+-    {{- if and (eq .Environment.Name "demo") ( .Values.application.keycloak.enabled) }}
++    {{- if and (or (eq .Environment.Name "demo") (eq .Environment.Name "runner")) ( .Values.application.keycloak.enabled) }}
+     needs:
+       {{- if eq (.Values.database.default.provider | default "bitnami") "cnpg" }}
+       - {{ if .Values.application.keycloak.namespace }}{{ .Values.application.keycloak.namespace }}/{{ end }}keycloak-cluster
+@@ -27,7 +27,7 @@ releases:
+     {{- if .Values.application.keycloak.namespace }}
+     namespace: {{ .Values.application.keycloak.namespace }}
+     {{- end }}
+-    installed: {{ and (eq .Environment.Name "demo") ( .Values.application.keycloak.enabled) (ne (.Values.database.default.provider | default "bitnami") "cnpg") | toYaml }}
++    installed: {{ and (or (eq .Environment.Name "demo") (eq .Environment.Name "runner")) ( .Values.application.keycloak.enabled) (ne (.Values.database.default.provider | default "bitnami") "cnpg") | toYaml }}
+     values:
+       - "postgresql.yaml.gotmpl"
+ 
+@@ -36,7 +36,7 @@ releases:
+     {{- if .Values.application.keycloak.namespace }}
+     namespace: {{ .Values.application.keycloak.namespace }}
+     {{- end }}
+-    installed: {{ and (eq .Environment.Name "demo") ( .Values.application.keycloak.enabled) (eq (.Values.database.default.provider | default "bitnami") "cnpg") | toYaml }}
++    installed: {{ and (or (eq .Environment.Name "demo") (eq .Environment.Name "runner")) ( .Values.application.keycloak.enabled) (eq (.Values.database.default.provider | default "bitnami") "cnpg") | toYaml }}
+     values:
+       - "values-cnpg-cluster-credentials.yaml.gotmpl"
+ 
+@@ -45,7 +45,7 @@ releases:
+     {{- if .Values.application.keycloak.namespace }}
+     namespace: {{ .Values.application.keycloak.namespace }}
+     {{- end }}
+-    installed: {{ and (eq .Environment.Name "demo") ( .Values.application.keycloak.enabled) (eq (.Values.database.default.provider | default "bitnami") "cnpg") | toYaml }}
++    installed: {{ and (or (eq .Environment.Name "demo") (eq .Environment.Name "runner")) ( .Values.application.keycloak.enabled) (eq (.Values.database.default.provider | default "bitnami") "cnpg") | toYaml }}
+     needs:
+       - {{ if .Values.application.keycloak.namespace }}{{ .Values.application.keycloak.namespace }}/{{ end }}keycloak-cluster-credentials
+     values:
+diff --git a/helmfile/apps/keycloak/keycloak.yaml.gotmpl b/helmfile/apps/keycloak/keycloak.yaml.gotmpl
+index 5e284cb..971a595 100644
+--- a/helmfile/apps/keycloak/keycloak.yaml.gotmpl
++++ b/helmfile/apps/keycloak/keycloak.yaml.gotmpl
+@@ -53,7 +53,7 @@ extraDeploy:
+       MB_CLIENT_SECRET_OPENPROJECT: {{ .Values.authentication.client.openproject.client_secret | quote }}
+       MB_CLIENT_SECRET_DOCS: {{ .Values.authentication.client.docs.client_secret | quote }}
+       MB_CLIENT_SECRET_BUREAUBLAD: {{ .Values.authentication.client.bureaublad.client_secret | quote }}
+-      {{- if eq .Environment.Name "demo" }}
++      {{- if or (eq .Environment.Name "demo") (eq .Environment.Name "runner") }}
+       {{- range $user := .Values.user }}
+       MB_USER_PASSWORD_{{ regexReplaceAll "[^A-Z0-9_]" (upper $user.username) "_" }}: {{ $user.password | quote }}
+       {{- end }}
+@@ -674,7 +674,7 @@ keycloakConfigCli:
+             ]
+           }
+         },
+-        {{- if eq .Environment.Name "demo" }}
++        {{- if or (eq .Environment.Name "demo") (eq .Environment.Name "runner") }}
+         "users" : [
+           {{- $users := .Values.user }}
+           {{- range $index, $user := $users }}
+diff --git a/helmfile/apps/livekit/helmfile-child.yaml.gotmpl b/helmfile/apps/livekit/helmfile-child.yaml.gotmpl
+index 2e1bd42..1605b0c 100644
+--- a/helmfile/apps/livekit/helmfile-child.yaml.gotmpl
++++ b/helmfile/apps/livekit/helmfile-child.yaml.gotmpl
+@@ -8,7 +8,7 @@ releases:
+     {{- if .Values.application.livekit.namespace }}
+     namespace: {{ .Values.application.livekit.namespace }}
+     {{- end }}
+-    {{- if and (eq .Environment.Name "demo") ( .Values.application.livekit.enabled) }}
++    {{- if and (or (eq .Environment.Name "demo") (eq .Environment.Name "runner")) ( .Values.application.livekit.enabled) }}
+     needs:
+       - {{ if .Values.application.livekit.namespace }}{{ .Values.application.livekit.namespace }}/{{ end }}livekit-redis
+     {{- end }}
+@@ -22,6 +22,6 @@ releases:
+     {{- if .Values.application.livekit.namespace }}
+     namespace: {{ .Values.application.livekit.namespace }}
+     {{- end }}
+-    installed: {{ and (eq .Environment.Name "demo") ( .Values.application.livekit.enabled) | toYaml }}
++    installed: {{ and (or (eq .Environment.Name "demo") (eq .Environment.Name "runner")) ( .Values.application.livekit.enabled) | toYaml }}
+     values:
+       - "values-redis.yaml.gotmpl"
+diff --git a/helmfile/apps/meet/helmfile-child.yaml.gotmpl b/helmfile/apps/meet/helmfile-child.yaml.gotmpl
+index a670c3d..9a55830 100644
+--- a/helmfile/apps/meet/helmfile-child.yaml.gotmpl
++++ b/helmfile/apps/meet/helmfile-child.yaml.gotmpl
+@@ -15,7 +15,7 @@ releases:
+       # a fresh install applies meet first and its frontend pod hangs in
+       # ContainerCreating until meet-static catches up.
+       - {{ if .Values.application.meet.namespace }}{{ .Values.application.meet.namespace }}/{{ end }}meet-static
+-      {{- if eq .Environment.Name "demo" }}
++      {{- if or (eq .Environment.Name "demo") (eq .Environment.Name "runner") }}
+       {{- if eq (.Values.database.default.provider | default "bitnami") "cnpg" }}
+       - {{ if .Values.application.meet.namespace }}{{ .Values.application.meet.namespace }}/{{ end }}meet-cluster
+       {{- else }}
+@@ -34,7 +34,7 @@ releases:
+     {{- if .Values.application.meet.namespace }}
+     namespace: {{ .Values.application.meet.namespace }}
+     {{- end }}
+-    installed: {{ and (eq .Environment.Name "demo") ( .Values.application.meet.enabled) (ne (.Values.database.default.provider | default "bitnami") "cnpg") | toYaml }}
++    installed: {{ and (or (eq .Environment.Name "demo") (eq .Environment.Name "runner")) ( .Values.application.meet.enabled) (ne (.Values.database.default.provider | default "bitnami") "cnpg") | toYaml }}
+     values:
+       - "values-postgresql.yaml.gotmpl"
+ 
+@@ -43,7 +43,7 @@ releases:
+     {{- if .Values.application.meet.namespace }}
+     namespace: {{ .Values.application.meet.namespace }}
+     {{- end }}
+-    installed: {{ and (eq .Environment.Name "demo") ( .Values.application.meet.enabled) (eq (.Values.database.default.provider | default "bitnami") "cnpg") | toYaml }}
++    installed: {{ and (or (eq .Environment.Name "demo") (eq .Environment.Name "runner")) ( .Values.application.meet.enabled) (eq (.Values.database.default.provider | default "bitnami") "cnpg") | toYaml }}
+     values:
+       - "values-cnpg-cluster-credentials.yaml.gotmpl"
+ 
+@@ -52,7 +52,7 @@ releases:
+     {{- if .Values.application.meet.namespace }}
+     namespace: {{ .Values.application.meet.namespace }}
+     {{- end }}
+-    installed: {{ and (eq .Environment.Name "demo") ( .Values.application.meet.enabled) (eq (.Values.database.default.provider | default "bitnami") "cnpg") | toYaml }}
++    installed: {{ and (or (eq .Environment.Name "demo") (eq .Environment.Name "runner")) ( .Values.application.meet.enabled) (eq (.Values.database.default.provider | default "bitnami") "cnpg") | toYaml }}
+     needs:
+       - {{ if .Values.application.meet.namespace }}{{ .Values.application.meet.namespace }}/{{ end }}meet-cluster-credentials
+     values:
+@@ -64,7 +64,7 @@ releases:
+     {{- if .Values.application.meet.namespace }}
+     namespace: {{ .Values.application.meet.namespace }}
+     {{- end }}
+-    installed: {{ and (eq .Environment.Name "demo") ( .Values.application.meet.enabled) | toYaml }}
++    installed: {{ and (or (eq .Environment.Name "demo") (eq .Environment.Name "runner")) ( .Values.application.meet.enabled) | toYaml }}
+     values:
+       - "values-redis.yaml.gotmpl"
+ 
+diff --git a/helmfile/apps/nextcloud/helmfile-child.yaml.gotmpl b/helmfile/apps/nextcloud/helmfile-child.yaml.gotmpl
+index dd55b71..2129d43 100644
+--- a/helmfile/apps/nextcloud/helmfile-child.yaml.gotmpl
++++ b/helmfile/apps/nextcloud/helmfile-child.yaml.gotmpl
+@@ -8,7 +8,7 @@ releases:
+     {{- if .Values.application.nextcloud.namespace }}
+     namespace: {{ .Values.application.nextcloud.namespace }}
+     {{- end }}
+-    installed: {{ and (eq .Environment.Name "demo") ( .Values.application.nextcloud.enabled) (ne (.Values.database.default.provider | default "bitnami") "cnpg") | toYaml }}
++    installed: {{ and (or (eq .Environment.Name "demo") (eq .Environment.Name "runner")) ( .Values.application.nextcloud.enabled) (ne (.Values.database.default.provider | default "bitnami") "cnpg") | toYaml }}
+     values:
+       - "values-postgresql.yaml.gotmpl"
+ 
+@@ -17,7 +17,7 @@ releases:
+     {{- if .Values.application.nextcloud.namespace }}
+     namespace: {{ .Values.application.nextcloud.namespace }}
+     {{- end }}
+-    installed: {{ and (eq .Environment.Name "demo") ( .Values.application.nextcloud.enabled) (eq (.Values.database.default.provider | default "bitnami") "cnpg") | toYaml }}
++    installed: {{ and (or (eq .Environment.Name "demo") (eq .Environment.Name "runner")) ( .Values.application.nextcloud.enabled) (eq (.Values.database.default.provider | default "bitnami") "cnpg") | toYaml }}
+     values:
+       - "values-cnpg-cluster-credentials.yaml.gotmpl"
+ 
+@@ -26,7 +26,7 @@ releases:
+     {{- if .Values.application.nextcloud.namespace }}
+     namespace: {{ .Values.application.nextcloud.namespace }}
+     {{- end }}
+-    installed: {{ and (eq .Environment.Name "demo") ( .Values.application.nextcloud.enabled) (eq (.Values.database.default.provider | default "bitnami") "cnpg") | toYaml }}
++    installed: {{ and (or (eq .Environment.Name "demo") (eq .Environment.Name "runner")) ( .Values.application.nextcloud.enabled) (eq (.Values.database.default.provider | default "bitnami") "cnpg") | toYaml }}
+     needs:
+       - {{ if .Values.application.nextcloud.namespace }}{{ .Values.application.nextcloud.namespace }}/{{ end }}nextcloud-cluster-credentials
+     values:
+@@ -38,7 +38,7 @@ releases:
+     {{- if .Values.application.nextcloud.namespace }}
+     namespace: {{ .Values.application.nextcloud.namespace }}
+     {{- end }}
+-    installed: {{ and (eq .Environment.Name "demo") ( .Values.application.nextcloud.enabled) | toYaml }}
++    installed: {{ and (or (eq .Environment.Name "demo") (eq .Environment.Name "runner")) ( .Values.application.nextcloud.enabled) | toYaml }}
+     values:
+       - "values-redis.yaml.gotmpl"
+ 
+@@ -48,7 +48,7 @@ releases:
+     {{- if .Values.application.nextcloud.namespace }}
+     namespace: {{ .Values.application.nextcloud.namespace }}
+     {{- end }}
+-    installed: {{ and (eq .Environment.Name "demo") ( .Values.application.nextcloud.enabled) | toYaml }}
++    installed: {{ and (or (eq .Environment.Name "demo") (eq .Environment.Name "runner")) ( .Values.application.nextcloud.enabled) | toYaml }}
+     values:
+       - "../common/values-cluster-ingress.yaml.gotmpl"
+       - "values-minio.yaml.gotmpl"
+@@ -59,7 +59,7 @@ releases:
+     {{- if .Values.application.nextcloud.namespace }}
+     namespace: {{ .Values.application.nextcloud.namespace }}
+     {{- end }}
+-    {{- if and (eq .Environment.Name "demo") ( .Values.application.nextcloud.enabled) }}
++    {{- if and (or (eq .Environment.Name "demo") (eq .Environment.Name "runner")) ( .Values.application.nextcloud.enabled) }}
+     needs:
+       {{- if eq (.Values.database.default.provider | default "bitnami") "cnpg" }}
+       - {{ if .Values.application.nextcloud.namespace }}{{ .Values.application.nextcloud.namespace }}/{{ end }}nextcloud-cluster
+diff --git a/helmfile/apps/openproject/helmfile-child.yaml.gotmpl b/helmfile/apps/openproject/helmfile-child.yaml.gotmpl
+index 582cbd5..e2d64f3 100644
+--- a/helmfile/apps/openproject/helmfile-child.yaml.gotmpl
++++ b/helmfile/apps/openproject/helmfile-child.yaml.gotmpl
+@@ -12,7 +12,7 @@ releases:
+     {{- if .Values.application.openproject.namespace }}
+     namespace: {{ .Values.application.openproject.namespace }}
+     {{- end }}
+-    installed: {{ and (eq .Environment.Name "demo") ( .Values.application.openproject.enabled) (ne (.Values.database.default.provider | default "bitnami") "cnpg") | toYaml }}
++    installed: {{ and (or (eq .Environment.Name "demo") (eq .Environment.Name "runner")) ( .Values.application.openproject.enabled) (ne (.Values.database.default.provider | default "bitnami") "cnpg") | toYaml }}
+     values:
+       - "values-postgresql.yaml.gotmpl"
+ 
+@@ -21,7 +21,7 @@ releases:
+     {{- if .Values.application.openproject.namespace }}
+     namespace: {{ .Values.application.openproject.namespace }}
+     {{- end }}
+-    installed: {{ and (eq .Environment.Name "demo") ( .Values.application.openproject.enabled) (eq (.Values.database.default.provider | default "bitnami") "cnpg") | toYaml }}
++    installed: {{ and (or (eq .Environment.Name "demo") (eq .Environment.Name "runner")) ( .Values.application.openproject.enabled) (eq (.Values.database.default.provider | default "bitnami") "cnpg") | toYaml }}
+     values:
+       - "values-cnpg-cluster-credentials.yaml.gotmpl"
+ 
+@@ -30,7 +30,7 @@ releases:
+     {{- if .Values.application.openproject.namespace }}
+     namespace: {{ .Values.application.openproject.namespace }}
+     {{- end }}
+-    installed: {{ and (eq .Environment.Name "demo") ( .Values.application.openproject.enabled) (eq (.Values.database.default.provider | default "bitnami") "cnpg") | toYaml }}
++    installed: {{ and (or (eq .Environment.Name "demo") (eq .Environment.Name "runner")) ( .Values.application.openproject.enabled) (eq (.Values.database.default.provider | default "bitnami") "cnpg") | toYaml }}
+     needs:
+       - {{ if .Values.application.openproject.namespace }}{{ .Values.application.openproject.namespace }}/{{ end }}openproject-cluster-credentials
+     values:
+@@ -42,7 +42,7 @@ releases:
+     {{- if .Values.application.openproject.namespace }}
+     namespace: {{ .Values.application.openproject.namespace }}
+     {{- end }}
+-    installed: {{ and (eq .Environment.Name "demo") ( .Values.application.openproject.enabled) | toYaml }}
++    installed: {{ and (or (eq .Environment.Name "demo") (eq .Environment.Name "runner")) ( .Values.application.openproject.enabled) | toYaml }}
+     values:
+       - "values-redis.yaml.gotmpl"
+ 
+@@ -52,7 +52,7 @@ releases:
+     {{- if .Values.application.openproject.namespace }}
+     namespace: {{ .Values.application.openproject.namespace }}
+     {{- end }}
+-    installed: {{ and (eq .Environment.Name "demo") ( .Values.application.openproject.enabled) | toYaml }}
++    installed: {{ and (or (eq .Environment.Name "demo") (eq .Environment.Name "runner")) ( .Values.application.openproject.enabled) | toYaml }}
+     values:
+       - "../common/values-cluster-ingress.yaml.gotmpl"
+       - "values-minio.yaml.gotmpl"
+@@ -64,7 +64,7 @@ releases:
+     {{- if .Values.application.openproject.namespace }}
+     namespace: {{ .Values.application.openproject.namespace }}
+     {{- end }}
+-    {{- if and (eq .Environment.Name "demo") ( .Values.application.openproject.enabled) }}
++    {{- if and (or (eq .Environment.Name "demo") (eq .Environment.Name "runner")) ( .Values.application.openproject.enabled) }}
+     needs:
+       {{- if eq (.Values.database.default.provider | default "bitnami") "cnpg" }}
+       - {{ if .Values.application.openproject.namespace }}{{ .Values.application.openproject.namespace }}/{{ end }}openproject-cluster
+diff --git a/helmfile/bases/environment.yaml.gotmpl b/helmfile/bases/environment.yaml.gotmpl
+index 26d8c86..57c54a6 100644
+--- a/helmfile/bases/environment.yaml.gotmpl
++++ b/helmfile/bases/environment.yaml.gotmpl
+@@ -6,17 +6,15 @@ environments:
+     values:
+       - "helmfile/environments/default/*.yaml*"
+       - "helmfile/environments/demo/*.yaml.gotmpl"
+-    # secrets:
+-    #   - "helmfile/environments/{{ .Environment.Name }}/*.secrets.yaml"
++  runner:
++    values:
++      - "helmfile/environments/default/*.yaml*"
++      - "helmfile/environments/runner/*.yaml.gotmpl"
+   local:
+     values:
+       - "helmfile/environments/default/*.yaml*"
+       - "helmfile/environments/local/*.yaml.gotmpl"
+-    # secrets:
+-    #   - "helmfile/environments/{{ .Environment.Name }}/*.secrets.yaml"
+   production:
+     values:
+       - "helmfile/environments/default/*.yaml*"
+       - "helmfile/environments/production/*.yaml.gotmpl"
+-    # secrets:
+-    #   - "helmfile/environments/{{ .Environment.Name }}/*.secrets.yaml"

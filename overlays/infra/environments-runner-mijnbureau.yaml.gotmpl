@@ -1,0 +1,64 @@
+---
+global:
+  domain: "runner.mijnbureau.ritzademo.com"
+  resourcesPreset: "none"
+  resourcesPresetPerApp:
+    collabora: "none"
+    elementweb: "none"
+    keycloak: "none"
+    ollama: "none"
+    synapse: "none"
+    grist: "none"
+    livekit: "none"
+    meet: { backend: "none", frontend: "none" }
+    nextcloud: "none"
+    docs: { backend: "none", frontend: "none", celery: "none", yProvider: "none", docspec: "none" }
+    drive: { backend: "none", frontend: "none" }
+    conversations: { backend: "none", frontend: "none" }
+    bureaublad: { backend: "none", frontend: "none" }
+  tls:
+    enabled: true
+    selfSigned: false
+
+cluster:
+  routingMode: ingress
+  ingress:
+    type: traefik
+    annotations:
+      cert-manager.io/cluster-issuer: letsencrypt-prod
+  networking:
+    podSubnet:
+      - "10.42.0.0/16"
+    serviceSubnet:
+      - "10.43.0.0/16"
+
+application:
+  ollama:
+    enabled: false
+  # Antivirus and project-management are disabled for this install. To re-enable:
+  # set enabled: true and give each a namespace. OpenProject additionally needs
+  # the security.openproject and tls.openproject blocks (see the guide).
+  clamav:
+    enabled: false
+  openproject:
+    enabled: false
+  keycloak:    { namespace: rb-keycloak }
+  grist:       { namespace: rb-grist }
+  element:     { namespace: rb-element }
+  collabora:   { namespace: rb-collabora }
+  nextcloud:   { namespace: rb-nextcloud }
+  livekit:     { namespace: rb-livekit }
+  meet:        { namespace: rb-meet }
+  docs:        { namespace: rb-docs }
+  bureaublad:  { namespace: rb-bureaublad }
+
+authentication:
+  oidc:
+    issuer: "https://id.runner.mijnbureau.ritzademo.com/realms/mijnbureau"
+    authorization_endpoint: "https://id.runner.mijnbureau.ritzademo.com/realms/mijnbureau/protocol/openid-connect/auth"
+    token_endpoint: "https://id.runner.mijnbureau.ritzademo.com/realms/mijnbureau/protocol/openid-connect/token"
+    introspection_endpoint: "https://id.runner.mijnbureau.ritzademo.com/realms/mijnbureau/protocol/openid-connect/token/introspect"
+    userinfo_endpoint: "https://id.runner.mijnbureau.ritzademo.com/realms/mijnbureau/protocol/openid-connect/userinfo"
+    end_session_endpoint: "https://id.runner.mijnbureau.ritzademo.com/realms/mijnbureau/protocol/openid-connect/logout"
+    jwks_uri: "https://id.runner.mijnbureau.ritzademo.com/realms/mijnbureau/protocol/openid-connect/certs"
+

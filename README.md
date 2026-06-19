@@ -1,4 +1,4 @@
-# work-eu
+# Open Suite
 
 An opinionated, self-hostable digital workplace for European public-sector and
 privacy-conscious orgs — assembled from best-in-class open-source apps (the
@@ -28,7 +28,7 @@ sudo ./deploy.sh DOMAIN you@example.com 'MASTER_PASSWORD'
 ```
 
 This runs the MinBZK base scripts (`scripts/single-vps-deploy/01-07`, vendored)
-then the work-eu layer (`08-work-eu-portal.sh`): builds our patched bureaublad
+then the open-suite layer (`08-open-suite-portal.sh`): builds our patched bureaublad
 backend (CalDAV fixes) + frontend (upcoming-events Calendar widget) from pinned
 upstream source + `overlays/bureaublad/`, installs the Nextcloud Calendar app,
 and wires the portal calendar to Nextcloud CalDAV. Result:
