@@ -60,6 +60,11 @@ cat > helmfile/environments/demo/mijnbureau.yaml.gotmpl <<YAML
 ---
 global:
   domain: "${DOMAIN}"
+  # Keep Office serves the portal at bridge.DOMAIN (upstream default: bureaublad).
+  # This one value also drives the portal's Keycloak client redirect URIs and the
+  # cross-app "open portal" buttons, so they all move together.
+  hostname:
+    bureaublad: "bridge"
   resourcesPreset: "none"
   resourcesPresetPerApp:
     collabora: "none"
