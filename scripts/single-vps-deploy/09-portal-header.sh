@@ -62,6 +62,13 @@ http {
   fastcgi_temp_path /tmp/fastcgi_temp;
   uwsgi_temp_path /tmp/uwsgi_temp;
   scgi_temp_path /tmp/scgi_temp;
+  # Nextcloud's CSP is `script-src-elem 'strict-dynamic' 'nonce-...'` (no 'self'),
+  # so an injected <script> only runs if it carries that request's nonce. Pull
+  # the nonce out of the upstream CSP header so sub_filter can stamp it on.
+  map $upstream_http_content_security_policy $ko_nonce {
+    default "";
+    "~nonce-(?<n>[A-Za-z0-9+/=_-]+)" $n;
+  }
   server {
     listen 8081;
     client_max_body_size 0;
@@ -79,7 +86,7 @@ http {
       proxy_set_header Accept-Encoding "";
       proxy_read_timeout 300s;
       proxy_redirect off;
-      sub_filter '</body>' '<script src="/keepoffice-header.js"></script></body>';
+      sub_filter '</body>' '<script nonce="$ko_nonce" src="/keepoffice-header.js"></script></body>';
       sub_filter_once on;
     }
   }
