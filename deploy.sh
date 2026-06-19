@@ -41,6 +41,7 @@ bash "${DIR}/05-docs.sh"
 bash "${DIR}/06-grist.sh"
 bash "${DIR}/07-session-lifetimes.sh" "${DOMAIN}"
 bash "${DIR}/08-work-eu-portal.sh"
+bash "${DIR}/09-portal-header.sh"
 
 echo ""
 echo "############################################################"
