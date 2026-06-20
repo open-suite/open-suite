@@ -37,14 +37,58 @@ echo "==> Enforcing one block editor (disable Nextcloud Text)"
 kubectl -n mb-nextcloud exec deploy/nextcloud -c nextcloud -- \
   sh -c "cd /var/www/html && php occ app:disable text" >/dev/null 2>&1 || true
 
-echo "==> [1/3] Calendar — upcoming events"
+echo "==> [1/3] Calendar — upcoming events (each with a Meet link)"
+# Meet is OIDC-native; mint johndoe a token (direct-access grant on the meet
+# client) so we can create a room per event. Its URL goes in the event location,
+# which the portal surfaces as a "Join" button.
+MEET_CID=$(kubectl -n mb-keycloak get secret keycloak-keycloak-config-cli -o jsonpath="{.data.MB_CLIENT_SECRET_MEET}" | base64 -d)
+kubectl -n mb-keycloak exec keycloak-keycloak-0 -c keycloak -- sh -c '
+KC=/opt/bitnami/keycloak/bin/kcadm.sh; CFG=/tmp/kc.config
+PW=$(cat $KC_BOOTSTRAP_ADMIN_PASSWORD_FILE)
+$KC config credentials --config $CFG --server http://localhost:8080/ --realm master --user admin --password "$PW" >/dev/null 2>&1
+ID=$($KC get clients -r mijnbureau --config $CFG -q clientId=meet --fields id 2>/dev/null | grep -oE "[0-9a-f-]{36}" | head -1)
+$KC update clients/$ID -r mijnbureau --config $CFG -s directAccessGrantsEnabled=true >/dev/null 2>&1
+' || true
+MEET_TOK=$(curl -fsS --max-time 20 -X POST "https://id.${DOMAIN}/realms/mijnbureau/protocol/openid-connect/token" \
+  -d grant_type=password -d client_id=meet -d client_secret="${MEET_CID}" \
+  -d username=johndoe -d password="${DEMO_PASS}" -d scope=openid \
+  | python3 -c "import json,sys;print(json.load(sys.stdin).get('access_token',''))")
+
+# Create (idempotently) a Meet room for an event and echo its slug. On a re-run
+# the room already exists (La Suite 400s with a slug error list), so fall back
+# to looking the room up by name to get its real slug.
+meet_slug() {
+  local resp slug
+  resp=$(curl -s --max-time 20 -X POST "https://meet.${DOMAIN}/api/v1.0/rooms/" \
+    -H "Authorization: Bearer ${MEET_TOK}" -H "Content-Type: application/json" \
+    -d "{\"name\":\"$1\"}")
+  slug=$(printf '%s' "$resp" | python3 -c "import json,sys
+try:
+    s = json.load(sys.stdin).get('slug')
+    print(s if isinstance(s, str) else '')
+except Exception:
+    print('')")
+  if [ -z "$slug" ]; then
+    slug=$(curl -s --max-time 20 "https://meet.${DOMAIN}/api/v1.0/rooms/?page_size=200" \
+      -H "Authorization: Bearer ${MEET_TOK}" | python3 -c "import json,sys
+name = sys.argv[1]
+try: d = json.load(sys.stdin)
+except Exception: d = {}
+rooms = d.get('results', []) if isinstance(d, dict) else (d or [])
+print(next((r.get('slug','') for r in rooms if r.get('name') == name), ''))" "$1")
+  fi
+  printf '%s' "$slug"
+}
+
 # Fixed UIDs so re-runs replace (no duplicates); dates relative to today so they
 # always stay in the near future.
 put_event() {
   local uid="$1" days="$2" hour="$3" dur="$4" summary="$5"
-  local d; d=$(date -u -d "+${days} days" +%Y%m%d 2>/dev/null || date -u -v+"${days}"d +%Y%m%d)
-  local start="${d}T${hour}0000Z"
-  local end="${d}T$(printf '%02d' $((10#${hour}+dur)))0000Z"
+  local d start end meet=""
+  d=$(date -u -d "+${days} days" +%Y%m%d 2>/dev/null || date -u -v+"${days}"d +%Y%m%d)
+  start="${d}T${hour}0000Z"
+  end="${d}T$(printf '%02d' $((10#${hour}+dur)))0000Z"
+  [ -n "${MEET_TOK}" ] && meet="https://meet.${DOMAIN}/$(meet_slug "${summary}")"
   curl -fsS -u "${NC_LOGIN}:${NC_PASS}" -X PUT "${CAL}/${uid}.ics" \
     -H "Content-Type: text/calendar" --data-binary @- >/dev/null <<ICS
 BEGIN:VCALENDAR
@@ -56,14 +100,15 @@ DTSTAMP:${start}
 DTSTART:${start}
 DTEND:${end}
 SUMMARY:${summary}
+LOCATION:${meet}
 END:VEVENT
 END:VCALENDAR
 ICS
-  echo "    + ${summary} (in ${days}d)"
+  echo "    + ${summary} (in ${days}d) -> ${meet:-no meet link}"
 }
 put_event demo-standup-os    1 09 1 "Team standup"
 put_event demo-review-os      3 14 1 "Q3 deck review with Jane"
-put_event demo-1on1-os        5 11 1 "1:1 — John & Jane"
+put_event demo-1on1-os        5 11 1 "1:1 John and Jane"
 
 echo "==> [2/3] Docs — La Suite documents"
 # La Suite Docs is OIDC-native; mint johndoe a token via Keycloak direct-access

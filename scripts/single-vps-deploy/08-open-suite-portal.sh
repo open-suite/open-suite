@@ -39,6 +39,8 @@ echo "==> [3/7] Building backend image (overlay on ${BACKEND_BASE_IMAGE} to avoi
 cat > "${WORK}/Dockerfile.backend" <<EOF
 FROM ${BACKEND_BASE_IMAGE}
 COPY backend/app/clients/caldav.py /app/app/clients/caldav.py
+COPY backend/app/models/calendar.py /app/app/models/calendar.py
+COPY backend/app/routes/caldav.py /app/app/routes/caldav.py
 EOF
 docker buildx build --load -f "${WORK}/Dockerfile.backend" -t open-suite/portal-api:local "${WORK}/portal"
 docker save open-suite/portal-api:local | k3s ctr -n k8s.io images import -
@@ -65,6 +67,11 @@ kubectl -n mb-bureaublad set env deploy/bureaublad-backend \
   CALENDAR_CARD=true \
   TASK_URL="https://nextcloud.${DOMAIN}" \
   TASK_AUDIENCE=nextcloud
+
+# The image tag (:local) doesn't change between builds, so patching the deploy
+# is a no-op and won't restart the pods onto the freshly-imported image. Force
+# a restart so the new build is actually picked up.
+kubectl -n mb-bureaublad rollout restart deploy/bureaublad-backend deploy/bureaublad-frontend
 
 kubectl -n mb-bureaublad rollout status deploy/bureaublad-backend --timeout=120s
 kubectl -n mb-bureaublad rollout status deploy/bureaublad-frontend --timeout=180s
