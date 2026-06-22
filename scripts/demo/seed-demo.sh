@@ -58,25 +58,21 @@ MEET_TOK=$(curl -fsS --max-time 20 -X POST "https://id.${DOMAIN}/realms/mijnbure
 # the room already exists (La Suite 400s with a slug error list), so fall back
 # to looking the room up by name to get its real slug.
 meet_slug() {
-  local resp slug
+  # La Suite Meet only treats code-format slugs (xxx-yyyy-zzz) as joinable, and
+  # rooms default to "restricted" (owner only). So name the room with a random
+  # code (not the event title) and make it public, like the meetcal app does.
+  local resp slug code
+  code=$(LC_ALL=C tr -dc 'a-z' </dev/urandom | head -c 10)
+  code="${code:0:3}-${code:3:4}-${code:7:3}"
   resp=$(curl -s --max-time 20 -X POST "https://meet.${DOMAIN}/api/v1.0/rooms/" \
     -H "Authorization: Bearer ${MEET_TOK}" -H "Content-Type: application/json" \
-    -d "{\"name\":\"$1\"}")
+    -d "{\"name\":\"${code}\",\"access_level\":\"public\"}")
   slug=$(printf '%s' "$resp" | python3 -c "import json,sys
 try:
     s = json.load(sys.stdin).get('slug')
     print(s if isinstance(s, str) else '')
 except Exception:
     print('')")
-  if [ -z "$slug" ]; then
-    slug=$(curl -s --max-time 20 "https://meet.${DOMAIN}/api/v1.0/rooms/?page_size=200" \
-      -H "Authorization: Bearer ${MEET_TOK}" | python3 -c "import json,sys
-name = sys.argv[1]
-try: d = json.load(sys.stdin)
-except Exception: d = {}
-rooms = d.get('results', []) if isinstance(d, dict) else (d or [])
-print(next((r.get('slug','') for r in rooms if r.get('name') == name), ''))" "$1")
-  fi
   printf '%s' "$slug"
 }
 
