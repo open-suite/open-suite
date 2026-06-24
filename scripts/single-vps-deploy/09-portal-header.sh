@@ -48,6 +48,11 @@ PY
 add_sidecar() {
   local ns="$1" deploy="$2" svc="$3" upstream="$4" netpol="$5"
   echo "==> [${ns}] header sidecar on ${deploy} (proxy 127.0.0.1:${upstream})"
+  # Content hash → cache-busting query. The asset is served `immutable` (cached
+  # forever), so the only way a header update reaches browsers without a hard
+  # refresh is a changed URL. ?v=<hash> changes exactly when the file changes.
+  local ver
+  ver=$(sha1sum "$HEADER_JS" | cut -c1-12)
   local conf
   conf=$(cat <<NGINX
 worker_processes 1;
@@ -71,6 +76,7 @@ http {
     client_max_body_size 0;
     location = /opensuite-header.js {
       default_type application/javascript;
+      add_header Cache-Control "public, max-age=31536000, immutable";
       alias /usr/share/opensuite/opensuite-header.js;
     }
     location / {
@@ -82,7 +88,7 @@ http {
       proxy_set_header Accept-Encoding "";   # so sub_filter can rewrite the body
       proxy_read_timeout 300s;
       proxy_redirect off;
-      sub_filter '</body>' '<script nonce="\$ko_nonce" src="/opensuite-header.js"></script></body>';
+      sub_filter '</body>' '<script nonce="\$ko_nonce" src="/opensuite-header.js?v=${ver}"></script></body>';
       sub_filter_once on;
     }
   }
