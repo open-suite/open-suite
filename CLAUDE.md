@@ -7,6 +7,11 @@ Opinionated self-hostable digital-workplace distribution. Curates MinBZK
 - **open-suite/open-suite** — this distribution repo (deploy scripts, overlays, patches). Old `ritza-co/open-suite` redirects here.
 - **open-suite/open-suite-portal** — detached public fork of `MinBZK/bureaublad` @ `v0.9.3`. We own the portal now; brand/UI changes go here directly (not as patches). Already rebranded to "Open Suite".
 
+## PR & deploy policy (overrides global Rule 3 for `open-suite/` repos)
+- Opening PRs is fine without asking first — this is our OSS, fast and loose, not client work. Give Gareth the PR link for feature work.
+- You may push to the demo env (`demo.opensuite.online`) and then open a PR if it looks good.
+- Everything is MIT/public and our reputation rides on it: quality bar is high, zero slop. If a change looks bad, half-baked, or you're unsure it's fit to be seen publicly, STOP and check with Gareth instead of opening the PR.
+
 ## Demo VPS
 - **`ssh root@95.217.109.206`** — single-VPS k3s happy-path deploy.
 - Domain: `mijnbureau.ritzademo.com` (in `/etc/mijnbureau/domain`). Portal at https://mijnbureau.ritzademo.com
