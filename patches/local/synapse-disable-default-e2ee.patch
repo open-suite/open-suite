@@ -1,0 +1,14 @@
+--- a/helmfile/apps/element/values-synapse.yaml.gotmpl
++++ b/helmfile/apps/element/values-synapse.yaml.gotmpl
+@@ -303,6 +303,9 @@
+   # Disable password configuration, we only allow OIDC
+   passwordConfig:
+     enabled: false
+-  # E2E any room created with the private_chat or trusted_private_chat room creation presets.
+-  encryptionEnabledByDefaultForRoomType: "invite"
++  # Open Suite: default DMs/private rooms to UNENCRYPTED. MinBZK ships "invite"
++  # (private rooms E2EE), which forces every user through device-verification +
++  # cross-signing — a blocking "Verify this device" + SSO gate before they can
++  # chat. We disable default E2EE at the source for a Slack-like experience.
++  encryptionEnabledByDefaultForRoomType: "off"
+   # Options related to the user directory, allowing to search through all users and prefer local ones.
