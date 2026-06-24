@@ -1,0 +1,13 @@
+diff --git a/helmfile/apps/keycloak/keycloak.yaml.gotmpl b/helmfile/apps/keycloak/keycloak.yaml.gotmpl
+index 5e284cb..eea24d6 100644
+--- a/helmfile/apps/keycloak/keycloak.yaml.gotmpl
++++ b/helmfile/apps/keycloak/keycloak.yaml.gotmpl
+@@ -447,7 +447,7 @@ keycloakConfigCli:
+               "client.secret.creation.time": "1759388679",
+               "backchannel.logout.session.required": "true",
+               "backchannel.logout.url": "https://{{ .Values.global.hostname.nextcloud }}.{{ .Values.global.domain }}/index.php/apps/user_oidc/backchannel-logout/keycloak",
+-              "standard.token.exchange.enabled": "false",
++              "standard.token.exchange.enabled": "true",
+               "frontchannel.logout.session.required": "true",
+               "post.logout.redirect.uris": "+"
+             }

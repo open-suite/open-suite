@@ -1,0 +1,242 @@
+diff --git a/helmfile/apps/nextcloud/charts/nextcloud/templates/configmap-script-post-install.yaml b/helmfile/apps/nextcloud/charts/nextcloud/templates/configmap-script-post-install.yaml
+index 5b9cd96..173d033 100644
+--- a/helmfile/apps/nextcloud/charts/nextcloud/templates/configmap-script-post-install.yaml
++++ b/helmfile/apps/nextcloud/charts/nextcloud/templates/configmap-script-post-install.yaml
+@@ -54,6 +54,17 @@ data:
+     # Enable the bureaublad button app (files are mounted from a ConfigMap at custom_apps/bureaublad_button)
+     php /var/www/html/occ app:enable bureaublad_button || echo "WARNING: Failed to enable bureaublad_button"
+ 
++    # Calendar <-> Meet: enable the meetcal app (files mounted from a ConfigMap at custom_apps/meetcal)
++    php /var/www/html/occ app:enable meetcal || echo "WARNING: Failed to enable meetcal"
++    # Store the OIDC login token so meetcal can exchange it for a Meet-audience token.
++    php /var/www/html/occ config:app:set user_oidc store_login_token --value=1
++    # user_oidc requests requested_token_type=refresh_token, which Keycloak 26's standard
++    # token exchange rejects; Meet only needs the access token, so request access_token.
++    USER_OIDC_TS=/var/www/html/custom_apps/user_oidc/lib/Service/TokenService.php
++    if [ -f "$USER_OIDC_TS" ]; then
++      sed -i "s#requested_token_type. => .urn:ietf:params:oauth:token-type:refresh_token#requested_token_type' => 'urn:ietf:params:oauth:token-type:access_token#g" "$USER_OIDC_TS"
++    fi
++
+     php /var/www/html/occ config:system:set maintenance_window_start --type=integer --value=1
+     php /var/www/html/occ config:system:set default_phone_region --value=NL
+ 
+diff --git a/helmfile/apps/nextcloud/values.yaml.gotmpl b/helmfile/apps/nextcloud/values.yaml.gotmpl
+index 706e9e2..fb3aaee 100644
+--- a/helmfile/apps/nextcloud/values.yaml.gotmpl
++++ b/helmfile/apps/nextcloud/values.yaml.gotmpl
+@@ -249,6 +249,10 @@ extraVolumes:
+     configMap:
+       name: nextcloud-bureaublad-button-app
+       defaultMode: 0644
++  - name: meetcal-app
++    configMap:
++      name: nextcloud-meetcal-app
++      defaultMode: 0644
+ 
+ extraVolumeMounts:
+   - name: bureaublad-button-app
+@@ -263,6 +267,22 @@ extraVolumeMounts:
+     mountPath: /var/www/html/custom_apps/bureaublad_button/js/script.js
+     subPath: script.js
+     readOnly: true
++  - name: meetcal-app
++    mountPath: /var/www/html/custom_apps/meetcal/appinfo/info.xml
++    subPath: info.xml
++    readOnly: true
++  - name: meetcal-app
++    mountPath: /var/www/html/custom_apps/meetcal/appinfo/routes.php
++    subPath: routes.php
++    readOnly: true
++  - name: meetcal-app
++    mountPath: /var/www/html/custom_apps/meetcal/lib/AppInfo/Application.php
++    subPath: Application.php
++    readOnly: true
++  - name: meetcal-app
++    mountPath: /var/www/html/custom_apps/meetcal/lib/Controller/MeetController.php
++    subPath: MeetController.php
++    readOnly: true
+ 
+ extraDeploy:
+   - apiVersion: v1
+@@ -376,3 +396,181 @@ extraDeploy:
+             mount();
+           }
+         })();
++  - apiVersion: v1
++    kind: ConfigMap
++    metadata:
++      name: nextcloud-meetcal-app
++      namespace: '{{ "{{ .Release.Namespace }}" }}'
++      labels:
++        app.kubernetes.io/name: nextcloud
++        app.kubernetes.io/instance: nextcloud
++        app.kubernetes.io/version: '{{ "{{ .Chart.AppVersion }}" }}'
++        app.kubernetes.io/managed-by: Helm
++        app.kubernetes.io/part-of: nextcloud
++        app.kubernetes.io/component: meetcal
++    data:
++      info.xml: |
++        <?xml version="1.0"?>
++        <!--
++          Open Suite — Calendar ↔ Meet bridge.
++          A minimal same-origin endpoint Nextcloud Calendar's injected JS calls to
++          create/get a La Suite Meet room for the logged-in user. Nextcloud can't be
++          iframed (frame-ancestors 'none'), so the room must be created server-side on
++          the Nextcloud origin; we mint a `meet`-audience token via user_oidc's
++          internal-to-internal token exchange (no target client secret needed).
++        -->
++        <info xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:noNamespaceSchemaLocation="https://apps.nextcloud.com/schema/apps/info.xsd">
++            <id>meetcal</id>
++            <name>Open Suite Calendar Meet</name>
++            <summary>Create La Suite Meet rooms from Calendar events</summary>
++            <description>Adds a same-origin endpoint to create/get a Meet room for the current user, used by the Calendar event editor.</description>
++            <version>1.0.0</version>
++            <licence>agpl</licence>
++            <author>Open Suite</author>
++            <namespace>Meetcal</namespace>
++            <category>integration</category>
++            <dependencies>
++                <nextcloud min-version="30" max-version="34"/>
++            </dependencies>
++        </info>
++      routes.php: |
++        <?php
++        // SPDX-License-Identifier: AGPL-3.0-or-later
++        return [
++            'routes' => [
++                ['name' => 'meet#room', 'url' => '/room', 'verb' => 'POST'],
++            ],
++        ];
++      Application.php: |
++        <?php
++        // SPDX-License-Identifier: AGPL-3.0-or-later
++        namespace OCA\Meetcal\AppInfo;
++
++        use OCP\AppFramework\App;
++        use OCP\AppFramework\Bootstrap\IBootContext;
++        use OCP\AppFramework\Bootstrap\IBootstrap;
++        use OCP\AppFramework\Bootstrap\IRegistrationContext;
++
++        class Application extends App implements IBootstrap {
++            public const APP_ID = 'meetcal';
++
++            public function __construct() {
++                parent::__construct(self::APP_ID);
++            }
++
++            public function register(IRegistrationContext $context): void {}
++
++            public function boot(IBootContext $context): void {}
++        }
++      MeetController.php: |
++        <?php
++        // SPDX-License-Identifier: AGPL-3.0-or-later
++        namespace OCA\Meetcal\Controller;
++
++        use OCP\AppFramework\Controller;
++        use OCP\AppFramework\Http;
++        use OCP\AppFramework\Http\Attribute\NoAdminRequired;
++        use OCP\AppFramework\Http\Attribute\NoCSRFRequired;
++        use OCP\AppFramework\Http\JSONResponse;
++        use OCP\EventDispatcher\IEventDispatcher;
++        use OCP\Http\Client\IClientService;
++        use OCP\IRequest;
++        use Psr\Log\LoggerInterface;
++
++        class MeetController extends Controller {
++            public function __construct(
++                string $appName,
++                IRequest $request,
++                private IEventDispatcher $eventDispatcher,
++                private IClientService $clientService,
++                private LoggerInterface $logger,
++            ) {
++                parent::__construct($appName, $request);
++            }
++
++            /**
++             * Create (or get) a Meet room for `name` and return its URL.
++             * Same-origin endpoint called by the Calendar editor's injected JS.
++             */
++            /** La Suite Meet rooms are addressed by a code-format slug (xxx-yyyy-zzz);
++             *  a human title isn't a joinable slug, so each room gets a fresh code. */
++            private function generateCode(): string {
++                $letters = 'abcdefghijklmnopqrstuvwxyz';
++                $pick = function (int $n) use ($letters): string {
++                    $s = '';
++                    for ($i = 0; $i < $n; $i++) {
++                        $s .= $letters[random_int(0, strlen($letters) - 1)];
++                    }
++                    return $s;
++                };
++                return $pick(3) . '-' . $pick(4) . '-' . $pick(3);
++            }
++
++            #[NoAdminRequired]
++            #[NoCSRFRequired]
++            public function room(string $name = ''): JSONResponse {
++                $eventClass = 'OCA\\UserOIDC\\Event\\ExchangedTokenRequestedEvent';
++                if (!class_exists($eventClass)) {
++                    return new JSONResponse(['error' => 'user_oidc unavailable'], Http::STATUS_SERVICE_UNAVAILABLE);
++                }
++
++                // Mint a `meet`-audience token for the current user (internal->internal
++                // exchange; no target client secret needed).
++                $accessToken = null;
++                try {
++                    $event = new $eventClass('meet');
++                    $this->eventDispatcher->dispatchTyped($event);
++                    $token = $event->getToken();
++                    $accessToken = $token?->getAccessToken();
++                } catch (\Throwable $e) {
++                    $this->logger->warning('meetcal: token exchange failed: ' . $e->getMessage());
++                }
++                if (!$accessToken) {
++                    return new JSONResponse(['error' => 'no_token'], Http::STATUS_UNAUTHORIZED);
++                }
++
++                // nextcloud.<base> -> meet.<base>
++                $host = $this->request->getServerHost();
++                $meetBase = 'https://' . preg_replace('/^nextcloud\./', 'meet.', $host, 1);
++                $api = $meetBase . '/api/v1.0/rooms/';
++                // The room is identified by a generated code; the event keeps its own title.
++                $roomName = $this->generateCode();
++
++                $client = $this->clientService->newClient();
++                $headers = ['Authorization' => 'Bearer ' . $accessToken, 'Content-Type' => 'application/json'];
++
++                $slug = null;
++                try {
++                    // access_level "public" so anyone with the calendar link can join
++                    // (like Google Meet); the default is "restricted" (owner only).
++                    $resp = $client->post($api, ['headers' => $headers, 'body' => json_encode([
++                        'name' => $roomName,
++                        'access_level' => 'public',
++                    ])]);
++                    if ($resp->getStatusCode() === 201) {
++                        $slug = (json_decode($resp->getBody(), true)['slug'] ?? null);
++                    }
++                } catch (\Throwable $e) {
++                    // Likely a duplicate-name 400; fall through to lookup.
++                    $this->logger->debug('meetcal: create returned error, will look up: ' . $e->getMessage());
++                }
++
++                if (!$slug) {
++                    try {
++                        $list = $client->get($api, ['headers' => $headers, 'query' => ['page_size' => '200']]);
++                        $data = json_decode($list->getBody(), true);
++                        $rooms = is_array($data) ? ($data['results'] ?? $data) : [];
++                        foreach (($rooms ?: []) as $r) {
++                            if (($r['name'] ?? null) === $roomName) { $slug = $r['slug'] ?? null; break; }
++                        }
++                    } catch (\Throwable $e) {
++                        $this->logger->warning('meetcal: room lookup failed: ' . $e->getMessage());
++                    }
++                }
++
++                if (!$slug) {
++                    return new JSONResponse(['error' => 'room_failed'], Http::STATUS_BAD_GATEWAY);
++                }
++                return new JSONResponse(['url' => $meetBase . '/' . $slug]);
++            }
++        }

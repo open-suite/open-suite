@@ -1,11 +1,11 @@
-# Open Suite (formerly work-eu / Keep Office)
+# Open Suite (formerly work-eu)
 
 Opinionated self-hostable digital-workplace distribution. Curates MinBZK
 **bureaublad** portal + La Suite Numérique + Nextcloud + Keycloak behind one login.
 
-## Repos (GitHub org: Keep-Office)
-- **Keep-Office/open-suite** — this distribution repo (deploy scripts, overlays, patches). Old `ritza-co/open-suite` redirects here.
-- **Keep-Office/open-suite-portal** — detached public fork of `MinBZK/bureaublad` @ `v0.9.3`. We own the portal now; brand/UI changes go here directly (not as patches). Already rebranded to "Open Suite".
+## Repos (GitHub org: open-suite)
+- **open-suite/open-suite** — this distribution repo (deploy scripts, overlays, patches). Old `ritza-co/open-suite` redirects here.
+- **open-suite/open-suite-portal** — detached public fork of `MinBZK/bureaublad` @ `v0.9.3`. We own the portal now; brand/UI changes go here directly (not as patches). Already rebranded to "Open Suite".
 
 ## Demo VPS
 - **`ssh root@95.217.109.206`** — single-VPS k3s happy-path deploy.
