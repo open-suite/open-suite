@@ -28,9 +28,17 @@
   var base = host.indexOf(".") === -1 ? host : host.slice(host.indexOf(".") + 1);
   var origin = function (sub) { return window.location.protocol + "//" + sub + "." + base; };
 
-  // Office dropdown deep-links into Nextcloud (the "ocs"/office service).
+  // Office dropdown deep-links into Nextcloud. The office overview app (stock
+  // `nextcloud/office`) has no router — it always lives at `/apps/office/` and
+  // tracks the open section (Documents/Spreadsheets/…) in a Vue ref with no URL
+  // representation. We give each section a stable `#<slug>` and select it from
+  // the hash below (syncOfficeSection), so these become real, shareable links.
+  // The slug must equal the section's sidebar label, lower-cased.
   var OFFICE_CHILDREN = [
-    { label: "Office", path: "/apps/office/" },
+    { label: "Documents", path: "/apps/office/#documents" },
+    { label: "Spreadsheets", path: "/apps/office/#spreadsheets" },
+    { label: "Presentations", path: "/apps/office/#presentations" },
+    { label: "Diagrams", path: "/apps/office/#diagrams" },
     { label: "Files", path: "/apps/files/files" },
     { label: "Contacts", path: "/apps/contacts" },
     { label: "Projects", path: "/apps/deck/" },
@@ -171,4 +179,170 @@
     mount();
   }
   setInterval(mount, 1500);
+})();
+
+/*
+ * Office overview ↔ URL hash.
+ *
+ * The stock `nextcloud/office` overview app has no router: the open section
+ * (Documents / Spreadsheets / Presentations / Diagrams) is in-component Vue
+ * state with no URL representation, so the page is always `/apps/office/#`
+ * and a section can't be linked to. Rather than fork and rebuild the app, we
+ * make the URL hash the source of truth: `#spreadsheets` selects the matching
+ * sidebar entry, and clicking a section in the sidebar writes the hash back.
+ * This is what makes the Office dropdown's `#<slug>` deep links work.
+ *
+ * Matched by the section's (English) sidebar label; a localized instance would
+ * need the slugs mapped per locale.
+ */
+(function () {
+  if (window.self !== window.top) return;
+  if (window.location.pathname.indexOf("/apps/office") !== 0) return;
+
+  function slugOf(el) { return (el.textContent || "").trim().toLowerCase(); }
+
+  function navItems() {
+    var nav = document.getElementById("app-navigation-vue");
+    return nav ? nav.querySelectorAll('li[class*="app-navigation-entry"]') : [];
+  }
+
+  // Select the section named by the hash, retrying while the sidebar (which
+  // renders only after the app's async template fetch) comes up.
+  function applyFromHash() {
+    var want = (window.location.hash || "").replace(/^#\/?/, "").trim().toLowerCase();
+    if (!want) return;
+    var tries = 0;
+    (function attempt() {
+      var items = navItems();
+      for (var i = 0; i < items.length; i++) {
+        if (slugOf(items[i]) === want) {
+          // Already active → leave it, so we don't loop click→hashchange→click.
+          if (items[i].className.indexOf("active") === -1) {
+            (items[i].querySelector("a") || items[i]).click();
+          }
+          return;
+        }
+      }
+      if (tries++ < 40) setTimeout(attempt, 150); // up to ~6s for first paint
+    })();
+  }
+
+  // Mirror sidebar clicks into the hash so the URL reflects the open section
+  // (shareable, back-button friendly). replaceState (not `location.hash =`)
+  // so we don't fire our own hashchange and re-click what was just clicked.
+  function watchClicks() {
+    var nav = document.getElementById("app-navigation-vue");
+    if (!nav || nav.dataset.osHashBound) return;
+    nav.dataset.osHashBound = "1";
+    nav.addEventListener("click", function (e) {
+      var li = e.target.closest && e.target.closest('li[class*="app-navigation-entry"]');
+      if (!li || !nav.contains(li)) return;
+      var slug = slugOf(li);
+      if (slug && "#" + slug !== window.location.hash) {
+        history.replaceState(null, "", "#" + slug);
+      }
+    });
+  }
+
+  window.addEventListener("hashchange", applyFromHash);
+  applyFromHash();
+  setInterval(watchClicks, 1000);
+})();
+
+/*
+ * Calendar ↔ Meet integration (Nextcloud Calendar).
+ *
+ * Adds an "Add Meet link" button to the event editor's location field, fills a
+ * Meet link by default on new events, and lets the user remove it (clear the
+ * field) and re-add it (the button) — like Google Calendar + Meet.
+ *
+ * Rooms must be created via the Meet API (a bare URL isn't joinable) and that
+ * needs the user's token. Nextcloud can't be iframed (frame-ancestors 'none'),
+ * so the calendar is always top-level on the Nextcloud origin — we call a
+ * same-origin endpoint in the `meetcal` Nextcloud app, which mints a `meet`
+ * token for the user (user_oidc token exchange) and creates the room.
+ */
+(function () {
+  if (!/\/apps\/calendar/.test(window.location.pathname)) return;
+
+  var BTN_CLASS = "os-add-meet";
+
+  // Ask the meetcal app to create/get a room for this event name (same origin).
+  function ensureRoom(name, cb) {
+    var token = (window.OC && window.OC.requestToken) || "";
+    fetch("/apps/meetcal/room", {
+      method: "POST",
+      credentials: "include",
+      headers: { "Content-Type": "application/json", requesttoken: token },
+      body: JSON.stringify({ name: name }),
+    })
+      .then(function (r) { return r.ok ? r.json() : null; })
+      .then(function (j) { cb(j && j.url ? j.url : null); })
+      .catch(function () { cb(null); });
+  }
+
+  // Set a value on a Vue-controlled field so the framework registers the change.
+  // Nextcloud's location field is a <textarea>, so pick the matching prototype
+  // (using HTMLInputElement's setter on a textarea throws "Illegal invocation").
+  function setReactive(el, value) {
+    var proto = el.tagName === "TEXTAREA"
+      ? window.HTMLTextAreaElement.prototype
+      : window.HTMLInputElement.prototype;
+    var setter = Object.getOwnPropertyDescriptor(proto, "value").set;
+    setter.call(el, value);
+    el.dispatchEvent(new Event("input", { bubbles: true }));
+    el.dispatchEvent(new Event("change", { bubbles: true }));
+  }
+
+  function findLocationInput() {
+    var inputs = document.querySelectorAll("input, textarea");
+    for (var i = 0; i < inputs.length; i++) {
+      var ph = (inputs[i].getAttribute("placeholder") || "").toLowerCase();
+      if (ph.indexOf("location") !== -1 || ph.indexOf("locatie") !== -1) return inputs[i];
+    }
+    return null;
+  }
+
+  function findTitle() {
+    var inputs = document.querySelectorAll("input");
+    for (var i = 0; i < inputs.length; i++) {
+      var ph = (inputs[i].getAttribute("placeholder") || "").toLowerCase();
+      if (ph === "title" || ph === "titel") return (inputs[i].value || "").trim();
+    }
+    return "";
+  }
+
+  function addLink(loc, btn) {
+    if (btn) { btn.disabled = true; btn.textContent = "Adding…"; }
+    var title = findTitle() || "Meeting";
+    ensureRoom(title, function (url) {
+      if (btn) { btn.disabled = false; btn.textContent = "Add Meet link"; }
+      if (url) setReactive(loc, url);
+    });
+  }
+
+  function decorate() {
+    var loc = findLocationInput();
+    if (!loc) return;
+    var wrap = loc.parentElement;
+    if (!wrap || wrap.querySelector("." + BTN_CLASS)) return;
+
+    var btn = document.createElement("button");
+    btn.type = "button";
+    btn.className = BTN_CLASS;
+    btn.textContent = "Add Meet link";
+    btn.style.cssText =
+      "margin-top:6px;font:inherit;cursor:pointer;border:1px solid #2160c4;" +
+      "background:#2160c4;color:#fff;border-radius:6px;padding:4px 10px;";
+    btn.addEventListener("click", function () { addLink(loc, btn); });
+    wrap.appendChild(btn);
+
+    // By default a fresh, empty event gets a link automatically (once).
+    if (!loc.value && !loc.dataset.osAutofilled) {
+      loc.dataset.osAutofilled = "1";
+      addLink(loc, null);
+    }
+  }
+
+  setInterval(decorate, 1000);
 })();
