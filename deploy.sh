@@ -12,6 +12,13 @@ set -euo pipefail
 DOMAIN="${1:?Usage: $0 <domain> <email> <master-password>}"
 EMAIL="${2:?Usage: $0 <domain> <email> <master-password>}"
 MASTER_PASSWORD="${3:?Usage: $0 <domain> <email> <master-password>}"
+OPEN_SUITE_DEMO_MODE="${OPEN_SUITE_DEMO_MODE:-false}"
+OPEN_SUITE_DEMO_USERNAME="${OPEN_SUITE_DEMO_USERNAME:-johndoe}"
+OPEN_SUITE_DEMO_PASSWORD="${OPEN_SUITE_DEMO_PASSWORD:-myStrongPassword123}"
+OPEN_SUITE_DEMO_ADMIN_USERNAME="${OPEN_SUITE_DEMO_ADMIN_USERNAME:-admin}"
+OPEN_SUITE_DEMO_ADMIN_PASSWORD="${OPEN_SUITE_DEMO_ADMIN_PASSWORD:-${MASTER_PASSWORD}}"
+export OPEN_SUITE_DEMO_MODE OPEN_SUITE_DEMO_USERNAME OPEN_SUITE_DEMO_PASSWORD
+export OPEN_SUITE_DEMO_ADMIN_USERNAME OPEN_SUITE_DEMO_ADMIN_PASSWORD
 
 DIR="$(cd "$(dirname "$0")/scripts/single-vps-deploy" && pwd)"
 export KUBECONFIG=/etc/rancher/k3s/k3s.yaml
@@ -42,6 +49,7 @@ bash "${DIR}/06-grist.sh"
 bash "${DIR}/07-session-lifetimes.sh" "${DOMAIN}"
 bash "${DIR}/08-open-suite-portal.sh"
 bash "${DIR}/09-portal-header.sh"
+bash "${DIR}/10-keycloak-login.sh"
 
 echo ""
 echo "############################################################"

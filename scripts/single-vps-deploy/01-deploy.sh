@@ -10,10 +10,20 @@ set -euo pipefail
 DOMAIN="${1:?Usage: $0 <domain> <email> <master-password>}"
 EMAIL="${2:?Usage: $0 <domain> <email> <master-password>}"
 MASTER_PASSWORD="${3:?Usage: $0 <domain> <email> <master-password>}"
+OPEN_SUITE_DEMO_MODE="${OPEN_SUITE_DEMO_MODE:-false}"
+OPEN_SUITE_DEMO_USERNAME="${OPEN_SUITE_DEMO_USERNAME:-johndoe}"
+OPEN_SUITE_DEMO_PASSWORD="${OPEN_SUITE_DEMO_PASSWORD:-myStrongPassword123}"
+OPEN_SUITE_DEMO_ADMIN_USERNAME="${OPEN_SUITE_DEMO_ADMIN_USERNAME:-admin}"
+OPEN_SUITE_DEMO_ADMIN_PASSWORD="${OPEN_SUITE_DEMO_ADMIN_PASSWORD:-${MASTER_PASSWORD}}"
 
 # Persist the domain for the later scripts (02-networking.sh, 03-...).
 mkdir -p /etc/mijnbureau
 echo "${DOMAIN}" > /etc/mijnbureau/domain
+printf '%s' "${OPEN_SUITE_DEMO_MODE}" > /etc/mijnbureau/demo-mode
+printf '%s' "${OPEN_SUITE_DEMO_USERNAME}" > /etc/mijnbureau/demo-username
+printf '%s' "${OPEN_SUITE_DEMO_PASSWORD}" > /etc/mijnbureau/demo-password
+printf '%s' "${OPEN_SUITE_DEMO_ADMIN_USERNAME}" > /etc/mijnbureau/demo-admin-username
+printf '%s' "${OPEN_SUITE_DEMO_ADMIN_PASSWORD}" > /etc/mijnbureau/demo-admin-password
 
 HELMFILE_V=1.1.7
 
