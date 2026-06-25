@@ -42,6 +42,7 @@ bash "${DIR}/06-grist.sh"
 bash "${DIR}/07-session-lifetimes.sh" "${DOMAIN}"
 bash "${DIR}/08-open-suite-portal.sh"
 bash "${DIR}/09-portal-header.sh"
+bash "${DIR}/10-host-aliases.sh"
 
 echo ""
 echo "############################################################"
