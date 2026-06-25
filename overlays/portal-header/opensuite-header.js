@@ -28,17 +28,13 @@
   var base = host.indexOf(".") === -1 ? host : host.slice(host.indexOf(".") + 1);
   var origin = function (sub) { return window.location.protocol + "//" + sub + "." + base; };
 
-  // Office dropdown deep-links into Nextcloud. The office overview app (stock
-  // `nextcloud/office`) has no router — it always lives at `/apps/office/` and
-  // tracks the open section (Documents/Spreadsheets/…) in a Vue ref with no URL
-  // representation. We give each section a stable `#<slug>` and select it from
-  // the hash below (syncOfficeSection), so these become real, shareable links.
-  // The slug must equal the section's sidebar label, lower-cased.
+  // Office dropdown deep-links into Nextcloud. Avoid Nextcloud's `/apps/office`
+  // overview: it briefly shows "No office suite is deployed" while loading.
+  // Document creation lives in Files, so document-type entries land there.
   var OFFICE_CHILDREN = [
-    { label: "Documents", path: "/apps/office/#documents" },
-    { label: "Spreadsheets", path: "/apps/office/#spreadsheets" },
-    { label: "Presentations", path: "/apps/office/#presentations" },
-    { label: "Diagrams", path: "/apps/office/#diagrams" },
+    { label: "Documents", path: "/apps/files/files" },
+    { label: "Spreadsheets", path: "/apps/files/files" },
+    { label: "Presentations", path: "/apps/files/files" },
     { label: "Files", path: "/apps/files/files" },
     { label: "Contacts", path: "/apps/contacts" },
     { label: "Projects", path: "/apps/deck/" },
