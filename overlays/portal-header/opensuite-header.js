@@ -28,63 +28,6 @@
   var base = host.indexOf(".") === -1 ? host : host.slice(host.indexOf(".") + 1);
   var origin = function (sub) { return window.location.protocol + "//" + sub + "." + base; };
 
-  function suppressElementDeviceVerification() {
-    if (host.indexOf("element.") !== 0) return;
-    try {
-      if (window.localStorage.getItem("must_verify_device") === "true") {
-        window.localStorage.removeItem("must_verify_device");
-      }
-    } catch (e) {}
-
-    if (!document.body) return;
-    var bodyText = document.body.innerText || "";
-    var reminderText =
-      bodyText.indexOf("As of end of October 2026") !== -1 ||
-      bodyText.indexOf("unverified devices will not be able") !== -1;
-    if (reminderText) {
-      var buttons = document.querySelectorAll("button");
-      for (var i = 0; i < buttons.length; i++) {
-        var label = (buttons[i].innerText || "").trim();
-        if (label !== "Later" && label !== "Continue") continue;
-        var node = buttons[i];
-        while (node && node !== document.body) {
-          var text = node.innerText || "";
-          var rect = node.getBoundingClientRect ? node.getBoundingClientRect() : { width: 0, height: 0 };
-          var isSmallDialog = rect.width >= 240 && rect.width <= 900 && rect.height >= 120 && rect.height <= 650;
-          if (
-            isSmallDialog &&
-            text.indexOf("Verify this device") !== -1 &&
-            (
-              text.indexOf("As of end of October 2026") !== -1 ||
-              text.indexOf("unverified devices will not be able") !== -1
-            )
-          ) {
-            if (node.parentNode) node.parentNode.removeChild(node);
-            break;
-          }
-          node = node.parentElement;
-        }
-      }
-    }
-
-    var isVerificationPage =
-      document.querySelector(".mx_CompleteSecurityBody") ||
-      bodyText.indexOf("Confirm your digital identity") !== -1 ||
-      (bodyText.indexOf("Verify this device to set up secure messaging") !== -1);
-
-    if (!isVerificationPage) return;
-    try {
-      if (window.sessionStorage.getItem("ko-skipped-element-verification") !== "1") {
-        window.sessionStorage.setItem("ko-skipped-element-verification", "1");
-        window.location.replace(window.location.origin + window.location.pathname + window.location.search);
-      }
-    } catch (e) {
-      window.location.replace(window.location.origin + window.location.pathname + window.location.search);
-    }
-  }
-
-  suppressElementDeviceVerification();
-
   // Office dropdown deep-links into the Nextcloud Office overview sections.
   // The hash is handled below because the stock Office overview keeps its
   // selected section in Vue component state instead of the URL.
@@ -239,15 +182,12 @@
 
   if (document.readyState === "loading") {
     document.addEventListener("DOMContentLoaded", function () {
-      suppressElementDeviceVerification();
       mount();
     });
   } else {
-    suppressElementDeviceVerification();
     mount();
   }
   setInterval(function () {
-    suppressElementDeviceVerification();
     mount();
   }, 1500);
 })();
