@@ -87,11 +87,12 @@
 
   // Office dropdown deep-links into Nextcloud. Avoid Nextcloud's `/apps/office`
   // overview: it briefly shows "No office suite is deployed" while loading.
-  // Document creation lives in Files, so document-type entries land there.
+  // Document creation lives behind the Files app's client-side "New" menu. The
+  // query string below is consumed by handleNextcloudCreateIntent().
   var OFFICE_CHILDREN = [
-    { label: "Documents", path: "/apps/files/files" },
-    { label: "Spreadsheets", path: "/apps/files/files" },
-    { label: "Presentations", path: "/apps/files/files" },
+    { label: "Documents", path: "/apps/files/files?opensuiteCreate=document" },
+    { label: "Spreadsheets", path: "/apps/files/files?opensuiteCreate=spreadsheet" },
+    { label: "Presentations", path: "/apps/files/files?opensuiteCreate=presentation" },
     { label: "Files", path: "/apps/files/files" },
     { label: "Contacts", path: "/apps/contacts" },
     { label: "Projects", path: "/apps/deck/" },
@@ -239,6 +240,69 @@
     suppressElementDeviceVerification();
     mount();
   }, 1500);
+})();
+
+/*
+ * Nextcloud Files create intents.
+ *
+ * Nextcloud's document/spreadsheet/presentation creation actions are Vue menu
+ * buttons, not stable URLs. The Open Suite Office dropdown therefore links to
+ * `/apps/files/files?opensuiteCreate=<type>` and this small bridge opens the
+ * Files "New" menu, then clicks the corresponding action.
+ */
+(function () {
+  if (window.self !== window.top) return;
+  if (window.location.hostname.indexOf("nextcloud.") !== 0) return;
+  if (window.location.pathname.indexOf("/apps/files/") !== 0) return;
+
+  var params = new URLSearchParams(window.location.search);
+  var intent = params.get("opensuiteCreate");
+  var labels = {
+    document: "Document",
+    spreadsheet: "Spreadsheet",
+    presentation: "Presentation",
+  };
+  var label = labels[intent];
+  if (!label) return;
+
+  function cleanUrl() {
+    try {
+      params.delete("opensuiteCreate");
+      var query = params.toString();
+      var clean = window.location.pathname + (query ? "?" + query : "") + window.location.hash;
+      window.history.replaceState({}, "", clean);
+    } catch (e) {}
+  }
+
+  function buttonText(el) {
+    return ((el && (el.innerText || el.textContent)) || "").replace(/\s+/g, " ").trim();
+  }
+
+  function clickByText(text) {
+    var nodes = document.querySelectorAll("button, [role='button'], a");
+    for (var i = 0; i < nodes.length; i++) {
+      if (buttonText(nodes[i]) === text) {
+        nodes[i].click();
+        return true;
+      }
+    }
+    return false;
+  }
+
+  var attempts = 0;
+  var timer = window.setInterval(function () {
+    attempts += 1;
+    if (clickByText(label)) {
+      cleanUrl();
+      window.clearInterval(timer);
+      return;
+    }
+    clickByText("New");
+    if (attempts > 20) {
+      cleanUrl();
+      window.clearInterval(timer);
+    }
+  }, 500);
 })();
 
 /*
