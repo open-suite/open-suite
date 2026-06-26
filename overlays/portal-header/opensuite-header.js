@@ -85,13 +85,14 @@
 
   suppressElementDeviceVerification();
 
-  // Office dropdown deep-links into Nextcloud. Avoid Nextcloud's `/apps/office`
-  // overview: it briefly shows "No office suite is deployed" while loading.
-  // Document creation lives in Files, so document-type entries land there.
+  // Office dropdown deep-links into the Nextcloud Office overview sections.
+  // The hash is handled below because the stock Office overview keeps its
+  // selected section in Vue component state instead of the URL.
   var OFFICE_CHILDREN = [
-    { label: "Documents", path: "/apps/files/files" },
-    { label: "Spreadsheets", path: "/apps/files/files" },
-    { label: "Presentations", path: "/apps/files/files" },
+    { label: "Documents", path: "/apps/office/#documents" },
+    { label: "Spreadsheets", path: "/apps/office/#spreadsheets" },
+    { label: "Presentations", path: "/apps/office/#presentations" },
+    { label: "Diagrams", path: "/apps/office/#diagrams" },
     { label: "Files", path: "/apps/files/files" },
     { label: "Contacts", path: "/apps/contacts" },
     { label: "Projects", path: "/apps/deck/" },
@@ -183,6 +184,16 @@
         var a = document.createElement("a");
         a.href = origin(item.sub) + child.path;
         a.textContent = child.label;
+        if (child.path.indexOf("/apps/office/#") === 0) {
+          a.addEventListener("click", function () {
+            try {
+              window.sessionStorage.setItem(
+                "ko-office-section",
+                child.path.replace(/^\/apps\/office\/#\/?/, "")
+              );
+            } catch (e) {}
+          });
+        }
         menu.appendChild(a);
       });
       wrap.appendChild(menu);
@@ -266,20 +277,44 @@
     return nav ? nav.querySelectorAll('li[class*="app-navigation-entry"]') : [];
   }
 
+  function requestedSection() {
+    var hash = (window.location.hash || "").replace(/^#\/?/, "").trim().toLowerCase();
+    if (hash) return hash;
+    try {
+      return (window.sessionStorage.getItem("ko-office-section") || "").trim().toLowerCase();
+    } catch (e) {
+      return "";
+    }
+  }
+
+  function writeOfficeHash(slug) {
+    if (!slug) return;
+    var nextHash = "#" + slug;
+    if (window.location.hash !== nextHash) {
+      history.replaceState(null, "", nextHash);
+    }
+  }
+
   // Select the section named by the hash, retrying while the sidebar (which
   // renders only after the app's async template fetch) comes up.
   function applyFromHash() {
-    var want = (window.location.hash || "").replace(/^#\/?/, "").trim().toLowerCase();
+    var want = requestedSection();
     if (!want) return;
     var tries = 0;
     (function attempt() {
       var items = navItems();
       for (var i = 0; i < items.length; i++) {
         if (slugOf(items[i]) === want) {
+          writeOfficeHash(want);
           // Already active → leave it, so we don't loop click→hashchange→click.
           if (items[i].className.indexOf("active") === -1) {
             (items[i].querySelector("a") || items[i]).click();
           }
+          setTimeout(function () { writeOfficeHash(want); }, 0);
+          setTimeout(function () { writeOfficeHash(want); }, 250);
+          try {
+            window.sessionStorage.removeItem("ko-office-section");
+          } catch (e) {}
           return;
         }
       }
@@ -298,9 +333,8 @@
       var li = e.target.closest && e.target.closest('li[class*="app-navigation-entry"]');
       if (!li || !nav.contains(li)) return;
       var slug = slugOf(li);
-      if (slug && "#" + slug !== window.location.hash) {
-        history.replaceState(null, "", "#" + slug);
-      }
+      writeOfficeHash(slug);
+      setTimeout(function () { writeOfficeHash(slug); }, 0);
     });
   }
 
