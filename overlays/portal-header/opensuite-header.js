@@ -29,16 +29,14 @@
   var origin = function (sub) { return window.location.protocol + "//" + sub + "." + base; };
 
   // Office dropdown deep-links into the Nextcloud Office overview sections.
-  // The hash is handled below because the stock Office overview keeps its
-  // selected section in Vue component state instead of the URL.
+  // The header sidecar rewrites these clean URLs to the stock Office app while
+  // preserving the visible path for reloads, sharing, and switching sections.
   var OFFICE_CHILDREN = [
-    { label: "Documents", path: "/apps/office/#documents" },
-    { label: "Spreadsheets", path: "/apps/office/#spreadsheets" },
-    { label: "Presentations", path: "/apps/office/#presentations" },
-    { label: "Diagrams", path: "/apps/office/#diagrams" },
+    { label: "Documents", path: "/apps/office/documents" },
+    { label: "Spreadsheets", path: "/apps/office/spreadsheets" },
+    { label: "Presentations", path: "/apps/office/presentations" },
+    { label: "Diagrams", path: "/apps/office/diagrams" },
     { label: "Files", path: "/apps/files/files" },
-    { label: "Contacts", path: "/apps/contacts" },
-    { label: "Projects", path: "/apps/deck/" },
   ];
 
   // sub = subdomain the item points at; used both for the href and to mark the
@@ -46,6 +44,8 @@
   var NAV = [
     { label: "Home", sub: "bridge" },
     { label: "Office", sub: "nextcloud", children: OFFICE_CHILDREN },
+    { label: "Contacts", sub: "nextcloud", path: "/apps/contacts" },
+    { label: "Projects", sub: "nextcloud", path: "/apps/deck/" },
     { label: "Meet", sub: "meet" },
     { label: "Chat", sub: "element" },
     { label: "Tables", sub: "grist" },
@@ -127,16 +127,6 @@
         var a = document.createElement("a");
         a.href = origin(item.sub) + child.path;
         a.textContent = child.label;
-        if (child.path.indexOf("/apps/office/#") === 0) {
-          a.addEventListener("click", function () {
-            try {
-              window.sessionStorage.setItem(
-                "ko-office-section",
-                child.path.replace(/^\/apps\/office\/#\/?/, "")
-              );
-            } catch (e) {}
-          });
-        }
         menu.appendChild(a);
       });
       wrap.appendChild(menu);
@@ -193,15 +183,14 @@
 })();
 
 /*
- * Office overview ↔ URL hash.
+ * Office overview clean URLs.
  *
  * The stock `nextcloud/office` overview app has no router: the open section
  * (Documents / Spreadsheets / Presentations / Diagrams) is in-component Vue
- * state with no URL representation, so the page is always `/apps/office/#`
- * and a section can't be linked to. Rather than fork and rebuild the app, we
- * make the URL hash the source of truth: `#spreadsheets` selects the matching
- * sidebar entry, and clicking a section in the sidebar writes the hash back.
- * This is what makes the Office dropdown's `#<slug>` deep links work.
+ * state with no URL representation. The sidecar serves the same Office app for
+ * `/apps/office/<section>`, and this code selects the matching sidebar entry.
+ * Clicking a section updates the visible path, so reloads and switching between
+ * sections stay deterministic without hash/session handoffs.
  *
  * Matched by the section's (English) sidebar label; a localized instance would
  * need the slugs mapped per locale.
@@ -218,26 +207,24 @@
   }
 
   function requestedSection() {
-    var hash = (window.location.hash || "").replace(/^#\/?/, "").trim().toLowerCase();
-    if (hash) return hash;
-    try {
-      return (window.sessionStorage.getItem("ko-office-section") || "").trim().toLowerCase();
-    } catch (e) {
-      return "";
-    }
+    var match = window.location.pathname.match(/^\/apps\/office\/(documents|spreadsheets|presentations|diagrams)\/?$/);
+    if (match) return match[1];
+    var param = new URLSearchParams(window.location.search).get("koOfficeSection");
+    return (param || "").trim().toLowerCase();
   }
 
-  function writeOfficeHash(slug) {
+  function writeOfficePath(slug) {
     if (!slug) return;
-    var nextHash = "#" + slug;
-    if (window.location.hash !== nextHash) {
-      history.replaceState(null, "", nextHash);
+    var nextPath = "/apps/office/" + slug;
+    var nextHref = window.location.origin + nextPath;
+    if (window.location.href !== nextHref) {
+      history.replaceState(null, "", nextPath);
     }
   }
 
-  // Select the section named by the hash, retrying while the sidebar (which
+  // Select the section named by the URL, retrying while the sidebar (which
   // renders only after the app's async template fetch) comes up.
-  function applyFromHash() {
+  function applyFromUrl() {
     var want = requestedSection();
     if (!want) return;
     var tries = 0;
@@ -245,16 +232,14 @@
       var items = navItems();
       for (var i = 0; i < items.length; i++) {
         if (slugOf(items[i]) === want) {
-          writeOfficeHash(want);
+          writeOfficePath(want);
           // Already active → leave it, so we don't loop click→hashchange→click.
           if (items[i].className.indexOf("active") === -1) {
             (items[i].querySelector("a") || items[i]).click();
           }
-          setTimeout(function () { writeOfficeHash(want); }, 0);
-          setTimeout(function () { writeOfficeHash(want); }, 250);
-          try {
-            window.sessionStorage.removeItem("ko-office-section");
-          } catch (e) {}
+          setTimeout(function () { writeOfficePath(want); }, 0);
+          setTimeout(function () { writeOfficePath(want); }, 250);
+          setTimeout(function () { writeOfficePath(want); }, 1000);
           return;
         }
       }
@@ -262,9 +247,7 @@
     })();
   }
 
-  // Mirror sidebar clicks into the hash so the URL reflects the open section
-  // (shareable, back-button friendly). replaceState (not `location.hash =`)
-  // so we don't fire our own hashchange and re-click what was just clicked.
+  // Mirror sidebar clicks into the path so the URL reflects the open section.
   function watchClicks() {
     var nav = document.getElementById("app-navigation-vue");
     if (!nav || nav.dataset.osHashBound) return;
@@ -273,13 +256,23 @@
       var li = e.target.closest && e.target.closest('li[class*="app-navigation-entry"]');
       if (!li || !nav.contains(li)) return;
       var slug = slugOf(li);
-      writeOfficeHash(slug);
-      setTimeout(function () { writeOfficeHash(slug); }, 0);
+      writeOfficePath(slug);
+      setTimeout(function () { writeOfficePath(slug); }, 0);
+      setTimeout(function () { writeOfficePath(slug); }, 250);
+      setTimeout(function () { writeOfficePath(slug); }, 1000);
     });
   }
 
-  window.addEventListener("hashchange", applyFromHash);
-  applyFromHash();
+  window.addEventListener("popstate", applyFromUrl);
+  window.addEventListener("hashchange", function () {
+    var section = requestedSection();
+    if (section) setTimeout(function () { writeOfficePath(section); }, 0);
+  });
+  applyFromUrl();
+  setInterval(function () {
+    var section = requestedSection();
+    if (section) writeOfficePath(section);
+  }, 100);
   setInterval(watchClicks, 1000);
 })();
 

@@ -80,6 +80,7 @@ http {
       alias /usr/share/opensuite/opensuite-header.js;
     }
     location / {
+      rewrite ^/apps/office/(documents|spreadsheets|presentations|diagrams)/?$ /apps/office/?koOfficeSection=\$1 break;
       proxy_pass http://127.0.0.1:${upstream};
       proxy_set_header Host \$host;
       proxy_set_header X-Real-IP \$remote_addr;
