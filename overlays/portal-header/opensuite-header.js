@@ -27,6 +27,11 @@
   var host = window.location.hostname;
   var base = host.indexOf(".") === -1 ? host : host.slice(host.indexOf(".") + 1);
   var origin = function (sub) { return window.location.protocol + "//" + sub + "." + base; };
+  var nextcloudHref = function (path) {
+    var nc = origin("nextcloud");
+    var target = nc + (path || "");
+    return nc + "/apps/user_oidc/login/1?redirectUrl=" + encodeURIComponent(target);
+  };
 
   // Office dropdown deep-links into the Nextcloud Office overview sections.
   // The header sidecar rewrites these clean URLs to the stock Office app while
@@ -125,7 +130,7 @@
       menu.className = "ko-menu";
       item.children.forEach(function (child) {
         var a = document.createElement("a");
-        a.href = origin(item.sub) + child.path;
+        a.href = item.sub === "nextcloud" ? nextcloudHref(child.path) : origin(item.sub) + child.path;
         a.textContent = child.label;
         menu.appendChild(a);
       });
@@ -133,7 +138,7 @@
     } else {
       var link = document.createElement("a");
       link.className = "ko-link" + (isActive(item) ? " ko-active" : "");
-      link.href = origin(item.sub) + (item.path || "");
+      link.href = item.sub === "nextcloud" ? nextcloudHref(item.path) : origin(item.sub) + (item.path || "");
       link.textContent = item.label;
       wrap.appendChild(link);
     }
