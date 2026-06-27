@@ -1,0 +1,68 @@
+diff --git a/src/frontend/src/features/rooms/components/Join.tsx b/src/frontend/src/features/rooms/components/Join.tsx
+index 7568a11..e976700 100644
+--- a/src/frontend/src/features/rooms/components/Join.tsx
++++ b/src/frontend/src/features/rooms/components/Join.tsx
+@@ -33,7 +33,7 @@ import { ApiLobbyStatus, type ApiRequestEntry } from '../api/requestEntry'
+ import { Spinner } from '@/primitives/Spinner'
+ import { ApiAccessLevel } from '../api/ApiRoom'
+ import { useLoginHint } from '@/hooks/useLoginHint'
+-import { openPermissionsDialog } from '@/stores/permissions'
++import { openPermissionsDialog, permissionsStore } from '@/stores/permissions'
+ import { useResolveInitiallyDefaultDeviceId } from '../livekit/hooks/useResolveInitiallyDefaultDeviceId'
+ import { isSafari } from '@/utils/livekit'
+ 
+@@ -51,7 +51,26 @@ import {
+ import { useCannotUseDevice } from '../livekit/hooks/useCannotUseDevice'
+ import { useSnapshot } from 'valtio'
+ 
+-const onError = (e: Error) => console.error('ERROR', e)
++const isMediaPermissionError = (e: Error) =>
++  e.name === 'NotAllowedError' || e.name === 'PermissionDeniedError'
++
++const onMediaError = (
++  e: Error,
++  kind?: 'audioinput' | 'videoinput' | 'both'
++) => {
++  console.error('ERROR', e)
++
++  if (!isMediaPermissionError(e)) return
++
++  if (!kind || kind === 'videoinput' || kind === 'both') {
++    permissionsStore.cameraPermission = 'denied'
++  }
++  if (!kind || kind === 'audioinput' || kind === 'both') {
++    permissionsStore.microphonePermission = 'denied'
++  }
++  permissionsStore.isLoading = false
++  openPermissionsDialog(kind === 'both' ? undefined : kind)
++}
+ 
+ const Effects = ({
+   videoTrack,
+@@ -152,7 +171,7 @@ export const Join = ({
+           ),
+         },
+     },
+-    onError
++    (e) => onMediaError(e, 'both')
+   )
+ 
+   const [dynamicVideoTrack, setDynamicVideoTrack] =
+@@ -191,7 +210,7 @@ export const Join = ({
+         })
+         setDynamicVideoTrack(track)
+       } catch (error) {
+-        onError(error as Error)
++        onMediaError(error as Error, 'videoinput')
+       }
+     }
+ 
+@@ -219,7 +238,7 @@ export const Join = ({
+         })
+         setDynamicAudioTrack(track)
+       } catch (error) {
+-        onError(error as Error)
++        onMediaError(error as Error, 'audioinput')
+       }
+     }
+     if (
