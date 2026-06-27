@@ -79,6 +79,16 @@ http {
       add_header Cache-Control "public, max-age=31536000, immutable";
       alias /usr/share/opensuite/opensuite-header.js;
     }
+    location ~* \.(?:avif|css|gif|ico|jpe?g|js|mjs|png|svg|webp|woff2?)$ {
+      proxy_pass http://127.0.0.1:${upstream};
+      proxy_set_header Host \$host;
+      proxy_set_header X-Real-IP \$remote_addr;
+      proxy_set_header X-Forwarded-For \$proxy_add_x_forwarded_for;
+      proxy_set_header X-Forwarded-Proto \$scheme;
+      proxy_redirect off;
+      proxy_hide_header Cache-Control;
+      add_header Cache-Control "public, max-age=31536000, immutable";
+    }
     location / {
       rewrite ^/apps/office/(documents|spreadsheets|presentations|diagrams)/?$ /apps/office/?koOfficeSection=\$1 break;
       proxy_pass http://127.0.0.1:${upstream};
