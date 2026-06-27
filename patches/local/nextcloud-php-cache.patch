@@ -1,0 +1,29 @@
+diff --git a/helmfile/apps/nextcloud/values.yaml.gotmpl b/helmfile/apps/nextcloud/values.yaml.gotmpl
+index 706e9e2..7c39362 100644
+--- a/helmfile/apps/nextcloud/values.yaml.gotmpl
++++ b/helmfile/apps/nextcloud/values.yaml.gotmpl
+@@ -202,6 +202,24 @@ externalMinio:
+ 
+ phpUploadLimit: {{ .Values.application.nextcloud.uploadLimit | quote }}
+ 
++# Open Suite: production PHP cache settings for the immutable Nextcloud
++# container. The chart copies these files into conf.d for both the web pod and
++# the cron job during init.
++phpConfigs:
++  opensuite-apcu.ini: |
++    apc.enabled=1
++    apc.enable_cli=1
++    apc.shm_size=128M
++  opensuite-opcache.ini: |
++    opcache.enable=1
++    opcache.enable_cli=1
++    opcache.memory_consumption=256
++    opcache.interned_strings_buffer=32
++    opcache.max_accelerated_files=50000
++    opcache.validate_timestamps=0
++    opcache.revalidate_freq=0
++    opcache.save_comments=1
++
+ externalDatabase:
+   database: {{ .Values.database.nextcloud.name | quote }}
+   username: {{ .Values.database.nextcloud.user | quote }}
