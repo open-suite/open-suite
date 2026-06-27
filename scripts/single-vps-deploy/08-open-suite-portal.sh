@@ -41,6 +41,7 @@ FROM ${BACKEND_BASE_IMAGE}
 COPY backend/app/clients/caldav.py /app/app/clients/caldav.py
 COPY backend/app/models/calendar.py /app/app/models/calendar.py
 COPY backend/app/routes/caldav.py /app/app/routes/caldav.py
+COPY backend/app/token_exchange.py /app/app/token_exchange.py
 EOF
 docker buildx build --load -f "${WORK}/Dockerfile.backend" -t open-suite/portal-api:local "${WORK}/portal"
 docker save open-suite/portal-api:local | k3s ctr -n k8s.io images import -
