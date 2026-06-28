@@ -51,6 +51,7 @@ bash "${DIR}/08-open-suite-portal.sh"
 bash "${DIR}/09-portal-header.sh"
 bash "${DIR}/10-keycloak-login.sh"
 bash "${DIR}/11-element-web.sh"
+bash "${DIR}/12-auth-gate.sh"
 
 echo ""
 echo "############################################################"
