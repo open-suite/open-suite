@@ -1,5 +1,25 @@
 # open-suite — Plan
 
+## 0. Status vs plan (2026-07)
+
+Shipped: the single-VPS k3s happy path (`deploy.sh`, idempotent, verified by a
+full re-apply on the live demo 2026-07-02); SSO across every app; calendar +
+Meet integration (see §5 — shipped as the meetcal Nextcloud app, not the
+webhook listener this plan first sketched); Keycloak branding + session
+lifetimes, Element E2EE-off, the edge auth gate — all declarative as
+`patches/local/*` over the pinned MinBZK infra (`UPSTREAM_REF`), applied by
+`helmfile apply` alone (ticket 3.4).
+
+Shipped differently: MinBZK infra is vendored at deploy time (pinned clone +
+patch series), not fetched by CI; the portal is a owned fork
+(`open-suite/open-suite-portal`), not a patch queue.
+
+Doesn't exist yet: assembled-stack smoke test in CI (§2.2, ticket 3.6 — only
+the auth-gate image build is in CI), updatecli pinning, the upstreamable patch
+queue with provenance trailers (§4 — `patches/upstreamable/` is empty),
+pristine-build (`git am`) image pipeline (§4), registry images for portal and
+Meet (built on-box today, ticket 3.1), backups/restore drill (§6, M4).
+
 ## 1. What this is
 
 An **opinionated distribution** of an open-source digital workplace. We assemble
@@ -87,25 +107,25 @@ that's the cue to delete it. Retiring must keep the smoke test green.
 Sources are pulled at build time (pinned submodule only for apps we patch
 heavily, e.g. bureaublad).
 
-## 5. Calendar (near-term plan)
+## 5. Calendar (shipped — meetcal)
 
 No calendar ships in MinBZK or La Suite prod yet (tracked: MinBZK/mijn-bureau-infra
 #585). La Suite's prod calendar today is **Open-Xchange** (behind its Messagerie);
-a native `suitenumerique/calendars` app exists but has no release. So:
+a native `suitenumerique/calendars` app exists but has no release. What we ship:
 
-- **Now:** use **Nextcloud Calendar** (CalDAV). Install the `calendar` front-end
-  app in bootstrap (currently only `dav`/`contacts` are present — hence the
-  `/apps/calendar` 404). Wire bureaublad's existing `/calendar` route at it via
-  `CALENDAR_URL` (handle Nextcloud `X-Frame-Options` so the portal can iframe it).
-- **Meet integration (Google-Cal-style auto link):** Meet uses slug URLs with
-  room auto-creation, so a link is just `https://meet.<domain>/<slug>`. Nextcloud
-  Calendar's conferencing button is hardwired to Talk, so we add a small
-  **webhook listener** (`webhook_listeners` is already enabled): on event create,
-  if no conference link, mint a Meet slug into the VEVENT. Open question to
-  confirm first: do auto-created Meet rooms admit invited guests, or must we
-  pre-create via Meet's API (`gru-library-suitenumerique-meet`)?
+- **Nextcloud Calendar** (CalDAV) is the calendar; the portal links to it on the
+  Nextcloud origin (Nextcloud sends `frame-ancestors 'none'`, so no iframing).
+- **Meet integration (Google-Cal-style auto link)** is live, built differently
+  than first planned. The webhook-listener design was abandoned; instead a small
+  Nextcloud app, **meetcal** (`patches/local/nextcloud-meetcal.patch`, mounted
+  from a ConfigMap), exposes `POST /apps/meetcal/room`: it mints a `meet` token
+  via user_oidc **token exchange** (Keycloak standard token exchange enabled on
+  the realm client) and create-or-gets a public room with a `xxx-yyy-zzz` slug —
+  the only slug format Meet treats as joinable. The portal header overlay adds
+  the "Add Meet link" button and auto-fills new events; the link lives in the
+  event location, so the portal widget shows "Join".
 - **Later:** migrate to native `suitenumerique/calendars` when released — at
-  which point the Nextcloud route + Meet sidecar are deletable interim glue.
+  which point meetcal and the header glue are deletable interim glue.
 
 ## 6. Deployment target
 
