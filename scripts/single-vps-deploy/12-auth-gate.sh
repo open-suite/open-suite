@@ -29,16 +29,17 @@ CLIENT_SECRET="$(cat /etc/mijnbureau/auth-gate-client-secret)"
 COOKIE_SECRET="$(cat /etc/mijnbureau/auth-gate-cookie-secret)"
 
 echo "==> [2/5] Creating/updating Keycloak client ${CLIENT_ID}"
-KC_PASS="$(kubectl -n mb-keycloak get secret keycloak-keycloak -o jsonpath='{.data.admin-password}' | base64 -d)"
+# Auth with the pod's bootstrap admin file — the keycloak-keycloak secret's
+# admin-password does not match the running admin user (same gotcha as 10).
 kubectl -n mb-keycloak exec -i keycloak-keycloak-0 -c keycloak -- sh -s -- \
-  "$KC_PASS" "$CLIENT_ID" "$CLIENT_SECRET" "$AUTH_HOST" <<'SH'
+  "$CLIENT_ID" "$CLIENT_SECRET" "$AUTH_HOST" <<'SH'
 set -e
 KC=/opt/bitnami/keycloak/bin/kcadm.sh
 CFG=/tmp/opensuite-auth-gate-kcadm.config
-ADMIN_PASS="$1"
-CLIENT_ID="$2"
-CLIENT_SECRET="$3"
-AUTH_HOST="$4"
+CLIENT_ID="$1"
+CLIENT_SECRET="$2"
+AUTH_HOST="$3"
+ADMIN_PASS="$(cat "$KC_BOOTSTRAP_ADMIN_PASSWORD_FILE")"
 "$KC" config credentials --config "$CFG" --server http://localhost:8080/ --realm master --user admin --password "$ADMIN_PASS" >/dev/null
 CLIENT_UUID="$("$KC" get clients -r mijnbureau --config "$CFG" -q clientId="$CLIENT_ID" --fields id 2>/dev/null | grep -oE '[0-9a-f-]{36}' | head -1 || true)"
 cat >/tmp/opensuite-auth-gate-client.json <<EOF
