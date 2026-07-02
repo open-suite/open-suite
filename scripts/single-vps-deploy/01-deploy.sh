@@ -182,6 +182,17 @@ authentication:
     end_session_endpoint: "https://id.${DOMAIN}/realms/mijnbureau/protocol/openid-connect/logout"
     jwks_uri: "https://id.${DOMAIN}/realms/mijnbureau/protocol/openid-connect/certs"
 
+# Open Suite: gate the workspace app ingresses behind the edge auth gate
+# (12-auth-gate.sh deploys the gate itself). Consumed by
+# patches/local/auth-gate-ingress-middleware.patch, which appends the
+# forwardAuth middleware to each patched ingress's middleware chain. Keycloak
+# stays ungated — gating the IdP would loop the login. Until 12 creates the
+# Middleware object the gated routers fail closed; on a first deploy that
+# window is before the stack is usable anyway.
+opensuite:
+  authGate:
+    enabled: true
+
 YAML
 
 echo "==> [4/4] Deploying (this takes 10-20 minutes)"

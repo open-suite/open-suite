@@ -1,0 +1,136 @@
+diff --git a/helmfile/apps/bureaublad/values.yaml.gotmpl b/helmfile/apps/bureaublad/values.yaml.gotmpl
+index d78c692..021900c 100644
+--- a/helmfile/apps/bureaublad/values.yaml.gotmpl
++++ b/helmfile/apps/bureaublad/values.yaml.gotmpl
+@@ -156,7 +156,7 @@ ingress:
+     haproxy.router.openshift.io/hsts_header: max-age=31536000;includeSubDomains;preload
+     {{- end }}
+     {{- if eq .Values.cluster.ingress.type "traefik" }}
+-    traefik.ingress.kubernetes.io/router.middlewares: '{{ .Release.Namespace }}-hsts-header@kubernetescrd'
++    traefik.ingress.kubernetes.io/router.middlewares: '{{ .Release.Namespace }}-hsts-header@kubernetescrd{{ if dig "opensuite" "authGate" "enabled" false .Values }},{{ .Values.application.bureaublad.namespace }}-opensuite-auth-gate@kubernetescrd{{ end }}'
+     {{- end }}
+ 
+ networkPolicy:
+diff --git a/helmfile/apps/docs/values.yaml.gotmpl b/helmfile/apps/docs/values.yaml.gotmpl
+index ce4df2c..ccf207a 100644
+--- a/helmfile/apps/docs/values.yaml.gotmpl
++++ b/helmfile/apps/docs/values.yaml.gotmpl
+@@ -511,7 +511,7 @@ ingress:
+     haproxy.router.openshift.io/hsts_header: max-age=31536000;includeSubDomains;preload
+     {{- end }}
+     {{- if eq .Values.cluster.ingress.type "traefik" }}
+-    traefik.ingress.kubernetes.io/router.middlewares: '{{ .Release.Namespace }}-hsts-header@kubernetescrd'
++    traefik.ingress.kubernetes.io/router.middlewares: '{{ .Release.Namespace }}-hsts-header@kubernetescrd{{ if dig "opensuite" "authGate" "enabled" false .Values }},{{ .Values.application.bureaublad.namespace }}-opensuite-auth-gate@kubernetescrd{{ end }}'
+     {{- end }}
+   tls: {{ .Values.global.tls.enabled | default true }}
+   selfSigned: {{ and .Values.global.tls.enabled .Values.global.tls.selfSigned | default false }}
+@@ -533,7 +533,7 @@ ingressAdmin:
+     haproxy.router.openshift.io/hsts_header: max-age=31536000;includeSubDomains;preload
+     {{- end }}
+     {{- if eq .Values.cluster.ingress.type "traefik" }}
+-    traefik.ingress.kubernetes.io/router.middlewares: '{{ .Release.Namespace }}-hsts-header@kubernetescrd'
++    traefik.ingress.kubernetes.io/router.middlewares: '{{ .Release.Namespace }}-hsts-header@kubernetescrd{{ if dig "opensuite" "authGate" "enabled" false .Values }},{{ .Values.application.bureaublad.namespace }}-opensuite-auth-gate@kubernetescrd{{ end }}'
+     {{- end }}
+ 
+   tls: {{ .Values.global.tls.enabled | default true }}
+@@ -556,7 +556,7 @@ ingressCollaborationApi:
+     haproxy.router.openshift.io/hsts_header: max-age=31536000;includeSubDomains;preload
+     {{- end }}
+     {{- if eq .Values.cluster.ingress.type "traefik" }}
+-    traefik.ingress.kubernetes.io/router.middlewares: '{{ .Release.Namespace }}-hsts-header@kubernetescrd'
++    traefik.ingress.kubernetes.io/router.middlewares: '{{ .Release.Namespace }}-hsts-header@kubernetescrd{{ if dig "opensuite" "authGate" "enabled" false .Values }},{{ .Values.application.bureaublad.namespace }}-opensuite-auth-gate@kubernetescrd{{ end }}'
+     {{- end }}
+   tls: {{ .Values.global.tls.enabled | default true }}
+   selfSigned: {{ and .Values.global.tls.enabled .Values.global.tls.selfSigned | default false }}
+@@ -583,7 +583,7 @@ ingressCollaborationWS:
+     haproxy.router.openshift.io/hsts_header: max-age=31536000;includeSubDomains;preload
+     {{- end }}
+     {{- if eq .Values.cluster.ingress.type "traefik" }}
+-    traefik.ingress.kubernetes.io/router.middlewares: '{{ .Release.Namespace }}-hsts-header@kubernetescrd'
++    traefik.ingress.kubernetes.io/router.middlewares: '{{ .Release.Namespace }}-hsts-header@kubernetescrd{{ if dig "opensuite" "authGate" "enabled" false .Values }},{{ .Values.application.bureaublad.namespace }}-opensuite-auth-gate@kubernetescrd{{ end }}'
+     traefik.ingress.kubernetes.io/service.serverstransport: {{ .Release.Namespace }}-docs-transport@kubernetescrd
+     traefik.ingress.kubernetes.io/service.sticky.cookie: "true"
+     traefik.ingress.kubernetes.io/service.sticky.cookie.name: "DOCS_STICKY"
+@@ -609,7 +609,7 @@ ingressCollaborationsApi:
+     haproxy.router.openshift.io/hsts_header: max-age=31536000;includeSubDomains;preload
+     {{- end }}
+     {{- if eq .Values.cluster.ingress.type "traefik" }}
+-    traefik.ingress.kubernetes.io/router.middlewares: '{{ .Release.Namespace }}-hsts-header@kubernetescrd'
++    traefik.ingress.kubernetes.io/router.middlewares: '{{ .Release.Namespace }}-hsts-header@kubernetescrd{{ if dig "opensuite" "authGate" "enabled" false .Values }},{{ .Values.application.bureaublad.namespace }}-opensuite-auth-gate@kubernetescrd{{ end }}'
+     traefik.ingress.kubernetes.io/service.sticky.cookie: "true"
+     traefik.ingress.kubernetes.io/service.sticky.cookie.name: "DOCS_STICKY"
+     {{- end }}
+@@ -644,7 +644,7 @@ ingressMedia:
+     haproxy.router.openshift.io/hsts_header: max-age=31536000;includeSubDomains;preload
+     {{- end }}
+     {{- if eq .Values.cluster.ingress.type "traefik" }}
+-    traefik.ingress.kubernetes.io/router.middlewares: '{{ .Release.Namespace }}-hsts-header@kubernetescrd'
++    traefik.ingress.kubernetes.io/router.middlewares: '{{ .Release.Namespace }}-hsts-header@kubernetescrd{{ if dig "opensuite" "authGate" "enabled" false .Values }},{{ .Values.application.bureaublad.namespace }}-opensuite-auth-gate@kubernetescrd{{ end }}'
+     {{- end }}
+   tls: {{ .Values.global.tls.enabled | default true }}
+   selfSigned: {{ and .Values.global.tls.enabled .Values.global.tls.selfSigned | default false }}
+diff --git a/helmfile/apps/element/values-element-web.yaml.gotmpl b/helmfile/apps/element/values-element-web.yaml.gotmpl
+index 55e6c1a..e7d58ec 100644
+--- a/helmfile/apps/element/values-element-web.yaml.gotmpl
++++ b/helmfile/apps/element/values-element-web.yaml.gotmpl
+@@ -263,7 +263,7 @@ ingress:
+     haproxy.router.openshift.io/hsts_header: max-age=31536000;includeSubDomains;preload
+     {{- end }}
+     {{- if eq .Values.cluster.ingress.type "traefik" }}
+-    traefik.ingress.kubernetes.io/router.middlewares: '{{ .Release.Namespace }}-hsts-header@kubernetescrd'
++    traefik.ingress.kubernetes.io/router.middlewares: '{{ .Release.Namespace }}-hsts-header@kubernetescrd{{ if dig "opensuite" "authGate" "enabled" false .Values }},{{ .Values.application.bureaublad.namespace }}-opensuite-auth-gate@kubernetescrd{{ end }}'
+     {{- end }}
+ # Application Configuration, more information can be found here :https://web-docs.element.dev/Element%20Web/config.html
+ config:
+diff --git a/helmfile/apps/element/values-synapse.yaml.gotmpl b/helmfile/apps/element/values-synapse.yaml.gotmpl
+index 29b3f89..8b7bed4 100644
+--- a/helmfile/apps/element/values-synapse.yaml.gotmpl
++++ b/helmfile/apps/element/values-synapse.yaml.gotmpl
+@@ -176,7 +176,7 @@ ingress:
+     haproxy.router.openshift.io/hsts_header: max-age=31536000;includeSubDomains;preload
+     {{- end }}
+     {{- if eq .Values.cluster.ingress.type "traefik" }}
+-    traefik.ingress.kubernetes.io/router.middlewares: '{{ .Release.Namespace }}-hsts-header@kubernetescrd'
++    traefik.ingress.kubernetes.io/router.middlewares: '{{ .Release.Namespace }}-hsts-header@kubernetescrd{{ if dig "opensuite" "authGate" "enabled" false .Values }},{{ .Values.application.bureaublad.namespace }}-opensuite-auth-gate@kubernetescrd{{ end }}'
+     {{- end }}
+ # This section builds out the service account more information can be found here: https://kubernetes.io/docs/concepts/security/service-accounts/
+ serviceAccount:
+diff --git a/helmfile/apps/grist/values.yaml.gotmpl b/helmfile/apps/grist/values.yaml.gotmpl
+index 0d489aa..f8b8458 100644
+--- a/helmfile/apps/grist/values.yaml.gotmpl
++++ b/helmfile/apps/grist/values.yaml.gotmpl
+@@ -64,7 +64,7 @@ ingress:
+     haproxy.router.openshift.io/hsts_header: max-age=31536000;includeSubDomains;preload
+     {{- end }}
+     {{- if eq .Values.cluster.ingress.type "traefik" }}
+-    traefik.ingress.kubernetes.io/router.middlewares: '{{ .Release.Namespace }}-hsts-header@kubernetescrd'
++    traefik.ingress.kubernetes.io/router.middlewares: '{{ .Release.Namespace }}-hsts-header@kubernetescrd{{ if dig "opensuite" "authGate" "enabled" false .Values }},{{ .Values.application.bureaublad.namespace }}-opensuite-auth-gate@kubernetescrd{{ end }}'
+     {{- end }}
+ resourcesPreset: {{ coalesce .Values.global.resourcesPresetPerApp.grist .Values.global.resourcesPreset | quote }}
+ 
+diff --git a/helmfile/apps/meet/values.yaml.gotmpl b/helmfile/apps/meet/values.yaml.gotmpl
+index 6542bb9..91ce7d9 100644
+--- a/helmfile/apps/meet/values.yaml.gotmpl
++++ b/helmfile/apps/meet/values.yaml.gotmpl
+@@ -146,7 +146,7 @@ ingress:
+     haproxy.router.openshift.io/hsts_header: max-age=31536000;includeSubDomains;preload
+     {{- end }}
+     {{- if eq .Values.cluster.ingress.type "traefik" }}
+-    traefik.ingress.kubernetes.io/router.middlewares: '{{ .Release.Namespace }}-hsts-header@kubernetescrd'
++    traefik.ingress.kubernetes.io/router.middlewares: '{{ .Release.Namespace }}-hsts-header@kubernetescrd{{ if dig "opensuite" "authGate" "enabled" false .Values }},{{ .Values.application.bureaublad.namespace }}-opensuite-auth-gate@kubernetescrd{{ end }}'
+     {{- end }}
+ externalLivekit:
+   {{- if .Values.application.livekit.enabled }}
+diff --git a/helmfile/apps/nextcloud/values.yaml.gotmpl b/helmfile/apps/nextcloud/values.yaml.gotmpl
+index 706e9e2..6d863d8 100644
+--- a/helmfile/apps/nextcloud/values.yaml.gotmpl
++++ b/helmfile/apps/nextcloud/values.yaml.gotmpl
+@@ -39,7 +39,7 @@ ingress:
+     haproxy.router.openshift.io/hsts_header: max-age=31536000;includeSubDomains;preload
+     {{- end }}
+     {{- if eq .Values.cluster.ingress.type "traefik" }}
+-    traefik.ingress.kubernetes.io/router.middlewares: '{{ .Release.Namespace }}-hsts-header@kubernetescrd'
++    traefik.ingress.kubernetes.io/router.middlewares: '{{ .Release.Namespace }}-hsts-header@kubernetescrd{{ if dig "opensuite" "authGate" "enabled" false .Values }},{{ .Values.application.bureaublad.namespace }}-opensuite-auth-gate@kubernetescrd{{ end }}'
+     {{- end }}
+ resourcesPreset: {{ coalesce .Values.global.resourcesPresetPerApp.nextcloud .Values.global.resourcesPreset | quote }}
+ 

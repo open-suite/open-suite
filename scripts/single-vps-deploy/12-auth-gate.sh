@@ -1,7 +1,10 @@
 #!/usr/bin/env bash
 # Usage: ./12-auth-gate.sh
 #
-# Deploy the Open Suite edge auth gate and attach it to protected app ingresses.
+# Deploy the Open Suite edge auth gate. Attaching it to the protected app
+# ingresses is declarative: patches/local/auth-gate-ingress-middleware.patch
+# appends the forwardAuth middleware to each gated ingress's annotation when
+# the demo values set opensuite.authGate.enabled (01-deploy.sh does).
 set -euo pipefail
 
 export KUBECONFIG=/etc/rancher/k3s/k3s.yaml
@@ -14,7 +17,7 @@ NAMESPACE="mb-bureaublad"
 # pin a specific tag/digest; the default tracks main.
 IMAGE="${AUTH_GATE_IMAGE:-ghcr.io/open-suite/auth-gate:main}"
 
-echo "==> [1/6] Ensuring auth-gate secrets"
+echo "==> [1/5] Ensuring auth-gate secrets"
 mkdir -p /etc/mijnbureau
 if [ ! -f /etc/mijnbureau/auth-gate-client-secret ]; then
   openssl rand -base64 36 | tr -d '\n' > /etc/mijnbureau/auth-gate-client-secret
@@ -25,7 +28,7 @@ fi
 CLIENT_SECRET="$(cat /etc/mijnbureau/auth-gate-client-secret)"
 COOKIE_SECRET="$(cat /etc/mijnbureau/auth-gate-cookie-secret)"
 
-echo "==> [2/6] Creating/updating Keycloak client ${CLIENT_ID}"
+echo "==> [2/5] Creating/updating Keycloak client ${CLIENT_ID}"
 KC_PASS="$(kubectl -n mb-keycloak get secret keycloak-keycloak -o jsonpath='{.data.admin-password}' | base64 -d)"
 kubectl -n mb-keycloak exec -i keycloak-keycloak-0 -c keycloak -- sh -s -- \
   "$KC_PASS" "$CLIENT_ID" "$CLIENT_SECRET" "$AUTH_HOST" <<'SH'
@@ -65,9 +68,9 @@ CLIENT_UUID="$("$KC" get clients -r mijnbureau --config "$CFG" -q clientId="$CLI
 test -n "$CLIENT_UUID"
 SH
 
-echo "==> [3/6] Using prebuilt auth-gate image ${IMAGE}"
+echo "==> [3/5] Using prebuilt auth-gate image ${IMAGE}"
 
-echo "==> [4/6] Applying auth-gate Kubernetes resources"
+echo "==> [4/5] Applying auth-gate Kubernetes resources"
 kubectl -n "${NAMESPACE}" create secret generic opensuite-auth-gate \
   --from-literal=OIDC_CLIENT_SECRET="${CLIENT_SECRET}" \
   --from-literal=COOKIE_SECRET="${COOKIE_SECRET}" \
@@ -227,33 +230,5 @@ kubectl -n "${NAMESPACE}" rollout restart deploy/opensuite-auth-gate
 kubectl -n "${NAMESPACE}" rollout status deploy/opensuite-auth-gate --timeout=120s
 kubectl -n "${NAMESPACE}" wait --for=condition=Ready "certificate/${AUTH_HOST}-tls" --timeout=180s
 
-echo "==> [5/6] Attaching auth middleware to protected ingresses"
-append_middleware() {
-  local ns="$1" ingress="$2" auth_ref="${NAMESPACE}-opensuite-auth-gate@kubernetescrd"
-  local current next
-  current="$(kubectl -n "$ns" get ingress "$ingress" -o jsonpath='{.metadata.annotations.traefik\.ingress\.kubernetes\.io/router\.middlewares}' 2>/dev/null || true)"
-  next="$(python3 -c '
-import sys
-current, auth_ref = sys.argv[1], sys.argv[2]
-items = [x.strip() for x in current.split(",") if x.strip()]
-if auth_ref not in items:
-    items.append(auth_ref)
-print(",".join(items))
-' "$current" "$auth_ref")"
-  kubectl -n "$ns" annotate ingress "$ingress" "traefik.ingress.kubernetes.io/router.middlewares=${next}" --overwrite
-  kubectl -n "$ns" annotate ingress "$ingress" kubectl.kubernetes.io/last-applied-configuration- >/dev/null 2>&1 || true
-}
-
-append_middleware mb-bureaublad bureaublad
-kubectl -n mb-bureaublad get ingress opensuite-root-portal >/dev/null 2>&1 && append_middleware mb-bureaublad opensuite-root-portal
-append_middleware mb-meet meet
-append_middleware mb-nextcloud nextcloud
-for ingress in docs docs-backend-admin docs-media docs-y-provider-api docs-y-provider-ws; do
-  kubectl -n mb-docs get ingress "$ingress" >/dev/null 2>&1 && append_middleware mb-docs "$ingress"
-done
-append_middleware mb-grist grist
-append_middleware mb-element element-web
-append_middleware mb-element synapse
-
-echo "==> [6/6] Auth gate ready"
+echo "==> [5/5] Auth gate ready"
 echo "Protected workspace traffic now authenticates through https://${AUTH_HOST}"
