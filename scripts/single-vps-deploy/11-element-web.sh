@@ -14,8 +14,15 @@ NS=mb-element
 DEPLOY=element-web
 APP_VOLUME=element-web-patched-app
 
-IMAGE="$(kubectl -n "${NS}" get deploy "${DEPLOY}" -o jsonpath='{.spec.template.spec.containers[?(@.name=="element-web")].image}')"
-[ -n "${IMAGE}" ] || { echo "could not resolve Element Web image"; exit 1; }
+# Pinned to the exact bundle the perl substitutions below were written against.
+# A chart-side image bump must not silently feed a different bundle to the
+# patcher — bump this tag together with re-derived match strings.
+IMAGE="${ELEMENT_WEB_IMAGE:-registry-1.docker.io/vectorim/element-web:v1.12.21}"
+
+DEPLOYED="$(kubectl -n "${NS}" get deploy "${DEPLOY}" -o jsonpath='{.spec.template.spec.containers[?(@.name=="element-web")].image}')"
+if [ "${DEPLOYED}" != "${IMAGE}" ]; then
+  echo "WARNING: chart deploys ${DEPLOYED} but the bundle patch targets ${IMAGE}" >&2
+fi
 
 echo "==> Patching Element Web verification reminders at source (${IMAGE})"
 
@@ -62,7 +69,7 @@ print(json.dumps({
                 "initContainers": [{
                     "name": "patch-element-web-app",
                     "image": image,
-                    "imagePullPolicy": "Always",
+                    "imagePullPolicy": "IfNotPresent",
                     "command": ["/bin/sh", "-c"],
                     "args": [script],
                     "volumeMounts": [{"name": volume, "mountPath": "/patched"}],
