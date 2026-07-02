@@ -1,0 +1,14 @@
+diff --git a/helmfile/apps/keycloak/keycloak.yaml.gotmpl b/helmfile/apps/keycloak/keycloak.yaml.gotmpl
+index 5e284cb..cdb5f70 100644
+--- a/helmfile/apps/keycloak/keycloak.yaml.gotmpl
++++ b/helmfile/apps/keycloak/keycloak.yaml.gotmpl
+@@ -203,6 +203,9 @@ keycloakConfigCli:
+         "quickLoginCheckMilliSeconds": 1000,
+         "maxDeltaTimeSeconds": 43200,
+         "failureFactor": 30,
++        "accessTokenLifespan": 1800,
++        "ssoSessionIdleTimeout": 604800,
++        "ssoSessionMaxLifespan": 2592000,
+         "clients": [
+           {
+             "clientId": "{{ .Values.authentication.client.grist.client_id }}",
