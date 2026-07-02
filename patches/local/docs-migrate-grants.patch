@@ -1,0 +1,30 @@
+diff --git a/helmfile/apps/docs/charts/docs/values.yaml b/helmfile/apps/docs/charts/docs/values.yaml
+index 98c0ec4..0d6b164 100644
+--- a/helmfile/apps/docs/charts/docs/values.yaml
++++ b/helmfile/apps/docs/charts/docs/values.yaml
+@@ -586,6 +586,25 @@ backend:
+             echo "Database is ready"
+ 
+             python manage.py migrate --no-input
++
++            # Open Suite: migrations run as the postgres superuser (see
++            # migrateDbCredentials), so the app role gets no privileges on
++            # the tables they create and login 500s. Grant them to the
++            # database owner (the app role) right after migrating.
++            python manage.py shell << 'GRANTS'
++            from django.db import connection
++            cur = connection.cursor()
++            cur.execute("SELECT pg_get_userbyid(datdba) FROM pg_database WHERE datname = current_database()")
++            role = cur.fetchone()[0]
++            for stmt in (
++                'GRANT ALL ON ALL TABLES IN SCHEMA public TO "{r}"',
++                'GRANT ALL ON ALL SEQUENCES IN SCHEMA public TO "{r}"',
++                'ALTER DEFAULT PRIVILEGES IN SCHEMA public GRANT ALL ON TABLES TO "{r}"',
++                'ALTER DEFAULT PRIVILEGES IN SCHEMA public GRANT ALL ON SEQUENCES TO "{r}"',
++            ):
++                cur.execute(stmt.format(r=role))
++            print("granted table/sequence privileges to", role)
++            GRANTS
+         restartPolicy: OnFailure
+       - name: createSuperUser
+         annotations:

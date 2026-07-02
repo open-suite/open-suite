@@ -1,0 +1,26 @@
+diff --git a/helmfile/apps/docs/values.yaml.gotmpl b/helmfile/apps/docs/values.yaml.gotmpl
+index ce4df2c..8cb3003 100644
+--- a/helmfile/apps/docs/values.yaml.gotmpl
++++ b/helmfile/apps/docs/values.yaml.gotmpl
+@@ -199,7 +199,7 @@ backend:
+     THEME_CUSTOMIZATION_CACHE_TIMEOUT: "86400"
+     THEME_CUSTOMIZATION_FILE_PATH: ""
+     USER_OIDC_ESSENTIAL_CLAIMS: ""
+-    Y_PROVIDER_API_BASE_URL: "http://docs-y-provider:443/api/"
++    Y_PROVIDER_API_BASE_URL: "http://docs-y-provider:80/api/"
+     Y_PROVIDER_API_KEY: {{ .Values.application.docs.yProvider.key | quote }}
+   themeCustomization:
+     enabled: true
+@@ -433,6 +433,12 @@ docspec:
+     hpa: {{ .Values.autoscaling.horizontal.docs.docspec | toYaml | nindent 6 }}
+ 
+ yProvider:
++  # Open Suite: serve the plain-HTTP backend (container port 4444) on service
++  # port 80 instead of 443 — Traefik assumes a :443 backend speaks TLS and
++  # realtime collaboration 500s.
++  service:
++    ports:
++      http: 80
+   image:
+     registry: {{(coalesce .Values.container.docs.registry .Values.container.default.registry) | quote }}
+     repository: {{ .Values.container.docs.yProvider.repository | quote }}
