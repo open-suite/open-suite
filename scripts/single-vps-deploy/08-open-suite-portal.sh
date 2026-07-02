@@ -62,9 +62,14 @@ kubectl -n mb-bureaublad patch deploy bureaublad-frontend --type=json -p='[
   {"op":"replace","path":"/spec/template/spec/containers/0/image","value":"open-suite/portal-frontend:local"},
   {"op":"replace","path":"/spec/template/spec/containers/0/imagePullPolicy","value":"Never"}]'
 
-echo "==> [6/7] Installing the Nextcloud Calendar app"
-kubectl -n mb-nextcloud exec deploy/nextcloud -c nextcloud -- \
-  sh -c "cd /var/www/html && (php occ app:install calendar || php occ app:enable calendar)"
+echo "==> [6/7] Installing the Nextcloud apps (calendar, deck, contacts)"
+# deck backs the "Projects" claim on the landing page; contacts backs the
+# people/invite flows. install fails if already installed, then enable is
+# the no-op-safe fallback.
+for app in calendar deck contacts; do
+  kubectl -n mb-nextcloud exec deploy/nextcloud -c nextcloud -- \
+    sh -c "cd /var/www/html && (php occ app:install $app || php occ app:enable $app)"
+done
 
 echo "==> [7/7] Wiring the portal calendar to Nextcloud CalDAV"
 kubectl -n mb-bureaublad set env deploy/bureaublad-backend \
