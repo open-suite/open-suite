@@ -15,8 +15,12 @@ fi
 DEMO_MODE="$(cat /etc/mijnbureau/demo-mode 2>/dev/null || printf false)"
 DEMO_USERNAME="$(cat /etc/mijnbureau/demo-username 2>/dev/null || printf johndoe)"
 DEMO_PASSWORD="$(cat /etc/mijnbureau/demo-password 2>/dev/null || printf myStrongPassword123)"
-DEMO_ADMIN_USERNAME="$(cat /etc/mijnbureau/demo-admin-username 2>/dev/null || printf admin)"
+DEMO_ADMIN_USERNAME="$(cat /etc/mijnbureau/demo-admin-username 2>/dev/null || printf demoadmin)"
 DEMO_ADMIN_PASSWORD="$(cat /etc/mijnbureau/demo-admin-password 2>/dev/null || true)"
+# Admin credentials appear on the login page only when the operator explicitly
+# set OPEN_SUITE_DEMO_ADMIN_PASSWORD at deploy time (01-deploy.sh sets this
+# marker). A generated password is never rendered into page content.
+DEMO_ADMIN_SHOW="$(cat /etc/mijnbureau/demo-admin-show 2>/dev/null || printf false)"
 
 export KUBECONFIG=/etc/rancher/k3s/k3s.yaml
 
@@ -31,8 +35,12 @@ esac
 
 USER_JS="$(printf '%s' "${DEMO_USERNAME}" | json_string)"
 PASS_JS="$(printf '%s' "${DEMO_PASSWORD}" | json_string)"
-ADMIN_USER_JS="$(printf '%s' "${DEMO_ADMIN_USERNAME}" | json_string)"
-ADMIN_PASS_JS="$(printf '%s' "${DEMO_ADMIN_PASSWORD}" | json_string)"
+ADMIN_USER_JS='""'
+ADMIN_PASS_JS='""'
+if [ "${DEMO_ADMIN_SHOW}" = "true" ]; then
+  ADMIN_USER_JS="$(printf '%s' "${DEMO_ADMIN_USERNAME}" | json_string)"
+  ADMIN_PASS_JS="$(printf '%s' "${DEMO_ADMIN_PASSWORD}" | json_string)"
+fi
 
 echo "==> Installing Open Suite Keycloak login theme"
 kubectl -n mb-keycloak create configmap opensuite-keycloak-theme \
@@ -279,5 +287,29 @@ PW=$(cat "$KC_BOOTSTRAP_ADMIN_PASSWORD_FILE")
   -s "displayNameHtml=<b>Open Suite</b>" \
   -s "loginTheme=opensuite"
 '
+
+if [ "${DEMO_ENABLED_JS}" = "true" ] && [ -n "${DEMO_ADMIN_PASSWORD}" ]; then
+  echo "==> Ensuring dedicated demo admin account '${DEMO_ADMIN_USERNAME}' exists"
+  # Password goes over stdin so it never appears in argv on the host side.
+  printf '%s' "${DEMO_ADMIN_PASSWORD}" | \
+    kubectl -n mb-keycloak exec -i keycloak-keycloak-0 -c keycloak -- sh -c '
+set -e
+DEMO_ADMIN_USERNAME="$1"
+DEMO_ADMIN_PASSWORD="$(cat)"
+KC=/opt/bitnami/keycloak/bin/kcadm.sh
+CFG=/tmp/kc.config
+PW=$(cat "$KC_BOOTSTRAP_ADMIN_PASSWORD_FILE")
+"$KC" config credentials --config "$CFG" --server http://localhost:8080/ --realm master --user admin --password "$PW" >/dev/null
+if ! "$KC" get users --config "$CFG" -r master -q "username=${DEMO_ADMIN_USERNAME}" -q exact=true --fields username \
+    | grep -q "\"${DEMO_ADMIN_USERNAME}\""; then
+  "$KC" create users --config "$CFG" -r master \
+    -s "username=${DEMO_ADMIN_USERNAME}" -s enabled=true >/dev/null
+fi
+"$KC" add-roles --config "$CFG" -r master \
+  --uusername "${DEMO_ADMIN_USERNAME}" --rolename admin
+"$KC" set-password --config "$CFG" -r master \
+  --username "${DEMO_ADMIN_USERNAME}" --new-password "${DEMO_ADMIN_PASSWORD}"
+' sh "${DEMO_ADMIN_USERNAME}"
+fi
 
 echo "==> Open Suite Keycloak login theme enabled for https://id.${DOMAIN}"

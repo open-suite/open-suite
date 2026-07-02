@@ -13,8 +13,22 @@ MASTER_PASSWORD="${3:?Usage: $0 <domain> <email> <master-password>}"
 OPEN_SUITE_DEMO_MODE="${OPEN_SUITE_DEMO_MODE:-false}"
 OPEN_SUITE_DEMO_USERNAME="${OPEN_SUITE_DEMO_USERNAME:-johndoe}"
 OPEN_SUITE_DEMO_PASSWORD="${OPEN_SUITE_DEMO_PASSWORD:-myStrongPassword123}"
-OPEN_SUITE_DEMO_ADMIN_USERNAME="${OPEN_SUITE_DEMO_ADMIN_USERNAME:-admin}"
-OPEN_SUITE_DEMO_ADMIN_PASSWORD="${OPEN_SUITE_DEMO_ADMIN_PASSWORD:-${MASTER_PASSWORD}}"
+OPEN_SUITE_DEMO_ADMIN_USERNAME="${OPEN_SUITE_DEMO_ADMIN_USERNAME:-demoadmin}"
+# The demo admin password never defaults to the master password. Explicitly set
+# → persisted and shown on the login-page credential panel. Unset → generated
+# (kept across re-runs) and never shown; read it from
+# /etc/mijnbureau/demo-admin-password on the box.
+OPEN_SUITE_DEMO_ADMIN_SHOW=false
+if [ -n "${OPEN_SUITE_DEMO_ADMIN_PASSWORD:-}" ]; then
+  OPEN_SUITE_DEMO_ADMIN_SHOW=true
+elif [ -s /etc/mijnbureau/demo-admin-password ] \
+  && [ "$(cat /etc/mijnbureau/demo-admin-show 2>/dev/null)" = "false" ]; then
+  # Reuse a previously generated password — but never one persisted by an older
+  # deploy (no demo-admin-show marker), which may be the master password.
+  OPEN_SUITE_DEMO_ADMIN_PASSWORD="$(cat /etc/mijnbureau/demo-admin-password)"
+else
+  OPEN_SUITE_DEMO_ADMIN_PASSWORD="$(head -c 32 /dev/urandom | base64 | tr -dc 'A-Za-z0-9' | head -c 24)"
+fi
 
 # Persist the domain for the later scripts (02-networking.sh, 03-...).
 mkdir -p /etc/mijnbureau
@@ -23,7 +37,9 @@ printf '%s' "${OPEN_SUITE_DEMO_MODE}" > /etc/mijnbureau/demo-mode
 printf '%s' "${OPEN_SUITE_DEMO_USERNAME}" > /etc/mijnbureau/demo-username
 printf '%s' "${OPEN_SUITE_DEMO_PASSWORD}" > /etc/mijnbureau/demo-password
 printf '%s' "${OPEN_SUITE_DEMO_ADMIN_USERNAME}" > /etc/mijnbureau/demo-admin-username
-printf '%s' "${OPEN_SUITE_DEMO_ADMIN_PASSWORD}" > /etc/mijnbureau/demo-admin-password
+(umask 077; printf '%s' "${OPEN_SUITE_DEMO_ADMIN_PASSWORD}" > /etc/mijnbureau/demo-admin-password)
+chmod 600 /etc/mijnbureau/demo-admin-password
+printf '%s' "${OPEN_SUITE_DEMO_ADMIN_SHOW}" > /etc/mijnbureau/demo-admin-show
 
 HELMFILE_V=1.1.7
 
