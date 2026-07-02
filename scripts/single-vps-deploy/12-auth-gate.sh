@@ -185,6 +185,17 @@ spec:
     - ports:
         - port: 443
           protocol: TCP
+    # k3s Traefik listens on 8443, not 443 — this is the path to id.${DOMAIN}
+    # (token, userinfo, JWKS), same as 02-networking.sh grants the app
+    # namespaces. Without it the gate only works via the namespace-wide
+    # allow-egress-traefik policy.
+    - ports:
+        - port: 8443
+          protocol: TCP
+      to:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: kube-system
 ---
 apiVersion: networking.k8s.io/v1
 kind: Ingress

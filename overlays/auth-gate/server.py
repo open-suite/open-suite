@@ -17,6 +17,9 @@ import urllib.request
 from http import HTTPStatus
 from http.cookies import SimpleCookie
 
+import jwt
+from jwt import PyJWKClient
+
 
 DOMAIN = os.environ["OPEN_SUITE_DOMAIN"]
 AUTH_HOST = os.environ.get("OPEN_SUITE_AUTH_HOST", f"auth.{DOMAIN}")
@@ -34,8 +37,31 @@ AUTH_ENDPOINT = f"{ISSUER}/protocol/openid-connect/auth"
 TOKEN_ENDPOINT = f"{ISSUER}/protocol/openid-connect/token"
 USERINFO_ENDPOINT = f"{ISSUER}/protocol/openid-connect/userinfo"
 END_SESSION_ENDPOINT = f"{ISSUER}/protocol/openid-connect/logout"
+JWKS_ENDPOINT = f"{ISSUER}/protocol/openid-connect/certs"
 
 SESSIONS: dict[str, dict[str, object]] = {}
+
+# Keys are cached ~10 min so a fresh JWKS fetch is not on every request's path.
+JWKS_CLIENT = PyJWKClient(JWKS_ENDPOINT, cache_keys=True, lifespan=600, timeout=10)
+
+
+def valid_bearer(token: str) -> dict[str, object] | None:
+    """Return verified claims for a realm-issued access token, else None.
+
+    Signature is checked against the realm JWKS plus iss and exp. aud is not
+    checked: callers hold tokens minted for a mix of realm clients.
+    """
+    try:
+        key = JWKS_CLIENT.get_signing_key_from_jwt(token).key
+        return jwt.decode(
+            token,
+            key,
+            algorithms=["RS256", "RS384", "RS512", "ES256", "ES384", "ES512"],
+            issuer=ISSUER,
+            options={"verify_aud": False, "require": ["exp", "iss"]},
+        )
+    except Exception:
+        return None
 
 
 def b64url(data: bytes) -> str:
@@ -99,6 +125,19 @@ def request_url(handler: http.server.BaseHTTPRequestHandler) -> str:
     host = handler.headers.get("X-Forwarded-Host") or handler.headers.get("Host", "")
     uri = handler.headers.get("X-Forwarded-Uri") or handler.path
     return f"{proto}://{host}{uri}"
+
+
+def allowed_origin(origin: str | None) -> str | None:
+    """Return the Origin if it is https on this domain or a subdomain, else None."""
+    if not origin:
+        return None
+    parsed = urllib.parse.urlparse(origin)
+    if parsed.scheme != "https" or parsed.netloc != parsed.hostname:
+        return None
+    host = parsed.hostname or ""
+    if host == DOMAIN or host.endswith(f".{DOMAIN}"):
+        return origin
+    return None
 
 
 def safe_redirect_target(raw: str | None) -> str:
@@ -211,15 +250,18 @@ class Handler(http.server.BaseHTTPRequestHandler):
         self.end_headers()
 
     def send_preflight(self) -> None:
-        self.send_empty(
-            HTTPStatus.NO_CONTENT,
-            {
-                "Access-Control-Allow-Origin": self.headers.get("Origin", "*"),
-                "Access-Control-Allow-Methods": self.headers.get("Access-Control-Request-Method", "GET, HEAD, POST, PUT, DELETE, OPTIONS"),
-                "Access-Control-Allow-Headers": self.headers.get("Access-Control-Request-Headers", "Authorization, Content-Type"),
-                "Access-Control-Max-Age": "600",
-            },
-        )
+        origin = allowed_origin(self.headers.get("Origin"))
+        headers: dict[str, str] = {"Vary": "Origin"}
+        if origin:
+            headers.update(
+                {
+                    "Access-Control-Allow-Origin": origin,
+                    "Access-Control-Allow-Methods": self.headers.get("Access-Control-Request-Method", "GET, HEAD, POST, PUT, DELETE, OPTIONS"),
+                    "Access-Control-Allow-Headers": self.headers.get("Access-Control-Request-Headers", "Authorization, Content-Type"),
+                    "Access-Control-Max-Age": "600",
+                }
+            )
+        self.send_empty(HTTPStatus.NO_CONTENT, headers)
 
     def redirect(self, location: str, headers: dict[str, str] | None = None) -> None:
         self.send_response(HTTPStatus.FOUND)
@@ -267,10 +309,21 @@ class Handler(http.server.BaseHTTPRequestHandler):
             self.send_preflight()
             return
 
+        # Service-to-service API calls behind gated ingresses pass through on a
+        # valid realm token only; anything else falls into the normal gate flow.
         authorization = self.headers.get("Authorization", "")
         if authorization.lower().startswith("bearer "):
-            self.send_empty(HTTPStatus.NO_CONTENT)
-            return
+            claims = valid_bearer(authorization[7:].strip())
+            if claims:
+                self.send_empty(
+                    HTTPStatus.NO_CONTENT,
+                    {
+                        "X-Open-Suite-User": str(claims.get("sub", "")),
+                        "X-Open-Suite-Email": str(claims.get("email", "")),
+                        "X-Open-Suite-Name": str(claims.get("name") or claims.get("preferred_username", "")),
+                    },
+                )
+                return
 
         cookies = parse_cookies(self.headers.get("Cookie"))
         auth_cookie = cookies.get(COOKIE_NAME).value if cookies.get(COOKIE_NAME) else None
