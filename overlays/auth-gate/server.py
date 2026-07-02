@@ -1,0 +1,346 @@
+#!/usr/bin/env python3
+"""Open Suite edge auth gate for Traefik forwardAuth."""
+
+from __future__ import annotations
+
+import base64
+import hashlib
+import hmac
+import http.server
+import json
+import os
+import secrets
+import time
+import urllib.error
+import urllib.parse
+import urllib.request
+from http import HTTPStatus
+from http.cookies import SimpleCookie
+
+
+DOMAIN = os.environ["OPEN_SUITE_DOMAIN"]
+AUTH_HOST = os.environ.get("OPEN_SUITE_AUTH_HOST", f"auth.{DOMAIN}")
+ISSUER = os.environ["OIDC_ISSUER"].rstrip("/")
+CLIENT_ID = os.environ.get("OIDC_CLIENT_ID", "opensuite-auth-gate")
+CLIENT_SECRET = os.environ["OIDC_CLIENT_SECRET"]
+COOKIE_SECRET = os.environ["COOKIE_SECRET"].encode("utf-8")
+COOKIE_NAME = os.environ.get("COOKIE_NAME", "opensuite_auth")
+STATE_COOKIE_NAME = os.environ.get("STATE_COOKIE_NAME", "opensuite_auth_state")
+COOKIE_DOMAIN = os.environ.get("COOKIE_DOMAIN", f".{DOMAIN}")
+SESSION_TTL = int(os.environ.get("SESSION_TTL_SECONDS", "28800"))
+STATE_TTL = int(os.environ.get("STATE_TTL_SECONDS", "600"))
+
+AUTH_ENDPOINT = f"{ISSUER}/protocol/openid-connect/auth"
+TOKEN_ENDPOINT = f"{ISSUER}/protocol/openid-connect/token"
+USERINFO_ENDPOINT = f"{ISSUER}/protocol/openid-connect/userinfo"
+END_SESSION_ENDPOINT = f"{ISSUER}/protocol/openid-connect/logout"
+
+SESSIONS: dict[str, dict[str, object]] = {}
+
+
+def b64url(data: bytes) -> str:
+    return base64.urlsafe_b64encode(data).rstrip(b"=").decode("ascii")
+
+
+def sign(value: str) -> str:
+    sig = hmac.new(COOKIE_SECRET, value.encode("utf-8"), hashlib.sha256).digest()
+    return f"{value}.{b64url(sig)}"
+
+
+def unsign(signed: str) -> str | None:
+    try:
+        value, sig = signed.rsplit(".", 1)
+    except ValueError:
+        return None
+    expected = sign(value).rsplit(".", 1)[1]
+    if not hmac.compare_digest(sig, expected):
+        return None
+    return value
+
+
+def parse_cookies(header: str | None) -> SimpleCookie:
+    cookie = SimpleCookie()
+    if header:
+        cookie.load(header)
+    return cookie
+
+
+def cookie_header(name: str, value: str, max_age: int, path: str = "/") -> str:
+    cookie = SimpleCookie()
+    cookie[name] = value
+    cookie[name]["Path"] = path
+    cookie[name]["Domain"] = COOKIE_DOMAIN
+    cookie[name]["Max-Age"] = str(max_age)
+    cookie[name]["HttpOnly"] = True
+    cookie[name]["Secure"] = True
+    cookie[name]["SameSite"] = "Lax"
+    return cookie.output(header="").strip()
+
+
+def clear_cookie_header(name: str) -> str:
+    return cookie_header(name, "", 0)
+
+
+def json_b64(payload: dict[str, object]) -> str:
+    encoded = json.dumps(payload, separators=(",", ":")).encode("utf-8")
+    return b64url(encoded)
+
+
+def json_unb64(value: str) -> dict[str, object] | None:
+    try:
+        padded = value + "=" * (-len(value) % 4)
+        return json.loads(base64.urlsafe_b64decode(padded.encode("ascii")))
+    except Exception:
+        return None
+
+
+def request_url(handler: http.server.BaseHTTPRequestHandler) -> str:
+    proto = handler.headers.get("X-Forwarded-Proto", "https")
+    host = handler.headers.get("X-Forwarded-Host") or handler.headers.get("Host", "")
+    uri = handler.headers.get("X-Forwarded-Uri") or handler.path
+    return f"{proto}://{host}{uri}"
+
+
+def safe_redirect_target(raw: str | None) -> str:
+    fallback = f"https://bridge.{DOMAIN}/"
+    if not raw:
+        return fallback
+    parsed = urllib.parse.urlparse(raw)
+    same_site = parsed.netloc == DOMAIN or parsed.netloc.endswith(f".{DOMAIN}")
+    if parsed.scheme != "https" or not same_site:
+        return fallback
+    return raw
+
+
+def make_state(rd: str, verifier: str) -> tuple[str, str]:
+    state = secrets.token_urlsafe(24)
+    payload = {
+        "state": state,
+        "rd": rd,
+        "verifier": verifier,
+        "exp": int(time.time()) + STATE_TTL,
+    }
+    return state, sign(json_b64(payload))
+
+
+def read_state(cookie_value: str | None, state: str | None) -> dict[str, object] | None:
+    if not cookie_value or not state:
+        return None
+    unsigned = unsign(cookie_value)
+    if not unsigned:
+        return None
+    payload = json_unb64(unsigned)
+    if not payload:
+        return None
+    if payload.get("state") != state:
+        return None
+    if int(payload.get("exp", 0)) < int(time.time()):
+        return None
+    return payload
+
+
+def code_challenge(verifier: str) -> str:
+    return b64url(hashlib.sha256(verifier.encode("ascii")).digest())
+
+
+def exchange_code(code: str, verifier: str) -> dict[str, object]:
+    body = urllib.parse.urlencode(
+        {
+            "grant_type": "authorization_code",
+            "client_id": CLIENT_ID,
+            "client_secret": CLIENT_SECRET,
+            "code": code,
+            "redirect_uri": f"https://{AUTH_HOST}/callback",
+            "code_verifier": verifier,
+        }
+    ).encode("utf-8")
+    req = urllib.request.Request(
+        TOKEN_ENDPOINT,
+        data=body,
+        headers={"Content-Type": "application/x-www-form-urlencoded"},
+        method="POST",
+    )
+    with urllib.request.urlopen(req, timeout=10) as res:
+        return json.loads(res.read().decode("utf-8"))
+
+
+def fetch_userinfo(access_token: str) -> dict[str, object]:
+    req = urllib.request.Request(USERINFO_ENDPOINT, headers={"Authorization": f"Bearer {access_token}"})
+    with urllib.request.urlopen(req, timeout=10) as res:
+        return json.loads(res.read().decode("utf-8"))
+
+
+def make_session(tokens: dict[str, object], user: dict[str, object]) -> str:
+    sid = secrets.token_urlsafe(32)
+    now = int(time.time())
+    ttl = min(SESSION_TTL, int(tokens.get("expires_in", SESSION_TTL)))
+    SESSIONS[sid] = {
+        "sub": user.get("sub", ""),
+        "email": user.get("email", ""),
+        "name": user.get("name") or user.get("preferred_username", ""),
+        "exp": now + ttl,
+    }
+    return sign(sid)
+
+
+def valid_session(cookie_value: str | None) -> dict[str, object] | None:
+    if not cookie_value:
+        return None
+    sid = unsign(cookie_value)
+    if not sid:
+        return None
+    session = SESSIONS.get(sid)
+    if not session:
+        return None
+    if int(session.get("exp", 0)) <= int(time.time()):
+        SESSIONS.pop(sid, None)
+        return None
+    return session
+
+
+class Handler(http.server.BaseHTTPRequestHandler):
+    server_version = "opensuite-auth-gate/1.0"
+
+    def log_message(self, fmt: str, *args: object) -> None:
+        print(f"{self.address_string()} - {fmt % args}", flush=True)
+
+    def send_empty(self, status: int, headers: dict[str, str] | None = None) -> None:
+        self.send_response(status)
+        for key, value in (headers or {}).items():
+            self.send_header(key, value)
+        self.end_headers()
+
+    def send_preflight(self) -> None:
+        self.send_empty(
+            HTTPStatus.NO_CONTENT,
+            {
+                "Access-Control-Allow-Origin": self.headers.get("Origin", "*"),
+                "Access-Control-Allow-Methods": self.headers.get("Access-Control-Request-Method", "GET, HEAD, POST, PUT, DELETE, OPTIONS"),
+                "Access-Control-Allow-Headers": self.headers.get("Access-Control-Request-Headers", "Authorization, Content-Type"),
+                "Access-Control-Max-Age": "600",
+            },
+        )
+
+    def redirect(self, location: str, headers: dict[str, str] | None = None) -> None:
+        self.send_response(HTTPStatus.FOUND)
+        self.send_header("Location", location)
+        for key, value in (headers or {}).items():
+            self.send_header(key, value)
+        self.end_headers()
+
+    def do_GET(self) -> None:  # noqa: N802
+        parsed = urllib.parse.urlparse(self.path)
+        params = urllib.parse.parse_qs(parsed.query)
+
+        if parsed.path == "/healthz":
+            self.send_empty(HTTPStatus.OK)
+            return
+        if parsed.path == "/auth":
+            self.handle_auth()
+            return
+        if parsed.path == "/login":
+            self.handle_login(params)
+            return
+        if parsed.path == "/callback":
+            self.handle_callback(params)
+            return
+        if parsed.path == "/logout":
+            self.handle_logout(params)
+            return
+        self.send_empty(HTTPStatus.NOT_FOUND)
+
+    def do_HEAD(self) -> None:  # noqa: N802
+        parsed = urllib.parse.urlparse(self.path)
+        if parsed.path == "/healthz":
+            self.send_empty(HTTPStatus.OK)
+            return
+        if parsed.path == "/auth":
+            self.handle_auth()
+            return
+        self.send_empty(HTTPStatus.NOT_FOUND)
+
+    def do_OPTIONS(self) -> None:  # noqa: N802
+        self.send_preflight()
+
+    def handle_auth(self) -> None:
+        if self.headers.get("Access-Control-Request-Method"):
+            self.send_preflight()
+            return
+
+        authorization = self.headers.get("Authorization", "")
+        if authorization.lower().startswith("bearer "):
+            self.send_empty(HTTPStatus.NO_CONTENT)
+            return
+
+        cookies = parse_cookies(self.headers.get("Cookie"))
+        auth_cookie = cookies.get(COOKIE_NAME).value if cookies.get(COOKIE_NAME) else None
+        session = valid_session(auth_cookie)
+        if session:
+            self.send_empty(
+                HTTPStatus.NO_CONTENT,
+                {
+                    "X-Open-Suite-User": str(session.get("sub", "")),
+                    "X-Open-Suite-Email": str(session.get("email", "")),
+                    "X-Open-Suite-Name": str(session.get("name", "")),
+                },
+            )
+            return
+
+        rd = urllib.parse.quote(request_url(self), safe="")
+        self.redirect(f"https://{AUTH_HOST}/login?rd={rd}")
+
+    def handle_login(self, params: dict[str, list[str]]) -> None:
+        rd = safe_redirect_target(params.get("rd", [""])[0])
+        verifier = secrets.token_urlsafe(64)
+        state, state_cookie = make_state(rd, verifier)
+        query = urllib.parse.urlencode(
+            {
+                "response_type": "code",
+                "client_id": CLIENT_ID,
+                "redirect_uri": f"https://{AUTH_HOST}/callback",
+                "scope": "openid email profile",
+                "state": state,
+                "code_challenge": code_challenge(verifier),
+                "code_challenge_method": "S256",
+            }
+        )
+        self.redirect(f"{AUTH_ENDPOINT}?{query}", {"Set-Cookie": cookie_header(STATE_COOKIE_NAME, state_cookie, STATE_TTL)})
+
+    def handle_callback(self, params: dict[str, list[str]]) -> None:
+        code = params.get("code", [""])[0]
+        state = params.get("state", [""])[0]
+        cookies = parse_cookies(self.headers.get("Cookie"))
+        state_cookie = cookies.get(STATE_COOKIE_NAME).value if cookies.get(STATE_COOKIE_NAME) else None
+        state_payload = read_state(state_cookie, state)
+        if not code or not state_payload:
+            self.redirect(f"https://{AUTH_HOST}/login", {"Set-Cookie": clear_cookie_header(STATE_COOKIE_NAME)})
+            return
+
+        try:
+            tokens = exchange_code(code, str(state_payload["verifier"]))
+            user = fetch_userinfo(str(tokens["access_token"]))
+            session_cookie = make_session(tokens, user)
+        except (KeyError, urllib.error.URLError, TimeoutError, json.JSONDecodeError):
+            self.redirect(f"https://{AUTH_HOST}/login", {"Set-Cookie": clear_cookie_header(STATE_COOKIE_NAME)})
+            return
+
+        self.send_response(HTTPStatus.FOUND)
+        self.send_header("Location", safe_redirect_target(str(state_payload.get("rd", ""))))
+        self.send_header("Set-Cookie", clear_cookie_header(STATE_COOKIE_NAME))
+        self.send_header("Set-Cookie", cookie_header(COOKIE_NAME, session_cookie, SESSION_TTL))
+        self.end_headers()
+
+    def handle_logout(self, params: dict[str, list[str]]) -> None:
+        cookies = parse_cookies(self.headers.get("Cookie"))
+        auth_cookie = cookies.get(COOKIE_NAME).value if cookies.get(COOKIE_NAME) else None
+        sid = unsign(auth_cookie) if auth_cookie else None
+        if sid:
+            SESSIONS.pop(sid, None)
+        rd = safe_redirect_target(params.get("rd", [""])[0])
+        logout_query = urllib.parse.urlencode({"client_id": CLIENT_ID, "post_logout_redirect_uri": rd})
+        self.redirect(f"{END_SESSION_ENDPOINT}?{logout_query}", {"Set-Cookie": clear_cookie_header(COOKIE_NAME)})
+
+
+if __name__ == "__main__":
+    port = int(os.environ.get("PORT", "8080"))
+    http.server.ThreadingHTTPServer(("0.0.0.0", port), Handler).serve_forever()
