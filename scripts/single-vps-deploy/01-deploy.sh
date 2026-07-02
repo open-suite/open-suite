@@ -70,23 +70,26 @@ spec:
 YAML
 
 echo "==> [3/4] Cloning repo and writing config"
+# Single-source pin for MinBZK/mijn-bureau-infra: the one commit the local
+# patches are known to apply to. Bump UPSTREAM_REF deliberately, re-verifying
+# the patch series, never implicitly.
+REPO_ROOT="$(cd "$(dirname "$0")/../.." && pwd)"
+UPSTREAM_REF="$(cat "${REPO_ROOT}/UPSTREAM_REF")"
 cd /root
-# Clone-or-reset: re-runs must start from a pristine upstream tree, never
-# stack patches on an already-patched checkout.
-if [ -d mijn-bureau-infra/.git ]; then
-  git -C mijn-bureau-infra fetch origin
-  git -C mijn-bureau-infra reset --hard origin/HEAD
-  git -C mijn-bureau-infra clean -fd
-else
+# Clone-or-reset: re-runs must start from a pristine upstream tree at the
+# pinned ref, never stack patches on an already-patched checkout.
+if [ ! -d mijn-bureau-infra/.git ]; then
   git clone https://github.com/MinBZK/mijn-bureau-infra
 fi
+git -C mijn-bureau-infra fetch origin
+git -C mijn-bureau-infra reset --hard "${UPSTREAM_REF}"
+git -C mijn-bureau-infra clean -fd
 cd mijn-bureau-infra
 
 # Apply our local patches over the vendored MinBZK infra (Open Suite branding,
 # etc.). Check them all against the clean tree first so a drifted upstream
 # fails fast with nothing half-applied; --3way turns context drift into a
 # visible conflict instead of a refused hunk.
-REPO_ROOT="$(cd "$(dirname "$0")/../.." && pwd)"
 for p in "${REPO_ROOT}"/patches/local/*.patch; do
   [ -e "$p" ] || continue
   if ! git apply --3way --check "$p"; then
