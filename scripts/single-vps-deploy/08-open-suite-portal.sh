@@ -6,14 +6,15 @@
 #   - installs the Nextcloud Calendar app
 #   - wires the portal's calendar to Nextcloud CalDAV
 #
-# The portal source is our detached fork Keep-Office/open-suite-portal, which
+# The portal source is our detached fork open-suite/open-suite-portal, which
 # already carries the changes that used to live in overlays/bureaublad.
 #
 # Idempotent and safe to re-run. Reads the domain from /etc/mijnbureau/domain.
 set -euo pipefail
 
-PORTAL_REPO="${PORTAL_REPO:-https://github.com/Keep-Office/open-suite-portal}"
-PORTAL_REF="${PORTAL_REF:-main}"
+PORTAL_REPO="${PORTAL_REPO:-https://github.com/open-suite/open-suite-portal}"
+# Pinned SHA of open-suite-portal main (bump deliberately, not implicitly).
+PORTAL_REF="${PORTAL_REF:-67c6685dd4ed6095e2ae339354e1ef3ac0d12983}"
 # Base image for the backend: pinned upstream API so we only override the one
 # patched file and avoid lockfile drift from a full source build.
 BACKEND_BASE_IMAGE="${BACKEND_BASE_IMAGE:-ghcr.io/minbzk/bureaublad-api:v0.9.3}"
@@ -33,7 +34,10 @@ fi
 echo "==> [2/7] Fetching Open Suite portal source (${PORTAL_REPO}@${PORTAL_REF})"
 WORK="$(mktemp -d)"
 trap 'rm -rf "${WORK}"' EXIT
-git clone --depth 1 --branch "${PORTAL_REF}" "${PORTAL_REPO}" "${WORK}/portal"
+# Full clone + checkout: works for SHAs, tags, and branches alike (--branch
+# rejects SHAs, and GitHub refuses shallow fetches of bare commits).
+git clone "${PORTAL_REPO}" "${WORK}/portal"
+git -C "${WORK}/portal" checkout -q "${PORTAL_REF}"
 
 echo "==> [3/7] Building backend image (overlay on ${BACKEND_BASE_IMAGE} to avoid lockfile drift)"
 cat > "${WORK}/Dockerfile.backend" <<EOF
