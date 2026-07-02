@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # Usage: ./08-open-suite-portal.sh
-# Open Suite portal layer on top of the MinBZK base (scripts 01-07):
+# Open Suite portal layer on top of the MinBZK base (scripts 01-04):
 #   - builds our Open Suite portal backend (CalDAV fixes) and frontend
 #     (Open Suite branding + upcoming-events Calendar widget) from our fork
 #   - installs the Nextcloud Calendar app

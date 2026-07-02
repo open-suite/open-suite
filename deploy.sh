@@ -2,8 +2,10 @@
 # Usage: sudo ./deploy.sh <domain> <email> <master-password>
 #
 # Single happy-path deploy for open-suite on a fresh Ubuntu 24.04 VPS (k3s).
-# Runs the MinBZK base stack (scripts 01-07) then the open-suite layer (08):
-# patched portal + Nextcloud calendar wiring.
+# Runs the MinBZK base (01-04: helmfile + patches, networking, cert wait,
+# restarts, office cache) then the Open Suite layer (08-13: portal, header,
+# login theme, Element, auth gate, Meet). Gaps in the numbering are steps
+# made declarative and deleted (ticket 3.4). Final URL: https://bridge.DOMAIN
 #
 # Run this from a checkout of the open-suite repo on the target VPS, as root.
 # Every step is idempotent, so re-running is safe.
