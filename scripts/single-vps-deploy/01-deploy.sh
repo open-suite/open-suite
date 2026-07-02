@@ -131,6 +131,15 @@ global:
     enabled: true
     selfSigned: false
 
+autoscaling:
+  horizontal:
+    # Grist keeps upload state on the pod and has no session affinity, so a
+    # second replica breaks file imports ("Unknown upload"). Disable the HPA;
+    # the chart then pins the deployment to replicaCount (1). Same reasoning
+    # as upstream's collabora exception.
+    grist:
+      enabled: false
+
 cluster:
   routingMode: ingress
   ingress:
