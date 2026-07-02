@@ -6,12 +6,13 @@ set -euo pipefail
 
 export KUBECONFIG=/etc/rancher/k3s/k3s.yaml
 
-REPO_ROOT="$(cd "$(dirname "$0")/../.." && pwd)"
 DOMAIN="$(cat /etc/mijnbureau/domain)"
 AUTH_HOST="auth.${DOMAIN}"
 CLIENT_ID="opensuite-auth-gate"
 NAMESPACE="mb-bureaublad"
-IMAGE="open-suite/auth-gate:local"
+# Prebuilt in CI and pulled from GHCR (ticket 3.1). Override AUTH_GATE_IMAGE to
+# pin a specific tag/digest; the default tracks main.
+IMAGE="${AUTH_GATE_IMAGE:-ghcr.io/open-suite/auth-gate:main}"
 
 echo "==> [1/6] Ensuring auth-gate secrets"
 mkdir -p /etc/mijnbureau
@@ -64,9 +65,7 @@ CLIENT_UUID="$("$KC" get clients -r mijnbureau --config "$CFG" -q clientId="$CLI
 test -n "$CLIENT_UUID"
 SH
 
-echo "==> [3/6] Building auth-gate image"
-docker buildx build --load -t "${IMAGE}" "${REPO_ROOT}/overlays/auth-gate"
-docker save "${IMAGE}" | k3s ctr -n k8s.io images import -
+echo "==> [3/6] Using prebuilt auth-gate image ${IMAGE}"
 
 echo "==> [4/6] Applying auth-gate Kubernetes resources"
 kubectl -n "${NAMESPACE}" create secret generic opensuite-auth-gate \
@@ -97,7 +96,7 @@ spec:
       containers:
         - name: auth-gate
           image: ${IMAGE}
-          imagePullPolicy: Never
+          imagePullPolicy: Always
           ports:
             - name: http
               containerPort: 8080
