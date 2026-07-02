@@ -20,7 +20,7 @@ kubectl rollout status deploy/nextcloud -n mb-nextcloud --timeout=300s
 echo "==> Refreshing Collabora capabilities cache"
 # activate-config re-fetches /hosting/discovery + /hosting/capabilities and
 # rewrites the cache. Idempotent: running it again just re-fetches.
-kubectl exec -n mb-nextcloud deploy/nextcloud -- php occ richdocuments:activate-config
+kubectl exec -n mb-nextcloud deploy/nextcloud -c nextcloud -- php occ richdocuments:activate-config
 
 echo ""
 echo "Done. Office files (xlsx/docx/etc.) should now open in Nextcloud."
