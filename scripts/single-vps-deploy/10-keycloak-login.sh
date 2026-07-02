@@ -271,22 +271,9 @@ kubectl -n mb-keycloak patch sts keycloak-keycloak --type strategic -p '{
 kubectl -n mb-keycloak rollout restart sts/keycloak-keycloak
 kubectl -n mb-keycloak rollout status sts/keycloak-keycloak --timeout=240s
 
-echo "==> Enabling Open Suite login theme in Keycloak realms"
-kubectl -n mb-keycloak exec keycloak-keycloak-0 -c keycloak -- sh -c '
-set -e
-KC=/opt/bitnami/keycloak/bin/kcadm.sh
-CFG=/tmp/kc.config
-PW=$(cat "$KC_BOOTSTRAP_ADMIN_PASSWORD_FILE")
-"$KC" config credentials --config "$CFG" --server http://localhost:8080/ --realm master --user admin --password "$PW" >/dev/null
-"$KC" update realms/master --config "$CFG" \
-  -s "displayName=Open Suite Admin" \
-  -s "displayNameHtml=<b>Open Suite Admin</b>" \
-  -s "loginTheme=opensuite"
-"$KC" update realms/mijnbureau --config "$CFG" \
-  -s "displayName=Open Suite" \
-  -s "displayNameHtml=<b>Open Suite</b>" \
-  -s "loginTheme=opensuite"
-'
+# Realm displayName/displayNameHtml/loginTheme are owned declaratively by
+# patches/local/keycloak-realm-open-suite-branding.patch (config-cli import);
+# this script only ships the theme files and mounts them.
 
 if [ "${DEMO_ENABLED_JS}" = "true" ] && [ -n "${DEMO_ADMIN_PASSWORD}" ]; then
   echo "==> Ensuring dedicated demo admin account '${DEMO_ADMIN_USERNAME}' exists"

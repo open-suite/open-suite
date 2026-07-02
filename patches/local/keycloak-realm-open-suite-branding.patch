@@ -2,7 +2,17 @@ diff --git a/helmfile/apps/keycloak/keycloak.yaml.gotmpl b/helmfile/apps/keycloa
 index 5e284cb..4235c48 100644
 --- a/helmfile/apps/keycloak/keycloak.yaml.gotmpl
 +++ b/helmfile/apps/keycloak/keycloak.yaml.gotmpl
-@@ -183,8 +183,8 @@ keycloakConfigCli:
+@@ -176,6 +176,9 @@ keycloakConfigCli:
+     master.json: |
+       {
+         "realm" : "master",
++        "displayName": "Open Suite Admin",
++        "displayNameHtml": "<b>Open Suite Admin</b>",
++        "loginTheme": "opensuite",
+         "attributes": {
+           "frontendUrl": "https://{{ .Values.global.hostname.keycloak }}.{{ .Values.global.domain }}"
+         }
+@@ -183,8 +186,9 @@ keycloakConfigCli:
      mijnbureau.json: |
        {
          "realm" : "mijnbureau",
@@ -10,6 +20,7 @@ index 5e284cb..4235c48 100644
 -        "displayNameHtml": "<b>Mijn Bureau</b>",
 +        "displayName": "Open Suite",
 +        "displayNameHtml": "<b>Open Suite</b>",
++        "loginTheme": "opensuite",
          "defaultSignatureAlgorithm": "RS256",
          "enabled" : true,
          "revokeRefreshToken": true,
