@@ -8,7 +8,7 @@
 # upcoming; the chat room is only seeded once).
 #
 # Requires (env or the `demo-seed` secret in mb-bureaublad):
-#   DOMAIN     e.g. demo.opensuite.online
+#   DOMAIN     e.g. suite.example.com
 #   NC_LOGIN   Nextcloud login name for johndoe (the user_oidc hash)
 #   NC_PASS    a Nextcloud app password for that user
 # Matrix is seeded via the Synapse pod (no extra creds needed).
@@ -30,6 +30,44 @@ NC="https://nextcloud.${DOMAIN}/remote.php/dav"
 CAL="${NC}/calendars/${NC_LOGIN}/personal"
 FILES="${NC}/files/${NC_LOGIN}"
 
+# Direct-access grants are enabled on the meet/docs clients only for the
+# duration of the run (needed to mint johndoe tokens) and re-disabled on exit,
+# including on failure.
+set_direct_access() { # clientId true|false
+  kubectl -n mb-keycloak exec -i keycloak-keycloak-0 -c keycloak -- sh -s -- "$1" "$2" <<'SH' || true
+set -e
+CLIENT_ID="$1"; VALUE="$2"
+KC=/opt/bitnami/keycloak/bin/kcadm.sh; CFG=/tmp/kc.config
+PW=$(cat "$KC_BOOTSTRAP_ADMIN_PASSWORD_FILE")
+"$KC" config credentials --config "$CFG" --server http://localhost:8080/ --realm master --user admin --password "$PW" >/dev/null 2>&1
+ID=$("$KC" get clients -r mijnbureau --config "$CFG" -q clientId="$CLIENT_ID" --fields id 2>/dev/null | grep -oE "[0-9a-f-]{36}" | head -1)
+"$KC" update "clients/$ID" -r mijnbureau --config "$CFG" -s "directAccessGrantsEnabled=$VALUE" >/dev/null 2>&1
+SH
+}
+restore_direct_access() {
+  set_direct_access meet false
+  set_direct_access docs false
+}
+
+# The Synapse admin token minted for step 3 lives only for this run.
+SEED_ADMIN_TOKEN=""
+synapse_sql() { # SQL on stdin
+  local pw
+  pw=$(kubectl -n mb-element get secret element-cluster-rw -o jsonpath='{.data.password}' | base64 -d)
+  kubectl -n mb-element exec -i element-cluster-rw-0 -- \
+    env PGPASSWORD="${pw}" psql -qAt -h 127.0.0.1 -U synapse -d synapse
+}
+cleanup_matrix_token() {
+  [ -n "${SEED_ADMIN_TOKEN}" ] || return 0
+  printf "DELETE FROM access_tokens WHERE token = '%s';\n" "${SEED_ADMIN_TOKEN}" | \
+    synapse_sql >/dev/null 2>&1 || true
+}
+seed_cleanup() {
+  restore_direct_access
+  cleanup_matrix_token
+}
+trap seed_cleanup EXIT
+
 # Opinionation: Nextcloud is files + Collabora office only. La Suite Docs is the
 # single block editor, so disable Nextcloud Text — otherwise opening a file in
 # Nextcloud presents a second, competing notes editor. (Idempotent.)
@@ -42,13 +80,7 @@ echo "==> [1/3] Calendar — upcoming events (each with a Meet link)"
 # client) so we can create a room per event. Its URL goes in the event location,
 # which the portal surfaces as a "Join" button.
 MEET_CID=$(kubectl -n mb-keycloak get secret keycloak-keycloak-config-cli -o jsonpath="{.data.MB_CLIENT_SECRET_MEET}" | base64 -d)
-kubectl -n mb-keycloak exec keycloak-keycloak-0 -c keycloak -- sh -c '
-KC=/opt/bitnami/keycloak/bin/kcadm.sh; CFG=/tmp/kc.config
-PW=$(cat $KC_BOOTSTRAP_ADMIN_PASSWORD_FILE)
-$KC config credentials --config $CFG --server http://localhost:8080/ --realm master --user admin --password "$PW" >/dev/null 2>&1
-ID=$($KC get clients -r mijnbureau --config $CFG -q clientId=meet --fields id 2>/dev/null | grep -oE "[0-9a-f-]{36}" | head -1)
-$KC update clients/$ID -r mijnbureau --config $CFG -s directAccessGrantsEnabled=true >/dev/null 2>&1
-' || true
+set_direct_access meet true
 MEET_TOK=$(curl -fsS --max-time 20 -X POST "https://id.${DOMAIN}/realms/mijnbureau/protocol/openid-connect/token" \
   -d grant_type=password -d client_id=meet -d client_secret="${MEET_CID}" \
   -d username=johndoe -d password="${DEMO_PASS}" -d scope=openid \
@@ -110,13 +142,7 @@ echo "==> [2/3] Docs — La Suite documents"
 # La Suite Docs is OIDC-native; mint johndoe a token via Keycloak direct-access
 # grant on the docs client (ensure that grant is enabled first).
 DOCS_CID=$(kubectl -n mb-keycloak get secret keycloak-keycloak-config-cli -o jsonpath="{.data.MB_CLIENT_SECRET_DOCS}" | base64 -d)
-kubectl -n mb-keycloak exec keycloak-keycloak-0 -c keycloak -- sh -c '
-KC=/opt/bitnami/keycloak/bin/kcadm.sh; CFG=/tmp/kc.config
-PW=$(cat $KC_BOOTSTRAP_ADMIN_PASSWORD_FILE)
-$KC config credentials --config $CFG --server http://localhost:8080/ --realm master --user admin --password "$PW" >/dev/null 2>&1
-ID=$($KC get clients -r mijnbureau --config $CFG -q clientId=docs --fields id 2>/dev/null | grep -oE "[0-9a-f-]{36}" | head -1)
-$KC update clients/$ID -r mijnbureau --config $CFG -s directAccessGrantsEnabled=true >/dev/null 2>&1
-' || true
+set_direct_access docs true
 DTOK=$(curl -fsS --max-time 20 -X POST "https://id.${DOMAIN}/realms/mijnbureau/protocol/openid-connect/token" \
   -d grant_type=password -d client_id=docs -d client_secret="${DOCS_CID}" \
   -d username=johndoe -d password="${DEMO_PASS}" -d scope=openid \
@@ -141,21 +167,39 @@ fi
 
 echo "==> [3/3] Chat — Jane ↔ John direct message"
 SYN=$(kubectl -n mb-element get pods -o name | grep -i "synapse-" | grep -iv keygen | head -1)
-kubectl -n mb-element exec "${SYN}" -c synapse -- sh -c '
+# Mint a run-scoped Synapse admin token. Password login is disabled (OIDC-only
+# Synapse), so shared-secret registration is unusable; bootstrap a seedadmin
+# user + token straight in the DB instead. The token expires after an hour and
+# is deleted by the exit trap. The id offset keeps clear of Synapse's in-memory
+# id generator, which hands out ids from the max it saw at startup.
+SEED_ADMIN_TOKEN="syt_seed_$(openssl rand -hex 16)"
+synapse_sql >/dev/null <<SQL
+INSERT INTO users (name, creation_ts, admin)
+VALUES ('@seedadmin:matrix.${DOMAIN}', extract(epoch from now())::bigint, 1)
+ON CONFLICT (name) DO UPDATE SET admin = 1;
+INSERT INTO access_tokens (id, user_id, device_id, token, valid_until_ms)
+VALUES ((SELECT COALESCE(MAX(id), 0) + 100000 FROM access_tokens),
+        '@seedadmin:matrix.${DOMAIN}', 'seed', '${SEED_ADMIN_TOKEN}',
+        (extract(epoch from now())::bigint + 3600) * 1000);
+SQL
+kubectl -n mb-element exec -i "${SYN}" -c synapse -- sh -s -- "${DOMAIN}" "${SEED_ADMIN_TOKEN}" <<'SH'
 set -e
+DOMAIN="$1"
 B=http://localhost:8448
-SERVER=matrix.demo.opensuite.online
+SERVER=matrix.$DOMAIN
 JOHN=@johndoe:$SERVER; JANE=@janedoe:$SERVER
-AT="Authorization: Bearer syt_seedadmintokenjohn0001"
+AAT="Authorization: Bearer $2"
+# Ensure both demo users exist, and act as them via admin login (no passwords).
+curl -s -X PUT "$B/_synapse/admin/v2/users/$JOHN" -H "$AAT" -H "Content-Type: application/json" -d "{\"displayname\":\"John Doe\"}" >/dev/null
+curl -s -X PUT "$B/_synapse/admin/v2/users/$JANE" -H "$AAT" -H "Content-Type: application/json" -d "{\"displayname\":\"Jane Doe\"}" >/dev/null
+AT="Authorization: Bearer $(curl -s -X POST "$B/_synapse/admin/v1/users/$JOHN/login" -H "$AAT" -H "Content-Type: application/json" -d "{}" | python3 -c "import json,sys;print(json.load(sys.stdin)[\"access_token\"])")"
 # Idempotent: skip if John already has a DM with Jane (m.direct account data).
 HAS=$(curl -s "$B/_matrix/client/v3/user/$JOHN/account_data/m.direct" -H "$AT" | python3 -c "import json,sys
 try: d=json.load(sys.stdin)
 except Exception: d={}
 print(\"yes\" if isinstance(d,dict) and d.get(\"$JANE\") else \"no\")")
 if [ "$HAS" = "yes" ]; then echo "    DM already present — skipping"; exit 0; fi
-# Ensure Jane exists and get her token.
-curl -s -X PUT "$B/_synapse/admin/v2/users/$JANE" -H "$AT" -H "Content-Type: application/json" -d "{\"displayname\":\"Jane Doe\"}" >/dev/null
-JT=$(curl -s -X POST "$B/_synapse/admin/v1/users/$JANE/login" -H "$AT" -H "Content-Type: application/json" -d "{}" | python3 -c "import json,sys;print(json.load(sys.stdin)[\"access_token\"])")
+JT=$(curl -s -X POST "$B/_synapse/admin/v1/users/$JANE/login" -H "$AAT" -H "Content-Type: application/json" -d "{}" | python3 -c "import json,sys;print(json.load(sys.stdin)[\"access_token\"])")
 # Create a real DM: no name, is_direct, so clients show it as the other person.
 RID=$(curl -s -X POST "$B/_matrix/client/v3/createRoom" -H "$AT" -H "Content-Type: application/json" -d "{\"is_direct\":true,\"invite\":[\"$JANE\"],\"preset\":\"trusted_private_chat\"}" | python3 -c "import json,sys;print(json.load(sys.stdin)[\"room_id\"])")
 # Mark it as a direct message for both users so it renders as a DM.
@@ -169,6 +213,6 @@ snd "Authorization: Bearer $JT" "Hey John, yes reviewing it now."
 snd "$AT" "Great, lets sync after standup."
 snd "Authorization: Bearer $JT" "Works for me, see you at 10."
 echo "    seeded DM thread"
-'
+SH
 
 echo "==> Demo data seeded."

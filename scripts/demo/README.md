@@ -23,8 +23,9 @@ kubectl -n mb-bureaublad create secret generic demo-seed \
   --from-literal=NC_PASS=... --from-literal=DEMO_PASS=...
 ```
 
-Matrix needs no extra creds — `seed-demo.sh` bootstraps a Synapse admin token in
-the DB on first run and uses the admin API to provision Jane and seed the room.
+Matrix needs no extra creds — `seed-demo.sh` registers a `seedadmin` admin user
+via Synapse's registration shared secret (first run; plain login after) and
+uses the admin API to provision John and Jane and seed the room.
 
 ## Run / daily reset
 
