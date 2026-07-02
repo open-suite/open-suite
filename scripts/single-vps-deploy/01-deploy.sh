@@ -71,15 +71,33 @@ YAML
 
 echo "==> [3/4] Cloning repo and writing config"
 cd /root
-git clone https://github.com/MinBZK/mijn-bureau-infra
+# Clone-or-reset: re-runs must start from a pristine upstream tree, never
+# stack patches on an already-patched checkout.
+if [ -d mijn-bureau-infra/.git ]; then
+  git -C mijn-bureau-infra fetch origin
+  git -C mijn-bureau-infra reset --hard origin/HEAD
+  git -C mijn-bureau-infra clean -fd
+else
+  git clone https://github.com/MinBZK/mijn-bureau-infra
+fi
 cd mijn-bureau-infra
 
-# Apply our local patches over the vendored MinBZK infra (Open Suite branding, etc.).
+# Apply our local patches over the vendored MinBZK infra (Open Suite branding,
+# etc.). Check them all against the clean tree first so a drifted upstream
+# fails fast with nothing half-applied; --3way turns context drift into a
+# visible conflict instead of a refused hunk.
 REPO_ROOT="$(cd "$(dirname "$0")/../.." && pwd)"
 for p in "${REPO_ROOT}"/patches/local/*.patch; do
   [ -e "$p" ] || continue
+  if ! git apply --3way --check "$p"; then
+    echo "ERROR: patch does not apply to upstream $(git rev-parse --short HEAD): $(basename "$p")" >&2
+    exit 1
+  fi
+done
+for p in "${REPO_ROOT}"/patches/local/*.patch; do
+  [ -e "$p" ] || continue
   echo "==> Applying local patch: $(basename "$p")"
-  git apply "$p"
+  git apply --3way "$p"
 done
 
 cat > helmfile/environments/demo/mijnbureau.yaml.gotmpl <<YAML
