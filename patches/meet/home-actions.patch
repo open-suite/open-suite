@@ -1,0 +1,373 @@
+diff --git a/src/frontend/src/features/home/components/CreateMeetingMenu.tsx b/src/frontend/src/features/home/components/CreateMeetingMenu.tsx
+index 194f892..3c6b431 100644
+--- a/src/frontend/src/features/home/components/CreateMeetingMenu.tsx
++++ b/src/frontend/src/features/home/components/CreateMeetingMenu.tsx
+@@ -1,15 +1,13 @@
+ import { useTranslation } from 'react-i18next'
+-import { MenuItem, Menu as RACMenu } from 'react-aria-components'
+-import { Button, Menu } from '@/primitives'
++import { Button } from '@/primitives'
+ import { navigateTo } from '@/navigation/navigateTo'
+ import { generateRoomId, useCreateRoom } from '@/features/rooms'
+ import { RiAddLine, RiLink } from '@remixicon/react'
+ import { LaterMeetingDialog } from '@/features/home/components/LaterMeetingDialog'
+ import { useState } from 'react'
+-
+-import { menuRecipe } from '@/primitives/menuRecipe'
+ import { ApiRoom } from '@/features/rooms/api/ApiRoom'
+ import { loadUserChoices } from '@livekit/components-core'
++import { css } from '@/styled-system/css'
+ 
+ export const CreateMeetingMenu = () => {
+   const { username } = loadUserChoices()
+@@ -18,41 +16,59 @@ export const CreateMeetingMenu = () => {
+   const { mutateAsync: createRoom } = useCreateRoom()
+   const [laterRoom, setLaterRoom] = useState<null | ApiRoom>(null)
+ 
++  const startInstantMeeting = () => {
++    const slug = generateRoomId()
++    createRoom({ slug, username }).then((data) =>
++      navigateTo('room', data.slug, {
++        state: { create: true, initialRoomData: data },
++      })
++    )
++  }
++
++  const scheduleMeeting = () => {
++    const slug = generateRoomId()
++    createRoom({ slug, username }).then(setLaterRoom)
++  }
++
+   return (
+     <>
+-      <Menu>
+-        <Button variant="primary" data-attr="create-meeting">
+-          {t('createMeeting')}
++      <div
++        className={css({
++          display: 'flex',
++          flexDirection: { base: 'column', xsm: 'row' },
++          gap: '0.75rem',
++          width: '100%',
++          xsm: {
++            width: 'auto',
++          },
++        })}
++      >
++        <Button
++          variant="primary"
++          data-attr="create-option-instant"
++          onPress={startInstantMeeting}
++          icon={<RiAddLine size={20} />}
++          className={css({
++            minHeight: '3.25rem',
++            paddingX: '1.25rem',
++            fontSize: '1.05rem',
++          })}
++        >
++          {t('createMenu.instantOption')}
++        </Button>
++        <Button
++          variant="secondary"
++          data-attr="create-option-later"
++          onPress={scheduleMeeting}
++          icon={<RiLink size={20} />}
++          className={css({
++            minHeight: '3.25rem',
++            paddingX: '1.25rem',
++          })}
++        >
++          {t('createMenu.laterOption')}
+         </Button>
+-        <RACMenu>
+-          <MenuItem
+-            className={menuRecipe({ icon: true, variant: 'light' }).item}
+-            onAction={() => {
+-              const slug = generateRoomId()
+-              createRoom({ slug, username }).then((data) =>
+-                navigateTo('room', data.slug, {
+-                  state: { create: true, initialRoomData: data },
+-                })
+-              )
+-            }}
+-            data-attr="create-option-instant"
+-          >
+-            <RiAddLine size={18} />
+-            {t('createMenu.instantOption')}
+-          </MenuItem>
+-          <MenuItem
+-            className={menuRecipe({ icon: true, variant: 'light' }).item}
+-            onAction={() => {
+-              const slug = generateRoomId()
+-              createRoom({ slug, username }).then(setLaterRoom)
+-            }}
+-            data-attr="create-option-later"
+-          >
+-            <RiLink size={18} />
+-            {t('createMenu.laterOption')}
+-          </MenuItem>
+-        </RACMenu>
+-      </Menu>
++      </div>
+       <LaterMeetingDialog
+         room={laterRoom}
+         onOpenChange={() => setLaterRoom(null)}
+diff --git a/src/frontend/src/features/home/routes/Home.tsx b/src/frontend/src/features/home/routes/Home.tsx
+index 64b1be5..12bcda6 100644
+--- a/src/frontend/src/features/home/routes/Home.tsx
++++ b/src/frontend/src/features/home/routes/Home.tsx
+@@ -6,8 +6,6 @@ import { Screen } from '@/layout/Screen'
+ import { UserAware } from '@/features/auth/components/UserAware'
+ import { useUser } from '@/features/auth/api/useUser'
+ import { JoinMeetingDialog } from '../components/JoinMeetingDialog'
+-import { IntroSlider } from '../components/IntroSlider'
+-import { MoreLink } from '../components/MoreLink'
+ import { CreateMeetingMenu } from '../components/CreateMeetingMenu'
+ import { ReactNode, useEffect, useState } from 'react'
+ 
+@@ -26,7 +24,7 @@ const Columns = ({ children }: { children?: ReactNode }) => {
+         flexDirection: 'column',
+         height: '100%',
+         minHeight: '100%',
+-        justifyContent: 'normal',
++        justifyContent: 'center',
+         padding: '0 1rem',
+         width: 'calc(100% - 2rem)',
+         _motionReduce: {
+@@ -37,7 +35,7 @@ const Columns = ({ children }: { children?: ReactNode }) => {
+           animation: '.5s ease-in fade 0s forwards',
+         },
+         lg: {
+-          flexDirection: 'row',
++          flexDirection: 'column',
+           justifyContent: 'center',
+           width: '100%',
+           padding: 0,
+@@ -62,14 +60,13 @@ const LeftColumn = ({ children }: { children?: ReactNode }) => {
+         maxWidth: '38rem',
+         width: '100%',
+         padding: '1rem 3%',
+-        marginTop: 'auto',
+         lg: {
+           margin: 0,
+           textAlign: 'left',
+           alignItems: 'flex-start',
+           flexShrink: '1',
+-          flexBasis: '40rem',
+-          maxWidth: '40rem',
++          flexBasis: 'auto',
++          maxWidth: '44rem',
+           padding: '1em 3em',
+         },
+       })}
+@@ -79,65 +76,31 @@ const LeftColumn = ({ children }: { children?: ReactNode }) => {
+   )
+ }
+ 
+-const RightColumn = ({ children }: { children?: ReactNode }) => {
+-  return (
+-    <div
+-      className={css({
+-        display: 'flex',
+-        flexDirection: 'column',
+-        alignItems: 'center',
+-        overflow: 'hidden',
+-        padding: '1rem 3%',
+-        marginBottom: 'auto',
+-        flexBasis: 'auto',
+-        flexShrink: 0,
+-        maxWidth: '39rem',
+-        lg: {
+-          margin: 0,
+-          flexBasis: '45%',
+-          padding: '1em 3em',
+-        },
+-      })}
+-    >
+-      {children}
+-    </div>
+-  )
+-}
+-
+-const Separator = styled('div', {
+-  base: {
+-    borderBottom: '1px solid',
+-    borderColor: 'greyscale.500',
+-    marginTop: '2.5rem',
+-    maxWidth: '30rem',
+-    width: '100%',
+-  },
+-})
+-
+ const Heading = styled('h1', {
+   base: {
+     fontWeight: '700',
+     fontStyle: 'normal',
+     fontStretch: 'normal',
+     fontOpticalSizing: 'auto',
+-    paddingBottom: '1.2rem',
+-    fontSize: '2.3rem',
+-    lineHeight: '2.6rem',
++    paddingBottom: '0.875rem',
++    fontSize: '2.5rem',
++    lineHeight: '2.75rem',
+     letterSpacing: '0',
+     xsm: {
+-      fontSize: '3rem',
+-      lineHeight: '3.2rem',
++      fontSize: '3.75rem',
++      lineHeight: '4rem',
+     },
+   },
+ })
+ 
+ const IntroText = styled('div', {
+   base: {
+-    marginBottom: '3rem',
++    marginBottom: '2rem',
+     fontSize: '1.2rem',
+     lineHeight: '1.5rem',
+     textWrap: 'balance',
+-    maxWidth: '32rem',
++    maxWidth: '34rem',
++    color: 'greyscale.700',
+   },
+ })
+ 
+@@ -182,9 +145,10 @@ const Home = () => {
+             <div
+               className={css({
+                 display: 'flex',
+-                gap: 0.5,
+-                flexDirection: { base: 'column', xsm: 'row' },
+-                alignItems: { base: 'center', xsm: 'items-start' },
++                gap: '0.875rem',
++                flexDirection: 'column',
++                alignItems: { base: 'stretch', xsm: 'flex-start' },
++                width: '100%',
+               })}
+             >
+               {isLoggedIn ? (
+@@ -194,25 +158,24 @@ const Home = () => {
+               )}
+               <DialogTrigger>
+                 <Button
+-                  variant="secondary"
++                  variant="secondaryText"
+                   style={{
+                     height:
+                       !isLoggedIn && data?.use_proconnect_button
+                         ? '56px'
+                         : undefined, // Temporary, Align with ProConnect Button fixed height
+                   }}
++                  className={css({
++                    alignSelf: { base: 'center', xsm: 'flex-start' },
++                    color: 'greyscale.600',
++                  })}
+                 >
+                   {t('joinMeeting')}
+                 </Button>
+                 <JoinMeetingDialog />
+               </DialogTrigger>
+             </div>
+-            <Separator />
+-            <MoreLink />
+           </LeftColumn>
+-          <RightColumn>
+-            <IntroSlider />
+-          </RightColumn>
+         </Columns>
+       </Screen>
+     </UserAware>
+diff --git a/src/frontend/src/locales/de/home.json b/src/frontend/src/locales/de/home.json
+index 30787fc..079bc37 100644
+--- a/src/frontend/src/locales/de/home.json
++++ b/src/frontend/src/locales/de/home.json
+@@ -1,7 +1,7 @@
+ {
+   "createMeeting": "Meeting erstellen",
+-  "heading": "Einfache und sichere Videokonferenzen",
+-  "intro": "Kommuniziere und arbeite mühelos, ohne deine digitale Souveränität zu gefährden",
++  "heading": "Meet",
++  "intro": "Starte jetzt ein Videomeeting, plane eines für später oder tritt mit einem Link bei.",
+   "joinInputError": "Verwende einen Meeting-Link oder -Code. Beispiele:",
+   "joinInputExample": "URL oder 10-stelliger Code",
+   "joinInputLabel": "Meeting-Link",
+@@ -14,7 +14,7 @@
+   "moreLink": "Mehr erfahren",
+   "moreAbout": "über {{appTitle}}",
+   "createMenu": {
+-    "laterOption": "Meeting für später planen",
++    "laterOption": "Meeting planen",
+     "instantOption": "Meeting sofort starten"
+   },
+   "laterMeetingDialog": {
+diff --git a/src/frontend/src/locales/en/home.json b/src/frontend/src/locales/en/home.json
+index e23d0f4..3829eab 100644
+--- a/src/frontend/src/locales/en/home.json
++++ b/src/frontend/src/locales/en/home.json
+@@ -1,7 +1,7 @@
+ {
+   "createMeeting": "Create a meeting",
+-  "heading": "Simple and Secure Video Conferencing",
+-  "intro": "Communicate and work with ease, without compromising your sovereignty",
++  "heading": "Meet",
++  "intro": "Start a video meeting now, schedule one for later, or join with a link.",
+   "joinInputError": "Use a meeting link or code. Examples:",
+   "joinInputExample": "URL or 10-letter code",
+   "joinInputLabel": "Meeting link",
+@@ -14,7 +14,7 @@
+   "moreLink": "Learn more",
+   "moreAbout": "about {{appTitle}}",
+   "createMenu": {
+-    "laterOption": "Create a meeting for a later date",
++    "laterOption": "Schedule meeting",
+     "instantOption": "Start an instant meeting"
+   },
+   "laterMeetingDialog": {
+diff --git a/src/frontend/src/locales/fr/home.json b/src/frontend/src/locales/fr/home.json
+index 5a967d9..e35cc04 100644
+--- a/src/frontend/src/locales/fr/home.json
++++ b/src/frontend/src/locales/fr/home.json
+@@ -1,7 +1,7 @@
+ {
+   "createMeeting": "Créer une réunion",
+-  "heading": "Visioconférences simples et sécurisées",
+-  "intro": "Communiquez et travaillez en toute simplicité, sans compromis sur votre souveraineté",
++  "heading": "Meet",
++  "intro": "Démarrez une visioconférence maintenant, planifiez-en une pour plus tard ou rejoignez avec un lien.",
+   "joinInputError": "Saisissez un lien ou un code de réunion. Exemples :",
+   "joinInputExample": "Un code de réunion ressemble à ceci : abc-defg-hij",
+   "joinInputLabel": "Lien complet ou code de la réunion",
+@@ -14,7 +14,7 @@
+   "moreLink": "En savoir plus",
+   "moreAbout": "sur {{appTitle}}",
+   "createMenu": {
+-    "laterOption": "Créer une réunion pour une date ultérieure",
++    "laterOption": "Planifier une réunion",
+     "instantOption": "Démarrer une réunion instantanée"
+   },
+   "laterMeetingDialog": {
+diff --git a/src/frontend/src/locales/nl/home.json b/src/frontend/src/locales/nl/home.json
+index c4afc87..b6c0496 100644
+--- a/src/frontend/src/locales/nl/home.json
++++ b/src/frontend/src/locales/nl/home.json
+@@ -1,7 +1,7 @@
+ {
+   "createMeeting": "Maak een vergadering",
+-  "heading": "Eenvoudige en veilige videoconferenties",
+-  "intro": "Communiceer en werk gemakkelijk, zonder uw soevereiniteit in gevaar te brengen",
++  "heading": "Meet",
++  "intro": "Start direct een videovergadering, plan er een voor later of neem deel met een link.",
+   "joinInputError": "Gebruik een vergaderlink of code. Voorbeelden:",
+   "joinInputExample": "Een 10-lettercode zoals : abc-defg-hij",
+   "joinInputLabel": "Vergadering met link",
+@@ -14,7 +14,7 @@
+   "moreLink": "Meer informatie",
+   "moreAbout": "over {{appTitle}}",
+   "createMenu": {
+-    "laterOption": "Maak een vergadering voor een latere datum",
++    "laterOption": "Vergadering plannen",
+     "instantOption": "Begin direct een vergadering"
+   },
+   "laterMeetingDialog": {
