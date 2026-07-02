@@ -21,10 +21,10 @@ index 5b9cd96..173d033 100644
      php /var/www/html/occ config:system:set default_phone_region --value=NL
  
 diff --git a/helmfile/apps/nextcloud/values.yaml.gotmpl b/helmfile/apps/nextcloud/values.yaml.gotmpl
-index 706e9e2..fb3aaee 100644
+index 706e9e2..da7e244 100644
 --- a/helmfile/apps/nextcloud/values.yaml.gotmpl
 +++ b/helmfile/apps/nextcloud/values.yaml.gotmpl
-@@ -249,6 +249,10 @@ extraVolumes:
+@@ -249,6 +249,18 @@ extraVolumes:
      configMap:
        name: nextcloud-bureaublad-button-app
        defaultMode: 0644
@@ -32,10 +32,18 @@ index 706e9e2..fb3aaee 100644
 +    configMap:
 +      name: nextcloud-meetcal-app
 +      defaultMode: 0644
++  # Second reference to the chart's post-install script configmap: the chart's
++  # builtin post-install-dir volume exists only in the deployment template,
++  # while extraVolumeMounts also renders into the cronjob — so the hook mount
++  # below needs its own volume that renders into both.
++  - name: post-upgrade-hook
++    configMap:
++      name: nextcloud-script-post-install
++      defaultMode: 0755
  
  extraVolumeMounts:
    - name: bureaublad-button-app
-@@ -263,6 +267,29 @@ extraVolumeMounts:
+@@ -263,6 +275,29 @@ extraVolumeMounts:
      mountPath: /var/www/html/custom_apps/bureaublad_button/js/script.js
      subPath: script.js
      readOnly: true
@@ -60,12 +68,12 @@ index 706e9e2..fb3aaee 100644
 +  # opcache.validate_timestamps=0 (nextcloud-php-cache.patch) means a sed
 +  # applied to a serving pod is never picked up. Both hook dirs run in the
 +  # entrypoint before PHP starts serving, so the fix is always cached fresh.
-+  - name: post-install-dir
++  - name: post-upgrade-hook
 +    mountPath: /docker-entrypoint-hooks.d/post-upgrade
  
  extraDeploy:
    - apiVersion: v1
-@@ -376,3 +396,181 @@ extraDeploy:
+@@ -376,3 +411,181 @@ extraDeploy:
              mount();
            }
          })();
