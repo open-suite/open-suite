@@ -53,7 +53,6 @@ bash "${DIR}/02-networking.sh"        "${DOMAIN}"
 wait_for_certs
 bash "${DIR}/03-restart-oidc-apps.sh"
 bash "${DIR}/04-nextcloud-office.sh"
-bash "${DIR}/05-docs.sh"
 bash "${DIR}/08-open-suite-portal.sh"
 bash "${DIR}/09-portal-header.sh"
 bash "${DIR}/10-keycloak-login.sh"
