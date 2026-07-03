@@ -19,7 +19,10 @@ VM=opensuite-local
 DOMAIN=127.0.0.1.sslip.io
 REPO=https://github.com/open-suite/open-suite
 
-if ! limactl list --format '{{.Name}}' 2>/dev/null | grep -qx "${VM}"; then
+# Capture first: with pipefail, `limactl | grep -q` can die of SIGPIPE on a
+# match (grep exits early) and read as "VM missing".
+EXISTING="$(limactl list --format '{{.Name}}' 2>/dev/null || true)"
+if ! printf '%s\n' "${EXISTING}" | grep -qx "${VM}"; then
   limactl create --name="${VM}" --tty=false - <<'LIMA'
 vmType: vz
 os: Linux
