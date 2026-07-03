@@ -1,0 +1,47 @@
+name: smoke
+
+# Assembled-stack smoke test against the live demo (ticket 3.6). A full
+# fresh-VM deploy does not fit free runners (4 vCPU/16 GB vs the stack's
+# 12/48) — this runs both suites against demo.opensuite.online instead:
+# on every main push, nightly, and on demand.
+on:
+  push:
+    branches: [main]
+  schedule:
+    - cron: "17 5 * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+env:
+  SMOKE_DOMAIN: demo.opensuite.online
+
+jobs:
+  unauthenticated:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - run: bash ci/smoke/smoke.sh "$SMOKE_DOMAIN"
+
+  authenticated:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: Install Playwright
+        run: |
+          npm i --no-save playwright
+          npx playwright install --with-deps chromium
+      - name: Run authenticated smoke
+        env:
+          SMOKE_USER: ${{ secrets.SMOKE_USER || 'johndoe' }}
+          SMOKE_PASS: ${{ secrets.SMOKE_PASS }}
+        run: |
+          if [ -z "$SMOKE_PASS" ]; then
+            echo "SMOKE_PASS secret not set — skipping authenticated suite" >&2
+            exit 0
+          fi
+          node ci/smoke/authenticated.mjs
