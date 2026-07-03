@@ -16,6 +16,7 @@ NAMESPACE="mb-bureaublad"
 # Prebuilt in CI and pulled from GHCR (ticket 3.1). Override AUTH_GATE_IMAGE to
 # pin a specific tag/digest; the default tracks main.
 IMAGE="${AUTH_GATE_IMAGE:-ghcr.io/open-suite/auth-gate:main}"
+OPEN_SUITE_TLS_MODE="${OPEN_SUITE_TLS_MODE:-letsencrypt}"
 
 echo "==> [1/5] Ensuring auth-gate secrets"
 mkdir -p /etc/mijnbureau
@@ -75,6 +76,23 @@ test -n "$CLIENT_UUID"
 echo "==> [3/5] Using prebuilt auth-gate image ${IMAGE}"
 
 echo "==> [4/5] Applying auth-gate Kubernetes resources"
+if [ "${OPEN_SUITE_TLS_MODE}" = "selfsigned" ]; then
+  CERT_ANNOTATION="opensuite.online/tls: selfsigned"
+  GATE_TLS_INSECURE="1"
+  # No cert-manager in selfsigned mode: mint the gate's cert ourselves,
+  # matching what the charts do for the app hosts.
+  if ! kubectl -n "${NAMESPACE}" get secret "${AUTH_HOST}-tls" >/dev/null 2>&1; then
+    TMPCRT="$(mktemp -d)"
+    openssl req -x509 -newkey rsa:2048 -keyout "${TMPCRT}/tls.key" -out "${TMPCRT}/tls.crt" \
+      -days 365 -nodes -subj "/CN=${AUTH_HOST}" -addext "subjectAltName=DNS:${AUTH_HOST}" >/dev/null 2>&1
+    kubectl -n "${NAMESPACE}" create secret tls "${AUTH_HOST}-tls" \
+      --cert="${TMPCRT}/tls.crt" --key="${TMPCRT}/tls.key"
+    rm -rf "${TMPCRT}"
+  fi
+else
+  CERT_ANNOTATION="cert-manager.io/cluster-issuer: letsencrypt-prod"
+  GATE_TLS_INSECURE="0"
+fi
 kubectl -n "${NAMESPACE}" create secret generic opensuite-auth-gate \
   --from-literal=OIDC_CLIENT_SECRET="${CLIENT_SECRET}" \
   --from-literal=COOKIE_SECRET="${COOKIE_SECRET}" \
@@ -116,6 +134,8 @@ spec:
               value: "https://id.${DOMAIN}/realms/mijnbureau"
             - name: OIDC_CLIENT_ID
               value: "${CLIENT_ID}"
+            - name: OIDC_TLS_INSECURE
+              value: "${GATE_TLS_INSECURE}"
             - name: OIDC_CLIENT_SECRET
               valueFrom:
                 secretKeyRef:
@@ -209,7 +229,7 @@ metadata:
   name: opensuite-auth-gate
   namespace: ${NAMESPACE}
   annotations:
-    cert-manager.io/cluster-issuer: letsencrypt-prod
+    ${CERT_ANNOTATION}
     traefik.ingress.kubernetes.io/router.middlewares: ${NAMESPACE}-hsts-header@kubernetescrd
 spec:
   ingressClassName: traefik
@@ -232,7 +252,9 @@ YAML
 
 kubectl -n "${NAMESPACE}" rollout restart deploy/opensuite-auth-gate
 kubectl -n "${NAMESPACE}" rollout status deploy/opensuite-auth-gate --timeout=120s
-kubectl -n "${NAMESPACE}" wait --for=condition=Ready "certificate/${AUTH_HOST}-tls" --timeout=180s
+if [ "${OPEN_SUITE_TLS_MODE}" != "selfsigned" ]; then
+  kubectl -n "${NAMESPACE}" wait --for=condition=Ready "certificate/${AUTH_HOST}-tls" --timeout=180s
+fi
 
 echo "==> [5/5] Auth gate ready"
 echo "Protected workspace traffic now authenticates through https://${AUTH_HOST}"
