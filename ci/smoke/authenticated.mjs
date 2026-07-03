@@ -51,7 +51,7 @@ try {
   // The portal has its own OIDC session; a fresh browser lands on its /login.
   // Wait for either the dashboard or the login stub, click through the latter
   // (round-trips Keycloak silently — the SSO session exists).
-  const dashboard = page.locator("text=Video Conference").first();
+  const dashboard = page.locator("text=Start instant meeting").first();
   const loginBtn = page.locator("text=Log in").last();
   await dashboard.or(loginBtn).first().waitFor({ timeout: 30000 });
   if (!(await dashboard.isVisible().catch(() => false))) {
@@ -60,18 +60,21 @@ try {
   await dashboard.waitFor({ timeout: 30000 });
   ok("portal renders (dashboard widgets present)");
 
-  // --- Portal calendar API --------------------------------------------------
-  const cal = await page.request.get(`https://bridge.${DOMAIN}/api/v1/caldav/events`);
-  if (cal.ok()) ok(`calendar API answers (${cal.status()})`);
-  else fail("calendar API", `HTTP ${cal.status()}`);
-
   // --- Header injection on the sidecar apps ---------------------------------
+  // Visiting nextcloud also establishes its user_oidc session (auto-SSO) and
+  // stores the login token the meetcal/caldav token exchange needs.
   for (const host of ["nextcloud", "grist", "docs"]) {
     const r = await page.goto(`https://${host}.${DOMAIN}/`, { waitUntil: "domcontentloaded" });
     const html = await page.content();
     if (html.includes("/opensuite-header.js")) ok(`${host}: header script injected`);
     else fail(`${host}: header script`, `not in HTML (HTTP ${r?.status()})`);
   }
+
+  // --- Portal calendar API --------------------------------------------------
+  const today = new Date().toISOString().slice(0, 10);
+  const cal = await page.request.get(`https://bridge.${DOMAIN}/api/v1/caldav/calendars/${today}`);
+  if (cal.ok()) ok(`calendar API answers (${cal.status()})`);
+  else fail("calendar API", `HTTP ${cal.status()}`);
 
   // --- meetcal mints a joinable room ----------------------------------------
   // Needs the Nextcloud session (same browser context) + CSRF token.
