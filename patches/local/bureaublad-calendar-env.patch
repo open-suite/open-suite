@@ -1,8 +1,8 @@
 diff --git a/helmfile/apps/bureaublad/values.yaml.gotmpl b/helmfile/apps/bureaublad/values.yaml.gotmpl
-index d78c692..06ffce2 100644
+index d78c692..e932c80 100644
 --- a/helmfile/apps/bureaublad/values.yaml.gotmpl
 +++ b/helmfile/apps/bureaublad/values.yaml.gotmpl
-@@ -69,6 +69,12 @@ backend:
+@@ -69,6 +69,17 @@ backend:
      OIDC_POST_LOGIN_REDIRECT_URI: {{ $baseUrl }}
      OIDC_POST_LOGOUT_REDIRECT_URI: {{ $baseUrl }}
      OIDC_TOKEN_ENDPOINT: {{ .Values.authentication.oidc.token_endpoint | quote }}
@@ -12,6 +12,11 @@ index d78c692..06ffce2 100644
 +    CALENDAR_CARD: "true"
 +    TASK_URL: "https://{{ .Values.global.hostname.nextcloud | default "nextcloud" }}.{{ .Values.global.domain }}"
 +    TASK_AUDIENCE: "nextcloud"
++    {{- if .Values.global.tls.selfSigned }}
++    # Local/dev only: every host serves a self-signed cert, so the backend's
++    # outbound client (OIDC code exchange, CalDAV) cannot verify TLS.
++    HTTP_TLS_INSECURE: "1"
++    {{- end }}
      OIDC_REVOCATION_ENDPOINT: {{ .Values.authentication.oidc.end_session_endpoint | quote }}
      OIDC_JWKS_ENDPOINT: {{ .Values.authentication.oidc.jwks_uri | quote }}
      OIDC_ISSUER: {{ .Values.authentication.oidc.issuer | quote }}

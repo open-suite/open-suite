@@ -11,6 +11,9 @@
 set -uo pipefail
 
 DOMAIN="${1:?Usage: $0 <domain>}"
+# SMOKE_INSECURE=1: tolerate self-signed certs (local VM deploys).
+CURL_K=""
+[ "${SMOKE_INSECURE:-0}" = "1" ] && CURL_K="-k"
 FAILURES=0
 
 check() { # check <name> <expected> <actual>
@@ -23,8 +26,8 @@ check() { # check <name> <expected> <actual>
   fi
 }
 
-code() { curl -s -o /dev/null -w '%{http_code}' --max-time 20 "$@"; }
-redirect() { curl -s -o /dev/null -w '%{redirect_url}' --max-time 20 "$@"; }
+code() { curl -s ${CURL_K} -o /dev/null -w '%{http_code}' --max-time 20 "$@"; }
+redirect() { curl -s ${CURL_K} -o /dev/null -w '%{redirect_url}' --max-time 20 "$@"; }
 
 # matrix.<domain> only routes /_matrix API paths (Traefik 404s on /), so it
 # has no meaningful unauthenticated probe here.
@@ -63,7 +66,7 @@ case "$loc" in
     echo "ok   gate /login redirects to Keycloak authorize"
     # Follow it: the Keycloak login page itself must render (200, contains the
     # login form) — catches cert, ingress and realm-import breakage.
-    page="$(curl -s -L --max-time 20 "https://auth.${DOMAIN}/login?rd=https://bridge.${DOMAIN}/")"
+    page="$(curl -s ${CURL_K} -L --max-time 20 "https://auth.${DOMAIN}/login?rd=https://bridge.${DOMAIN}/")"
     if printf '%s' "$page" | grep -q 'kc-form-login\|id="kc-form"'; then
       echo "ok   Keycloak login form renders"
     else
