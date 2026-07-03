@@ -42,10 +42,10 @@ idempotent; re-running is safe):
 | `10-keycloak-login.sh` | Keycloak login theme (+ demo credential panel when `OPEN_SUITE_DEMO_MODE=true`) |
 | `11-element-web.sh` | Element: no default E2EE, device-verification toasts off |
 | `12-auth-gate.sh` | edge auth gate at `auth.DOMAIN`; ingress attachment is declarative via `patches/local/auth-gate-ingress-middleware.patch` |
-| `13-meet-frontend.sh` | builds and deploys the patched La Suite Meet frontend |
 
 Gaps in the numbering are deleted steps whose work moved into
-`patches/local/` and helmfile values (ticket 3.4). Result:
+`patches/local/` and helmfile values (tickets 3.4/3.1; all app images —
+portal, Meet, auth gate — are CI-built and pinned in the demo values). Result:
 `https://bridge.DOMAIN`.
 
 ## Repo shape (current)

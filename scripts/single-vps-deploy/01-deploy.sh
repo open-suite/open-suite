@@ -14,6 +14,11 @@ OPEN_SUITE_DEMO_MODE="${OPEN_SUITE_DEMO_MODE:-false}"
 OPEN_SUITE_DEMO_USERNAME="${OPEN_SUITE_DEMO_USERNAME:-johndoe}"
 OPEN_SUITE_DEMO_PASSWORD="${OPEN_SUITE_DEMO_PASSWORD:-myStrongPassword123}"
 OPEN_SUITE_DEMO_ADMIN_USERNAME="${OPEN_SUITE_DEMO_ADMIN_USERNAME:-demoadmin}"
+# Pinned open-suite-portal commit: selects the CI-built portal images
+# (ghcr.io/open-suite/portal-{api,frontend}:sha-<short>). Bump deliberately.
+PORTAL_REF="${PORTAL_REF:-54795b661cb9c60938d0e6e7a15418ee6e0bbd86}"
+# Pinned upstream Meet ref the meet-frontend-image workflow builds+tags.
+MEET_TAG="${MEET_TAG:-v1.20.0}"
 # The demo admin password never defaults to the master password. Explicitly set
 # → persisted and shown on the login-page credential panel. Unset → generated
 # (kept across re-runs) and never shown; read it from
@@ -171,6 +176,23 @@ application:
   meet:        { namespace: mb-meet }
   docs:        { namespace: mb-docs }
   bureaublad:  { namespace: mb-bureaublad }
+
+# Open Suite images (CI-built; see .github/workflows and the portal repo's
+# publish-images workflow). Declared here so helmfile owns the images and a
+# re-apply can never revert them to upstream (which a kubectl-patch pin did).
+container:
+  bureaublad:
+    registry: "ghcr.io"
+    backend:
+      repository: "open-suite/portal-api"
+      tag: "sha-${PORTAL_REF:0:7}"
+    frontend:
+      repository: "open-suite/portal-frontend"
+      tag: "sha-${PORTAL_REF:0:7}"
+  meet_frontend:
+    registry: "ghcr.io"
+    repository: "open-suite/meet-frontend"
+    tag: "${MEET_TAG}"
 
 authentication:
   oidc:
