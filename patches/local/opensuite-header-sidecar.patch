@@ -41,10 +41,10 @@ index 7b0b221..1d19945 100644
        protocol: TCP
        {{- if and (or (eq .Values.frontend.service.type "NodePort") (eq .Values.frontend.service.type "LoadBalancer")) (not (empty .Values.frontend.service.nodePorts.http)) }}
 diff --git a/helmfile/apps/bureaublad/values.yaml.gotmpl b/helmfile/apps/bureaublad/values.yaml.gotmpl
-index d78c692..b06d9ce 100644
+index d78c692..f83339e 100644
 --- a/helmfile/apps/bureaublad/values.yaml.gotmpl
 +++ b/helmfile/apps/bureaublad/values.yaml.gotmpl
-@@ -112,7 +112,39 @@ backend:
+@@ -112,7 +112,35 @@ backend:
      TRUSTED_HOSTS: '[{{ $hostname | quote }}]'
      REDIS_URL: {{ $redisUrl | quote }}
  
@@ -57,10 +57,6 @@ index d78c692..b06d9ce 100644
 +  sidecars:
 +    - name: opensuite-header
 +      image: nginxinc/nginx-unprivileged:1.27-alpine
-+      ports:
-+        - name: hdr
-+          containerPort: 8091
-+          protocol: TCP
 +      volumeMounts:
 +        - name: opensuite-header-conf
 +          mountPath: /etc/nginx/nginx.conf
@@ -84,7 +80,7 @@ index d78c692..b06d9ce 100644
    image:
      registry: {{ (coalesce .Values.container.bureaublad.registry .Values.container.default.registry) | quote }}
      repository: {{ .Values.container.bureaublad.frontend.repository | quote }}
-@@ -172,3 +204,66 @@ networkPolicy:
+@@ -172,3 +200,66 @@ networkPolicy:
                app.kubernetes.io/name: redis
                app.kubernetes.io/component: master
        {{- end }}
@@ -180,10 +176,10 @@ index e317389..44648a7 100644
        protocol: TCP
        {{- if and (or (eq .Values.frontend.service.type "NodePort") (eq .Values.frontend.service.type "LoadBalancer")) (not (empty .Values.frontend.service.nodePorts.http)) }}
 diff --git a/helmfile/apps/docs/values.yaml.gotmpl b/helmfile/apps/docs/values.yaml.gotmpl
-index ce4df2c..6e678d2 100644
+index ce4df2c..3f3bea0 100644
 --- a/helmfile/apps/docs/values.yaml.gotmpl
 +++ b/helmfile/apps/docs/values.yaml.gotmpl
-@@ -399,7 +399,39 @@ backend:
+@@ -399,7 +399,35 @@ backend:
          min: 3
          max: 9
  
@@ -196,10 +192,6 @@ index ce4df2c..6e678d2 100644
 +  sidecars:
 +    - name: opensuite-header
 +      image: nginxinc/nginx-unprivileged:1.27-alpine
-+      ports:
-+        - name: hdr
-+          containerPort: 8091
-+          protocol: TCP
 +      volumeMounts:
 +        - name: opensuite-header-conf
 +          mountPath: /etc/nginx/nginx.conf
@@ -223,7 +215,7 @@ index ce4df2c..6e678d2 100644
    image:
      registry: {{(coalesce .Values.container.docs.registry .Values.container.default.registry) | quote }}
      repository: {{ .Values.container.docs.frontend.repository | quote }}
-@@ -649,3 +681,66 @@ ingressMedia:
+@@ -649,3 +677,66 @@ ingressMedia:
    tls: {{ .Values.global.tls.enabled | default true }}
    selfSigned: {{ and .Values.global.tls.enabled .Values.global.tls.selfSigned | default false }}
    extraTls: {{ .Values.tls.docs | toYaml | nindent 4 }}
@@ -306,10 +298,10 @@ index 7584485..2d1581b 100644
        protocol: TCP
        {{- if and (or (eq .Values.service.type "NodePort") (eq .Values.service.type "LoadBalancer")) (not (empty .Values.service.nodePorts.http)) }}
 diff --git a/helmfile/apps/grist/values.yaml.gotmpl b/helmfile/apps/grist/values.yaml.gotmpl
-index 0d489aa..1f8ab34 100644
+index 0d489aa..cf621de 100644
 --- a/helmfile/apps/grist/values.yaml.gotmpl
 +++ b/helmfile/apps/grist/values.yaml.gotmpl
-@@ -364,3 +364,98 @@ metrics:
+@@ -364,3 +364,94 @@ metrics:
  # no access to the chart's default).
  containerPorts:
    metrics: {{ $metricsPort }}
@@ -322,10 +314,6 @@ index 0d489aa..1f8ab34 100644
 +sidecars:
 +  - name: opensuite-header
 +    image: nginxinc/nginx-unprivileged:1.27-alpine
-+    ports:
-+      - name: hdr
-+        containerPort: 8091
-+        protocol: TCP
 +    volumeMounts:
 +      - name: opensuite-header-conf
 +        mountPath: /etc/nginx/nginx.conf
@@ -424,10 +412,10 @@ index b7cf4b0..587ab00 100644
        protocol: TCP
        {{- if and (or (eq .Values.service.type "NodePort") (eq .Values.service.type "LoadBalancer")) (not (empty .Values.service.nodePorts.http)) }}
 diff --git a/helmfile/apps/nextcloud/values.yaml.gotmpl b/helmfile/apps/nextcloud/values.yaml.gotmpl
-index 706e9e2..5db1e64 100644
+index 706e9e2..4d3809e 100644
 --- a/helmfile/apps/nextcloud/values.yaml.gotmpl
 +++ b/helmfile/apps/nextcloud/values.yaml.gotmpl
-@@ -241,10 +241,42 @@ metrics:
+@@ -241,10 +241,38 @@ metrics:
    serviceMonitor:
      enabled: {{ .Values.metric.serviceMonitor.enabled | default false }}
  
@@ -439,10 +427,6 @@ index 706e9e2..5db1e64 100644
 +sidecars:
 +  - name: opensuite-header
 +    image: nginxinc/nginx-unprivileged:1.27-alpine
-+    ports:
-+      - name: hdr
-+        containerPort: 8091
-+        protocol: TCP
 +    volumeMounts:
 +      - name: opensuite-header-conf
 +        mountPath: /etc/nginx/nginx.conf
@@ -470,7 +454,7 @@ index 706e9e2..5db1e64 100644
    - name: bureaublad-button-app
      configMap:
        name: nextcloud-bureaublad-button-app
-@@ -265,6 +297,67 @@ extraVolumeMounts:
+@@ -265,6 +293,67 @@ extraVolumeMounts:
      readOnly: true
  
  extraDeploy:
