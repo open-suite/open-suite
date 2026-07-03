@@ -34,7 +34,8 @@ const fail = (name, detail) => {
 };
 
 const browser = await chromium.launch();
-const ctx = await browser.newContext({ ignoreHTTPSErrors: false });
+// SMOKE_INSECURE=1: tolerate self-signed certs (local VM deploys).
+const ctx = await browser.newContext({ ignoreHTTPSErrors: process.env.SMOKE_INSECURE === "1" });
 const page = await ctx.newPage();
 
 try {
