@@ -26,7 +26,9 @@ check() { # check <name> <expected> <actual>
 code() { curl -s -o /dev/null -w '%{http_code}' --max-time 20 "$@"; }
 redirect() { curl -s -o /dev/null -w '%{redirect_url}' --max-time 20 "$@"; }
 
-GATED_HOSTS=(bridge nextcloud docs meet grist element matrix)
+# matrix.<domain> only routes /_matrix API paths (Traefik 404s on /), so it
+# has no meaningful unauthenticated probe here.
+GATED_HOSTS=(bridge nextcloud docs meet grist element)
 
 echo "== Gate is closed on every workspace host"
 for h in "${GATED_HOSTS[@]}"; do
