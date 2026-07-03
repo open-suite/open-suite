@@ -23,6 +23,7 @@ OPEN_SUITE_DEMO_ADMIN_USERNAME="${OPEN_SUITE_DEMO_ADMIN_USERNAME:-demoadmin}"
 OPEN_SUITE_DEMO_ADMIN_PASSWORD="${OPEN_SUITE_DEMO_ADMIN_PASSWORD:-}"
 export OPEN_SUITE_DEMO_MODE OPEN_SUITE_DEMO_USERNAME OPEN_SUITE_DEMO_PASSWORD
 export OPEN_SUITE_DEMO_ADMIN_USERNAME OPEN_SUITE_DEMO_ADMIN_PASSWORD
+export OPEN_SUITE_TLS_MODE="${OPEN_SUITE_TLS_MODE:-letsencrypt}"
 
 DIR="$(cd "$(dirname "$0")/scripts/single-vps-deploy" && pwd)"
 export KUBECONFIG=/etc/rancher/k3s/k3s.yaml
@@ -52,7 +53,9 @@ wait_for_certs() {
 
 bash "${DIR}/01-deploy.sh"            "${DOMAIN}" "${EMAIL}" "${MASTER_PASSWORD}"
 bash "${DIR}/02-networking.sh"        "${DOMAIN}"
-wait_for_certs
+# selfsigned mode has no cert-manager Certificates to wait for — every chart
+# generates its own cert secret at render time.
+[ "${OPEN_SUITE_TLS_MODE:-letsencrypt}" = "selfsigned" ] || wait_for_certs
 bash "${DIR}/03-restart-oidc-apps.sh"
 bash "${DIR}/04-nextcloud-office.sh"
 bash "${DIR}/08-open-suite-portal.sh"

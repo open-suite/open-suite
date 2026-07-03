@@ -17,8 +17,16 @@ import urllib.request
 from http import HTTPStatus
 from http.cookies import SimpleCookie
 
+import ssl
+
 import jwt
 from jwt import PyJWKClient
+
+# Local/dev deploys (OPEN_SUITE_TLS_MODE=selfsigned) run every host on
+# self-signed certs, so the gate's backchannel calls to Keycloak cannot
+# verify TLS. Never set outside a local VM.
+if os.environ.get("OIDC_TLS_INSECURE") == "1":
+    ssl._create_default_https_context = ssl._create_unverified_context
 
 
 DOMAIN = os.environ["OPEN_SUITE_DOMAIN"]

@@ -23,6 +23,9 @@ MEET_TAG="${MEET_TAG:-v1.20.0}"
 # meetcal + patched user_oidc). Tracks the upstream base tag; use a sha- tag
 # to pin a specific build.
 NEXTCLOUD_TAG="${NEXTCLOUD_TAG:-34.0.0-apache}"
+# TLS mode: letsencrypt (default; needs public DNS + ports) or selfsigned
+# (local VMs: every chart generates its own cert, no cert-manager, no ACME).
+OPEN_SUITE_TLS_MODE="${OPEN_SUITE_TLS_MODE:-letsencrypt}"
 # The demo admin password never defaults to the master password. Explicitly set
 # → persisted and shown on the login-page credential panel. Unset → generated
 # (kept across re-runs) and never shown; read it from
@@ -62,11 +65,18 @@ curl -fsSL "https://github.com/helmfile/helmfile/releases/download/v${HELMFILE_V
 # Idempotent: the plugin persists across a k3s wipe, so skip if already present.
 helm plugin list 2>/dev/null | grep -q '^diff' || helm plugin install https://github.com/databus23/helm-diff
 
-echo "==> [2/4] Installing cert-manager and ClusterIssuer"
-kubectl apply -f https://github.com/cert-manager/cert-manager/releases/download/v1.16.2/cert-manager.yaml
-kubectl -n cert-manager rollout status deploy/cert-manager-webhook --timeout=180s
+if [ "${OPEN_SUITE_TLS_MODE}" = "selfsigned" ]; then
+  echo "==> [2/4] TLS mode selfsigned — skipping cert-manager/ACME"
+  TLS_SELF_SIGNED=true
+  INGRESS_ANNOTATIONS=""
+else
+  echo "==> [2/4] Installing cert-manager and ClusterIssuer"
+  TLS_SELF_SIGNED=false
+  INGRESS_ANNOTATIONS='"cert-manager.io/cluster-issuer": "letsencrypt-prod"'
+  kubectl apply -f https://github.com/cert-manager/cert-manager/releases/download/v1.16.2/cert-manager.yaml
+  kubectl -n cert-manager rollout status deploy/cert-manager-webhook --timeout=180s
 
-kubectl apply -f - <<YAML
+  kubectl apply -f - <<YAML
 apiVersion: cert-manager.io/v1
 kind: ClusterIssuer
 metadata: { name: letsencrypt-prod }
@@ -77,6 +87,7 @@ spec:
     privateKeySecretRef: { name: letsencrypt-prod-account-key }
     solvers: [{ http01: { ingress: { class: traefik } } }]
 YAML
+fi
 
 echo "==> [3/4] Cloning repo and writing config"
 # Single-source pin for MinBZK/mijn-bureau-infra: the one commit the local
@@ -138,7 +149,7 @@ global:
     bureaublad: { backend: "none", frontend: "none" }
   tls:
     enabled: true
-    selfSigned: false
+    selfSigned: ${TLS_SELF_SIGNED}
 
 autoscaling:
   horizontal:
@@ -153,8 +164,7 @@ cluster:
   routingMode: ingress
   ingress:
     type: traefik
-    annotations:
-      cert-manager.io/cluster-issuer: letsencrypt-prod
+    annotations: { ${INGRESS_ANNOTATIONS} }
   networking:
     podSubnet:
       - "10.42.0.0/16"
