@@ -298,13 +298,7 @@ index 7584485..2d1581b 100644
        protocol: TCP
        {{- if and (or (eq .Values.service.type "NodePort") (eq .Values.service.type "LoadBalancer")) (not (empty .Values.service.nodePorts.http)) }}
 diff --git a/helmfile/apps/grist/values.yaml.gotmpl b/helmfile/apps/grist/values.yaml.gotmpl
-<<<<<<< Updated upstream
-index 0d489aa..cf621de 100644
---- a/helmfile/apps/grist/values.yaml.gotmpl
-+++ b/helmfile/apps/grist/values.yaml.gotmpl
-@@ -364,3 +364,94 @@ metrics:
-=======
-index 0d489aa..6487c6a 100644
+index 0d489aa..aeee611 100644
 --- a/helmfile/apps/grist/values.yaml.gotmpl
 +++ b/helmfile/apps/grist/values.yaml.gotmpl
 @@ -83,6 +83,11 @@ networkPolicy:
@@ -319,8 +313,7 @@ index 0d489aa..6487c6a 100644
     {{- if .Values.metric.enabled }}
     # Allow Prometheus to scrape metrics. Port is pinned to the chart's
     # containerPorts.metrics (charts/grist/values.yaml); change both together.
-@@ -364,3 +369,98 @@ metrics:
->>>>>>> Stashed changes
+@@ -364,3 +369,94 @@ metrics:
  # no access to the chart's default).
  containerPorts:
    metrics: {{ $metricsPort }}
@@ -431,13 +424,7 @@ index b7cf4b0..587ab00 100644
        protocol: TCP
        {{- if and (or (eq .Values.service.type "NodePort") (eq .Values.service.type "LoadBalancer")) (not (empty .Values.service.nodePorts.http)) }}
 diff --git a/helmfile/apps/nextcloud/values.yaml.gotmpl b/helmfile/apps/nextcloud/values.yaml.gotmpl
-<<<<<<< Updated upstream
-index 706e9e2..4d3809e 100644
---- a/helmfile/apps/nextcloud/values.yaml.gotmpl
-+++ b/helmfile/apps/nextcloud/values.yaml.gotmpl
-@@ -241,10 +241,38 @@ metrics:
-=======
-index 706e9e2..b2c445a 100644
+index 706e9e2..e2e5fd1 100644
 --- a/helmfile/apps/nextcloud/values.yaml.gotmpl
 +++ b/helmfile/apps/nextcloud/values.yaml.gotmpl
 @@ -62,6 +62,11 @@ networkPolicy:
@@ -452,8 +439,7 @@ index 706e9e2..b2c445a 100644
     {{- if .Values.metric.enabled }}
     # Allow the in-namespace metrics exporter pod to reach Nextcloud's
     # serverinfo endpoint. Prometheus itself scrapes the exporter pod, not
-@@ -241,10 +246,42 @@ metrics:
->>>>>>> Stashed changes
+@@ -241,10 +246,38 @@ metrics:
    serviceMonitor:
      enabled: {{ .Values.metric.serviceMonitor.enabled | default false }}
  
@@ -492,11 +478,7 @@ index 706e9e2..b2c445a 100644
    - name: bureaublad-button-app
      configMap:
        name: nextcloud-bureaublad-button-app
-<<<<<<< Updated upstream
-@@ -265,6 +293,67 @@ extraVolumeMounts:
-=======
-@@ -265,6 +302,67 @@ extraVolumeMounts:
->>>>>>> Stashed changes
+@@ -265,6 +298,67 @@ extraVolumeMounts:
      readOnly: true
  
  extraDeploy:
