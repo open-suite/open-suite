@@ -29,19 +29,11 @@ CLIENT_SECRET="$(cat /etc/mijnbureau/auth-gate-client-secret)"
 COOKIE_SECRET="$(cat /etc/mijnbureau/auth-gate-cookie-secret)"
 
 echo "==> [2/5] Creating/updating Keycloak client ${CLIENT_ID}"
-# Which password the master `admin` user actually has depends on the box: in
-# demo mode with demo-admin-username=admin, 10-keycloak-login.sh rotates it to
-# the persisted demo-admin password; otherwise it is still the pod's bootstrap
-# admin password. Resolve the authoritative one and pass it over stdin so it
-# never appears in argv on the host.
-if [ "$(cat /etc/mijnbureau/demo-mode 2>/dev/null)" = "true" ] \
-  && [ "$(cat /etc/mijnbureau/demo-admin-username 2>/dev/null)" = "admin" ] \
-  && [ -s /etc/mijnbureau/demo-admin-password ]; then
-  KC_ADMIN_PASS="$(cat /etc/mijnbureau/demo-admin-password)"
-else
-  KC_ADMIN_PASS="$(kubectl -n mb-keycloak exec keycloak-keycloak-0 -c keycloak -- \
-    sh -c 'cat "$KC_BOOTSTRAP_ADMIN_PASSWORD_FILE"')"
-fi
+# The pod's bootstrap admin password is authoritative (10 refuses a demo
+# admin named `admin`, so nothing ever rotates the master account). Passed
+# over stdin so it never appears in argv on the host.
+KC_ADMIN_PASS="$(kubectl -n mb-keycloak exec keycloak-keycloak-0 -c keycloak -- \
+  sh -c 'cat "$KC_BOOTSTRAP_ADMIN_PASSWORD_FILE"')"
 printf '%s' "${KC_ADMIN_PASS}" | \
 kubectl -n mb-keycloak exec -i keycloak-keycloak-0 -c keycloak -- sh -c '
 set -e

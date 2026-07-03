@@ -276,6 +276,15 @@ kubectl -n mb-keycloak rollout status sts/keycloak-keycloak --timeout=240s
 # this script only ships the theme files and mounts them.
 
 if [ "${DEMO_ENABLED_JS}" = "true" ] && [ -n "${DEMO_ADMIN_PASSWORD}" ]; then
+  # Never let the demo admin be the master `admin` user: set-password below
+  # would rotate the operational account, and every kcadm/config-cli consumer
+  # of the chart's admin-password secret (helmfile upgrades included) breaks
+  # with invalid_grant. Happened live 2026-07-03; recovery required a manual
+  # password restore inside the pod.
+  if [ "${DEMO_ADMIN_USERNAME}" = "admin" ]; then
+    echo "ERROR: OPEN_SUITE_DEMO_ADMIN_USERNAME must not be 'admin' (would rotate the master admin account)" >&2
+    exit 1
+  fi
   echo "==> Ensuring dedicated demo admin account '${DEMO_ADMIN_USERNAME}' exists"
   # Password goes over stdin so it never appears in argv on the host side.
   printf '%s' "${DEMO_ADMIN_PASSWORD}" | \
@@ -285,14 +294,8 @@ DEMO_ADMIN_USERNAME="$1"
 DEMO_ADMIN_PASSWORD="$(cat)"
 KC=/opt/bitnami/keycloak/bin/kcadm.sh
 CFG=/tmp/kc.config
-# First run: admin still has the bootstrap password. Re-runs: this script
-# already rotated admin to the demo-admin password (when the demo admin IS
-# admin), so bootstrap fails invalid_grant. Probe which state the box is in.
 PW=$(cat "$KC_BOOTSTRAP_ADMIN_PASSWORD_FILE")
-if ! "$KC" config credentials --config "$CFG" --server http://localhost:8080/ --realm master --user admin --password "$PW" >/dev/null 2>&1; then
-  PW="$DEMO_ADMIN_PASSWORD"
-  "$KC" config credentials --config "$CFG" --server http://localhost:8080/ --realm master --user admin --password "$PW" >/dev/null
-fi
+"$KC" config credentials --config "$CFG" --server http://localhost:8080/ --realm master --user admin --password "$PW" >/dev/null
 if ! "$KC" get users --config "$CFG" -r master -q "username=${DEMO_ADMIN_USERNAME}" -q exact=true --fields username \
     | grep -q "\"${DEMO_ADMIN_USERNAME}\""; then
   "$KC" create users --config "$CFG" -r master \
