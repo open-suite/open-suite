@@ -16,6 +16,14 @@ export KUBECONFIG=/etc/rancher/k3s/k3s.yaml
 
 echo "==> Waiting for Nextcloud to be ready"
 kubectl rollout status deploy/nextcloud -n mb-nextcloud --timeout=300s
+# On a fresh install the pod turns Ready while the entrypoint is still
+# populating /var/www/html on the PVC, and an early occ exec dies with
+# "versioncheck.php not found". Wait until occ itself answers.
+for i in $(seq 1 30); do
+  kubectl exec -n mb-nextcloud deploy/nextcloud -c nextcloud -- php occ status >/dev/null 2>&1 && break
+  [ "$i" = 30 ] && { echo "ERROR: occ not responding after 5 minutes" >&2; exit 1; }
+  sleep 10
+done
 
 echo "==> Refreshing Collabora capabilities cache"
 # activate-config re-fetches /hosting/discovery + /hosting/capabilities and
