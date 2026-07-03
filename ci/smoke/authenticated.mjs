@@ -48,9 +48,17 @@ try {
   await page.waitForURL(`https://bridge.${DOMAIN}/**`, { timeout: 30000 });
   ok("SSO login via gate reaches the portal");
 
-  // Portal shows real content, not an error shell.
-  await page.waitForSelector("text=Start instant meeting", { timeout: 30000 });
-  ok("portal renders (instant-meeting control present)");
+  // The portal has its own OIDC session; a fresh browser lands on its /login.
+  // Wait for either the dashboard or the login stub, click through the latter
+  // (round-trips Keycloak silently — the SSO session exists).
+  const dashboard = page.locator("text=Video Conference").first();
+  const loginBtn = page.locator("text=Log in").last();
+  await dashboard.or(loginBtn).first().waitFor({ timeout: 30000 });
+  if (!(await dashboard.isVisible().catch(() => false))) {
+    await loginBtn.click();
+  }
+  await dashboard.waitFor({ timeout: 30000 });
+  ok("portal renders (dashboard widgets present)");
 
   // --- Portal calendar API --------------------------------------------------
   const cal = await page.request.get(`https://bridge.${DOMAIN}/api/v1/caldav/events`);
