@@ -38,6 +38,14 @@ if [ "${OPEN_SUITE_TLS_MODE:-letsencrypt}" = "selfsigned" ]; then
   done
 fi
 
+if [ "${OPEN_SUITE_TLS_MODE:-letsencrypt}" = "selfsigned" ]; then
+  # The cert-store import above covers app code using IClientService, but
+  # richdocuments' discovery fetch still verifies against the system bundle —
+  # it ships its own toggle for exactly this.
+  kubectl exec -n mb-nextcloud deploy/nextcloud -c nextcloud -- \
+    php occ config:app:set richdocuments disable_certificate_verification --value yes
+fi
+
 echo "==> Refreshing Collabora capabilities cache"
 # activate-config re-fetches /hosting/discovery + /hosting/capabilities and
 # rewrites the cache. Idempotent: running it again just re-fetches.
