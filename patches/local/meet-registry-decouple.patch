@@ -1,0 +1,15 @@
+diff --git a/helmfile/apps/meet/values.yaml.gotmpl b/helmfile/apps/meet/values.yaml.gotmpl
+index 6542bb9..42d26e2 100644
+--- a/helmfile/apps/meet/values.yaml.gotmpl
++++ b/helmfile/apps/meet/values.yaml.gotmpl
+@@ -4,7 +4,9 @@ global:
+   ## @param global.imageRegistry Global Docker Image registry
+   ## @param global.imagePullSecrets Global Docker registry secret names as an array
+   ##
+-  imageRegistry: {{(coalesce .Values.container.meet_frontend.registry .Values.container.default.registry) | quote }}
++  # Open Suite: do not couple the release-wide registry to the frontend's —
++  # overriding container.meet_frontend.registry must not retarget the backend.
++  imageRegistry: {{ .Values.container.default.registry | quote }}
+   {{- with (coalesce .Values.container.meet_frontend.imagePullSecret .Values.container.default.imagePullSecret) }}
+   imagePullSecrets:
+     - name: {{ . | quote }}
