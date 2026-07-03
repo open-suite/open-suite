@@ -124,6 +124,12 @@ for p in "${REPO_ROOT}"/patches/local/*.patch; do
   git apply --3way "$p"
 done
 
+if [ "${OPEN_SUITE_TLS_MODE}" = "selfsigned" ]; then
+  KC_BACKCHANNEL="http://keycloak-keycloak.mb-keycloak"
+else
+  KC_BACKCHANNEL="https://id.${DOMAIN}"
+fi
+
 cat > helmfile/environments/demo/mijnbureau.yaml.gotmpl <<YAML
 ---
 global:
@@ -217,11 +223,15 @@ authentication:
   oidc:
     issuer: "https://id.${DOMAIN}/realms/mijnbureau"
     authorization_endpoint: "https://id.${DOMAIN}/realms/mijnbureau/protocol/openid-connect/auth"
-    token_endpoint: "https://id.${DOMAIN}/realms/mijnbureau/protocol/openid-connect/token"
-    introspection_endpoint: "https://id.${DOMAIN}/realms/mijnbureau/protocol/openid-connect/token/introspect"
-    userinfo_endpoint: "https://id.${DOMAIN}/realms/mijnbureau/protocol/openid-connect/userinfo"
     end_session_endpoint: "https://id.${DOMAIN}/realms/mijnbureau/protocol/openid-connect/logout"
-    jwks_uri: "https://id.${DOMAIN}/realms/mijnbureau/protocol/openid-connect/certs"
+    # Backchannel endpoints (server-to-server): in selfsigned mode the apps
+    # cannot verify the chart-generated certs, so they talk to Keycloak's
+    # in-cluster plain-HTTP service instead. issuer and the browser-facing
+    # endpoints above stay on the public https host either way.
+    token_endpoint: "${KC_BACKCHANNEL}/realms/mijnbureau/protocol/openid-connect/token"
+    introspection_endpoint: "${KC_BACKCHANNEL}/realms/mijnbureau/protocol/openid-connect/token/introspect"
+    userinfo_endpoint: "${KC_BACKCHANNEL}/realms/mijnbureau/protocol/openid-connect/userinfo"
+    jwks_uri: "${KC_BACKCHANNEL}/realms/mijnbureau/protocol/openid-connect/certs"
 
 # Open Suite: gate the workspace app ingresses behind the edge auth gate
 # (12-auth-gate.sh deploys the gate itself). Consumed by
