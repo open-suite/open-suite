@@ -15,7 +15,7 @@ Opinionated self-hostable digital-workplace distribution. Curates MinBZK
 ## Demo VPS
 - **`ssh root@95.217.109.206`** — single-VPS k3s happy-path deploy.
 - Domain: `demo.opensuite.online` (in `/etc/mijnbureau/domain`). Portal at https://bridge.demo.opensuite.online
-- Deploy entry point: `deploy.sh <domain> <email> <master-password>`, run as root from a checkout (`/root/open-suite` on the box); it runs `scripts/single-vps-deploy/01..13` (gaps = steps made declarative, ticket 3.4). Idempotent.
+- Deploy entry point: `deploy.sh <domain> <email> <master-password>`, run as root from a checkout (`/root/open-suite` on the box); it runs `scripts/single-vps-deploy/01..12` (gaps = steps made declarative; images are pinned in the demo values). Idempotent.
 - Namespaces (`kubectl get ns`): `mb-bureaublad` (portal + auth gate), `mb-keycloak`, `mb-nextcloud`, `mb-collabora`, `mb-docs`, `mb-grist`, `mb-element`, `mb-meet`, `mb-livekit`, plus `cert-manager`. Use `KUBECONFIG=/etc/rancher/k3s/k3s.yaml kubectl ...`.
 - Portal changes go in the `open-suite/open-suite-portal` fork; `08-open-suite-portal.sh` builds and deploys it from `@main`. (The old "sed the html into a thin image" workflow is superseded.)
 

@@ -60,7 +60,6 @@ bash "${DIR}/09-portal-header.sh"
 bash "${DIR}/10-keycloak-login.sh"
 bash "${DIR}/11-element-web.sh"
 bash "${DIR}/12-auth-gate.sh"
-bash "${DIR}/13-meet-frontend.sh"
 
 echo ""
 echo "############################################################"
