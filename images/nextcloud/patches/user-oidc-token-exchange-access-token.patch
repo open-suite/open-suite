@@ -1,0 +1,20 @@
+--- a/user_oidc/lib/Service/TokenService.php
++++ b/user_oidc/lib/Service/TokenService.php
+@@ -358,7 +358,7 @@
+ 				// urn:ietf:params:oauth:token-type:access_token
+ 				// or urn:ietf:params:oauth:token-type:id_token
+ 				// this one will get us an access token and refresh token within the response
+-				'requested_token_type' => 'urn:ietf:params:oauth:token-type:refresh_token',
++				'requested_token_type' => 'urn:ietf:params:oauth:token-type:access_token',
+ 				'audience' => $targetAudience,
+ 				'scope' => $scope,
+ 			];
+@@ -376,7 +376,7 @@
+ 				'client_id' => $oidcProvider->getClientId(),
+ 				'grant_type' => 'urn:ietf:params:oauth:grant-type:token-exchange',
+ 				'subject_token_type' => 'urn:ietf:params:oauth:token-type:access_token',
+-				'requested_token_type' => 'urn:ietf:params:oauth:token-type:refresh_token',
++				'requested_token_type' => 'urn:ietf:params:oauth:token-type:access_token',
+ 				'audience' => $targetAudience,
+ 			]);
+ 

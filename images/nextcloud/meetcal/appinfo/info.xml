@@ -1,0 +1,23 @@
+<?xml version="1.0"?>
+<!--
+  Open Suite — Calendar ↔ Meet bridge.
+  A minimal same-origin endpoint Nextcloud Calendar's injected JS calls to
+  create/get a La Suite Meet room for the logged-in user. Nextcloud can't be
+  iframed (frame-ancestors 'none'), so the room must be created server-side on
+  the Nextcloud origin; we mint a `meet`-audience token via user_oidc's
+  internal-to-internal token exchange (no target client secret needed).
+-->
+<info xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:noNamespaceSchemaLocation="https://apps.nextcloud.com/schema/apps/info.xsd">
+    <id>meetcal</id>
+    <name>Open Suite Calendar Meet</name>
+    <summary>Create La Suite Meet rooms from Calendar events</summary>
+    <description>Adds a same-origin endpoint to create/get a Meet room for the current user, used by the Calendar event editor.</description>
+    <version>1.0.0</version>
+    <licence>agpl</licence>
+    <author>Open Suite</author>
+    <namespace>Meetcal</namespace>
+    <category>integration</category>
+    <dependencies>
+        <nextcloud min-version="30" max-version="34"/>
+    </dependencies>
+</info>

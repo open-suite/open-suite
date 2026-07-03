@@ -19,6 +19,10 @@ OPEN_SUITE_DEMO_ADMIN_USERNAME="${OPEN_SUITE_DEMO_ADMIN_USERNAME:-demoadmin}"
 PORTAL_REF="${PORTAL_REF:-54795b661cb9c60938d0e6e7a15418ee6e0bbd86}"
 # Pinned upstream Meet ref the meet-frontend-image workflow builds+tags.
 MEET_TAG="${MEET_TAG:-v1.20.0}"
+# Open Suite Nextcloud image tag (nextcloud-image workflow: upstream base +
+# meetcal + patched user_oidc). Tracks the upstream base tag; use a sha- tag
+# to pin a specific build.
+NEXTCLOUD_TAG="${NEXTCLOUD_TAG:-34.0.0-apache}"
 # The demo admin password never defaults to the master password. Explicitly set
 # → persisted and shown on the login-page credential panel. Unset → generated
 # (kept across re-runs) and never shown; read it from
@@ -181,6 +185,10 @@ application:
 # publish-images workflow). Declared here so helmfile owns the images and a
 # re-apply can never revert them to upstream (which a kubectl-patch pin did).
 container:
+  nextcloud:
+    registry: "ghcr.io"
+    repository: "open-suite/nextcloud"
+    tag: "${NEXTCLOUD_TAG}"
   bureaublad:
     registry: "ghcr.io"
     backend:
