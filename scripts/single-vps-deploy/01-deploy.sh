@@ -60,7 +60,8 @@ curl -sfL https://get.k3s.io | INSTALL_K3S_EXEC="--write-kubeconfig-mode 644" sh
 export KUBECONFIG=/etc/rancher/k3s/k3s.yaml
 
 curl -fsSL https://raw.githubusercontent.com/helm/helm/main/scripts/get-helm-3 | bash
-curl -fsSL "https://github.com/helmfile/helmfile/releases/download/v${HELMFILE_V}/helmfile_${HELMFILE_V}_linux_amd64.tar.gz" \
+ARCH="$(dpkg --print-architecture 2>/dev/null || uname -m | sed -e s/x86_64/amd64/ -e s/aarch64/arm64/)"
+curl -fsSL "https://github.com/helmfile/helmfile/releases/download/v${HELMFILE_V}/helmfile_${HELMFILE_V}_linux_${ARCH}.tar.gz" \
   | tar -xz -C /usr/local/bin helmfile
 # Idempotent: the plugin persists across a k3s wipe, so skip if already present.
 helm plugin list 2>/dev/null | grep -q '^diff' || helm plugin install https://github.com/databus23/helm-diff
