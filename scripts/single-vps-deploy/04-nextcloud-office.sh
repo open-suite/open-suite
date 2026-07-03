@@ -25,6 +25,19 @@ for i in $(seq 1 30); do
   sleep 10
 done
 
+# Self-signed deploys: Nextcloud's outbound HTTP client (richdocuments WOPI
+# discovery, user_oidc, meetcal) verifies TLS against Nextcloud's own cert
+# store. Import the local certs so every occ/app fetch below verifies.
+if [ "${OPEN_SUITE_TLS_MODE:-letsencrypt}" = "selfsigned" ]; then
+  DOMAIN="$(cat /etc/mijnbureau/domain)"
+  echo "==> Importing self-signed certs into Nextcloud's certificate store"
+  for h in id collabora meet nextcloud; do
+    kubectl exec -n mb-nextcloud deploy/nextcloud -c nextcloud -- sh -c "
+      echo | openssl s_client -connect ${h}.${DOMAIN}:443 -servername ${h}.${DOMAIN} 2>/dev/null \
+        | openssl x509 -outform PEM > /tmp/${h}.crt && php occ security:certificates:import /tmp/${h}.crt"
+  done
+fi
+
 echo "==> Refreshing Collabora capabilities cache"
 # activate-config re-fetches /hosting/discovery + /hosting/capabilities and
 # rewrites the cache. Idempotent: running it again just re-fetches.
