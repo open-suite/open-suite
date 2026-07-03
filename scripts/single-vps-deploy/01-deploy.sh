@@ -16,7 +16,7 @@ OPEN_SUITE_DEMO_PASSWORD="${OPEN_SUITE_DEMO_PASSWORD:-myStrongPassword123}"
 OPEN_SUITE_DEMO_ADMIN_USERNAME="${OPEN_SUITE_DEMO_ADMIN_USERNAME:-demoadmin}"
 # Pinned open-suite-portal commit: selects the CI-built portal images
 # (ghcr.io/open-suite/portal-{api,frontend}:sha-<short>). Bump deliberately.
-PORTAL_REF="${PORTAL_REF:-4cadd379deac15d0f8690693c5ead8847e4c27b7}"
+PORTAL_REF="${PORTAL_REF:-5f055f212e49891e281b002198e5edbb1c895571}"
 # Pinned upstream Meet ref the meet-frontend-image workflow builds+tags.
 MEET_TAG="${MEET_TAG:-v1.20.0}"
 # Open Suite Nextcloud image tag (nextcloud-image workflow: upstream base +
