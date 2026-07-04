@@ -23,4 +23,11 @@ for app in calendar deck contacts; do
     sh -c "cd /var/www/html && (php occ app:install $app || php occ app:enable $app)"
 done
 
+# meetcal ships in the image (synced onto custom_apps by an entrypoint hook)
+# and the chart's post-install occ enable races that sync on a FRESH install —
+# the files don't exist yet, the enable no-ops, and the app sits disabled.
+# Enable it here too, late and reliably; enabling an enabled app is a no-op.
+kubectl -n mb-nextcloud exec deploy/nextcloud -c nextcloud -- \
+  sh -c "cd /var/www/html && php occ app:enable meetcal"
+
 echo "Done. Portal images and calendar wiring are owned by helmfile (01)."
