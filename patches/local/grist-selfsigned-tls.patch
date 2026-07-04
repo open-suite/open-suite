@@ -1,0 +1,17 @@
+diff --git a/helmfile/apps/grist/values.yaml.gotmpl b/helmfile/apps/grist/values.yaml.gotmpl
+index 0d489aa..d64fedd 100644
+--- a/helmfile/apps/grist/values.yaml.gotmpl
++++ b/helmfile/apps/grist/values.yaml.gotmpl
+@@ -197,6 +197,12 @@ persistence:
+ # page. Served by the grist-static nginx release, which sets the matching CORS
+ # header.
+ extraEnvVars:
++  {{- if .Values.global.tls.selfSigned }}
++  # Local/dev only: grist's OIDC discovery against the self-signed id. host
++  # cannot verify TLS and crashloops the pod.
++  - name: NODE_TLS_REJECT_UNAUTHORIZED
++    value: "0"
++  {{- end }}
+   - name: GRIST_INCLUDE_CUSTOM_SCRIPT_URL
+     value: 'https://{{ index .Values.global.hostname "grist-static" }}.{{ .Values.global.domain }}/bureaublad-button.js'
+ 
