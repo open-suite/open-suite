@@ -1,0 +1,32 @@
+diff --git a/helmfile/apps/nextcloud/charts/nextcloud/templates/cronjob.yaml b/helmfile/apps/nextcloud/charts/nextcloud/templates/cronjob.yaml
+index 415c0f4..ee401da 100644
+--- a/helmfile/apps/nextcloud/charts/nextcloud/templates/cronjob.yaml
++++ b/helmfile/apps/nextcloud/charts/nextcloud/templates/cronjob.yaml
+@@ -179,6 +179,11 @@ spec:
+                   subPath: {{ $key }}
+                 {{- end }}
+                 {{- end }}
++                {{- range $key, $value := .Values.extraConfigs }}
++                - name: nextcloud-config
++                  mountPath: /var/www/html/config/{{ $key }}
++                  subPath: {{ $key }}
++                {{- end }}
+                 - name: nextcloud-apache-config
+                   mountPath: /etc/apache2/ports.conf
+                   subPath: ports.conf
+diff --git a/helmfile/apps/nextcloud/charts/nextcloud/templates/deployment.yaml b/helmfile/apps/nextcloud/charts/nextcloud/templates/deployment.yaml
+index c014622..9933f71 100644
+--- a/helmfile/apps/nextcloud/charts/nextcloud/templates/deployment.yaml
++++ b/helmfile/apps/nextcloud/charts/nextcloud/templates/deployment.yaml
+@@ -332,6 +332,11 @@ spec:
+               subPath: {{ $key }}
+             {{- end }}
+             {{- end }}
++            {{- range $key, $value := .Values.extraConfigs }}
++            - name: nextcloud-config
++              mountPath: /var/www/html/config/{{ $key }}
++              subPath: {{ $key }}
++            {{- end }}
+             - name: nextcloud-apache-config
+               mountPath: /etc/apache2/ports.conf
+               subPath: ports.conf
