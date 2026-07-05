@@ -118,12 +118,18 @@ try {
     await page.locator('[role="menuitem"], .v-popper__popper button, .v-popper__popper li').filter({ hasText: /document/i }).first().click({ timeout: 8000 });
     await page.waitForTimeout(1200);
     await page.keyboard.press("Enter");
+    // The editor renders inside the cross-origin Collabora iframe; ask that
+    // frame directly. Failure overlays render in the top document.
     let editorUp = false;
     for (let i = 0; i < 12; i++) {
       await page.waitForTimeout(3000);
       const txt = await page.evaluate(() => document.body.innerText);
       if (/Document loading failed|Unauthorized WOPI/i.test(txt)) break;
-      if (page.frames().some(f => f.url().includes("cool.html")) && /Page 1 of 1|words/i.test(txt)) { editorUp = true; break; }
+      const cool = page.frames().find(f => f.url().includes("cool.html"));
+      if (cool) {
+        const inner = await cool.evaluate(() => document.body?.innerText || "").catch(() => "");
+        if (/Page 1 of|words|characters/i.test(inner)) { editorUp = true; break; }
+      }
     }
     if (editorUp) ok("Collabora opens a document (WOPI chain works)");
     else fail("Collabora document open", "editor never became ready or WOPI failed");
