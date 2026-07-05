@@ -115,7 +115,7 @@ try {
     await page.goto(`https://nextcloud.${DOMAIN}/apps/files/`, { waitUntil: "domcontentloaded" });
     await page.waitForTimeout(4000);
     await page.getByRole("button", { name: "New", exact: true }).click();
-    await page.locator('[role="menuitem"], .v-popper__popper button, .v-popper__popper li').filter({ hasText: /^Document$/ }).first().click({ timeout: 8000 });
+    await page.locator('[role="menuitem"], .v-popper__popper button, .v-popper__popper li').filter({ hasText: /document/i }).first().click({ timeout: 8000 });
     await page.waitForTimeout(1200);
     await page.keyboard.press("Enter");
     let editorUp = false;
