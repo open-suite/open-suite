@@ -1,0 +1,15 @@
+diff --git a/helmfile/apps/element/values-element-web.yaml.gotmpl b/helmfile/apps/element/values-element-web.yaml.gotmpl
+index 55e6c1a..d1aca27 100644
+--- a/helmfile/apps/element/values-element-web.yaml.gotmpl
++++ b/helmfile/apps/element/values-element-web.yaml.gotmpl
+@@ -292,6 +292,10 @@ config:
+       - {{ .Values.global.hostname.synapse | default "matrix-element" }}.{{ .Values.global.domain | default "example.com" }}
+   setting_defaults:
+     breadcrumbs: true
++  # Open Suite: Slack-like chat — new rooms/DMs are not E2EE by default
++  # (pairs with the synapse-disable-default-e2ee patch on the server side).
++  io.element.e2ee:
++    default: false
+   default_theme: "light"
+   disable_guests: true
+   force_verification: false
