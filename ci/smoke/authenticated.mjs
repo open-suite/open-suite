@@ -96,6 +96,18 @@ try {
     ok(`meetcal mints a joinable room (${roomUrl})`);
   else fail("meetcal room", `HTTP ${room.status}, body ${room.body.slice(0, 120)}`);
 
+  // --- Matrix SSO flows through without a consent screen --------------------
+  // (sso.client_whitelist; the Chat widget breaks UX without it)
+  await page.goto(
+    `https://matrix.${DOMAIN}/_matrix/client/v3/login/sso/redirect?redirectUrl=https%3A%2F%2Fbridge.${DOMAIN}%2F`,
+    { waitUntil: "domcontentloaded" }
+  ).catch(() => {});
+  await page.waitForTimeout(3000);
+  const ssoBody = await page.evaluate(() => document.body.innerText);
+  if (page.url().includes("loginToken=") && !ssoBody.includes("Continue to your account"))
+    ok("matrix SSO completes without consent screen");
+  else fail("matrix SSO consent", `landed on ${page.url().slice(0, 80)}`);
+
   // --- Docs, Grist, Element load --------------------------------------------
   for (const [host, marker] of [
     ["docs", "docs"],
