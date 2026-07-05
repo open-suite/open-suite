@@ -1,8 +1,8 @@
 diff --git a/helmfile/apps/nextcloud/values.yaml.gotmpl b/helmfile/apps/nextcloud/values.yaml.gotmpl
-index 706e9e2..5ff66ee 100644
+index 706e9e2..3ea23bb 100644
 --- a/helmfile/apps/nextcloud/values.yaml.gotmpl
 +++ b/helmfile/apps/nextcloud/values.yaml.gotmpl
-@@ -180,7 +180,18 @@ mail:
+@@ -180,7 +180,21 @@ mail:
  trustedDomains:
    - {{ .Values.global.hostname.nextcloud }}.{{ .Values.global.domain }}
  
@@ -10,7 +10,10 @@ index 706e9e2..5ff66ee 100644
 +# Open Suite: include the pod subnet — Traefik pods proxy from there, not from
 +# the service subnet. Without it Nextcloud sees every request as one internal
 +# IP: all users share a single rate-limit bucket and client IPs log wrong.
-+trustedProxies: {{ concat .Values.cluster.networking.serviceSubnet .Values.cluster.networking.podSubnet | toYaml | nindent 2 }}
++# 127.0.0.1: the opensuite-header sidecar proxies to the app container over
++# localhost; without trusting it Nextcloud cannot walk X-Forwarded-For and
++# sees every caller as 127.0.0.1 (breaking the WOPI pod-subnet allowlist).
++trustedProxies: {{ concat .Values.cluster.networking.serviceSubnet .Values.cluster.networking.podSubnet (list "127.0.0.1") | toYaml | nindent 2 }}
 +
 +# Open Suite: CoreDNS rewrites *.DOMAIN to the in-cluster Traefik ClusterIP, a
 +# private IP, and Nextcloud's SSRF guard refuses server-side requests to
