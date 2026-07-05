@@ -1,5 +1,5 @@
 diff --git a/helmfile/apps/nextcloud/values.yaml.gotmpl b/helmfile/apps/nextcloud/values.yaml.gotmpl
-index 706e9e2..3ea23bb 100644
+index 706e9e2..ba9a46c 100644
 --- a/helmfile/apps/nextcloud/values.yaml.gotmpl
 +++ b/helmfile/apps/nextcloud/values.yaml.gotmpl
 @@ -180,7 +180,21 @@ mail:
@@ -25,3 +25,16 @@ index 706e9e2..3ea23bb 100644
  
  forwardedForHeaders:
    - "X-Forwarded-For"
+@@ -220,7 +234,11 @@ persistence:
+ # The is the URL is used to connect Collabora Server with Next Cloud Office App automaticlly
+ collabora:
+   url: "https://{{ .Values.global.hostname.collabora | default "collabora" }}.{{ .Values.global.domain | default "example.com"  }}"
+-  wopi_allowlist: {{ index .Values.cluster.networking.podSubnet 0 }}
++  # 127.0.0.1: with the header sidecar in front, an all-trusted forwarded
++  # chain (Collabora is in the pod subnet = trusted_proxies) resolves to the
++  # sidecar's localhost. External callers resolve to their public IP and stay
++  # blocked either way.
++  wopi_allowlist: "{{ index .Values.cluster.networking.podSubnet 0 }},127.0.0.1"
+ {{- end }}
+ 
+ # Default storage quota per user
