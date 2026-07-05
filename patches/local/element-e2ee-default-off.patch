@@ -1,3 +1,17 @@
+diff --git a/helmfile/apps/element/charts/element-web/templates/configmap.yaml b/helmfile/apps/element/charts/element-web/templates/configmap.yaml
+index ad1374d..b30bbf9 100644
+--- a/helmfile/apps/element/charts/element-web/templates/configmap.yaml
++++ b/helmfile/apps/element/charts/element-web/templates/configmap.yaml
+@@ -42,6 +42,9 @@ data:
+       "setting_defaults": {
+         "breadcrumbs": {{ .Values.config.setting_defaults.breadcrumbs }}
+       },
++      {{- with (index .Values.config "io.element.e2ee") }}
++      "io.element.e2ee": {{ toJson . }},
++      {{- end }}
+       "default_theme": "{{ .Values.config.default_theme }}",
+       "brand": "{{ .Values.config.brand }} element",
+       "permalink_prefix": "https://{{ .Values.config.name }}.{{ .Values.config.homeserver.domain }}",
 diff --git a/helmfile/apps/element/values-element-web.yaml.gotmpl b/helmfile/apps/element/values-element-web.yaml.gotmpl
 index 55e6c1a..d1aca27 100644
 --- a/helmfile/apps/element/values-element-web.yaml.gotmpl
