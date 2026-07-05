@@ -1,0 +1,33 @@
+diff --git a/helmfile/apps/element/charts/synapse/templates/secret.yaml b/helmfile/apps/element/charts/synapse/templates/secret.yaml
+index c69374a..9d22112 100644
+--- a/helmfile/apps/element/charts/synapse/templates/secret.yaml
++++ b/helmfile/apps/element/charts/synapse/templates/secret.yaml
+@@ -61,6 +61,10 @@ stringData:
+ 
+     oidc_providers: {{- .Values.synapse.oidcProviders | toYaml | nindent 6 }}
+ 
++    {{- with .Values.synapse.sso }}
++    sso: {{- . | toYaml | nindent 6 }}
++    {{- end }}
++
+     password_config:
+       enabled: {{ .Values.synapse.passwordConfig.enabled }}
+       localdb_enabled: {{ .Values.synapse.passwordConfig.localdbEnabled }}
+diff --git a/helmfile/apps/element/values-synapse.yaml.gotmpl b/helmfile/apps/element/values-synapse.yaml.gotmpl
+index 29b3f89..5c71890 100644
+--- a/helmfile/apps/element/values-synapse.yaml.gotmpl
++++ b/helmfile/apps/element/values-synapse.yaml.gotmpl
+@@ -271,6 +271,13 @@ synapse:
+   # Users who register on this homeserver will automatically be joined to the rooms listed under this option.
+   autoJoinRooms: [{{ (printf "#%s:%s" "welkom" $serverName) | quote }}]
+   # List of OpenID Connect (OIDC) / OAuth 2.0 identity providers, for registration and login.
++  # Open Suite: the portal's Chat widget logs into synapse via SSO; whitelist
++  # the portal so users already authenticated at bridge. aren't shown the
++  # "Continuing will grant ... access to your account" consent screen.
++  sso:
++    client_whitelist:
++      - "https://{{ .Values.global.hostname.bureaublad | default "bureaublad" }}.{{ .Values.global.domain }}/"
++      - "https://{{ .Values.global.hostname.element | default "element" }}.{{ .Values.global.domain }}/"
+   oidcProviders:
+     - idp_id: mijnbureau
+       idp_name: "MijnBureau authenticatie"
