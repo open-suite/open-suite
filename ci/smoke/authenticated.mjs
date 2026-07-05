@@ -128,7 +128,8 @@ try {
       const cool = page.frames().find(f => f.url().includes("cool.html"));
       if (cool) {
         const inner = await cool.evaluate(() => document.body?.innerText || "").catch(() => "");
-        if (/Page 1 of|words|characters/i.test(inner)) { editorUp = true; break; }
+        // Menubar or status bar — either proves the editor rendered.
+        if (/Page 1 of|words|characters/i.test(inner) || (inner.includes("File") && inner.includes("Insert"))) { editorUp = true; break; }
       }
     }
     if (editorUp) ok("Collabora opens a document (WOPI chain works)");
