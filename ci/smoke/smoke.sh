@@ -55,6 +55,9 @@ for h in bridge nextcloud; do
   esac
 done
 
+echo "== Matrix client API is reachable (Element breaks if the gate eats it)"
+check "matrix client versions" 200 "$(code "https://matrix.${DOMAIN}/_matrix/client/versions")"
+
 echo "== Identity and gate health"
 check "id. realm endpoint"   200 "$(code "https://id.${DOMAIN}/realms/mijnbureau")"
 check "auth. healthz"        200 "$(code "https://auth.${DOMAIN}/healthz")"

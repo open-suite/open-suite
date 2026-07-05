@@ -82,19 +82,6 @@ index 55e6c1a..e7d58ec 100644
      {{- end }}
  # Application Configuration, more information can be found here :https://web-docs.element.dev/Element%20Web/config.html
  config:
-diff --git a/helmfile/apps/element/values-synapse.yaml.gotmpl b/helmfile/apps/element/values-synapse.yaml.gotmpl
-index 29b3f89..8b7bed4 100644
---- a/helmfile/apps/element/values-synapse.yaml.gotmpl
-+++ b/helmfile/apps/element/values-synapse.yaml.gotmpl
-@@ -176,7 +176,7 @@ ingress:
-     haproxy.router.openshift.io/hsts_header: max-age=31536000;includeSubDomains;preload
-     {{- end }}
-     {{- if eq .Values.cluster.ingress.type "traefik" }}
--    traefik.ingress.kubernetes.io/router.middlewares: '{{ .Release.Namespace }}-hsts-header@kubernetescrd'
-+    traefik.ingress.kubernetes.io/router.middlewares: '{{ .Release.Namespace }}-hsts-header@kubernetescrd{{ if dig "opensuite" "authGate" "enabled" false .Values }},{{ .Values.application.bureaublad.namespace }}-opensuite-auth-gate@kubernetescrd{{ end }}'
-     {{- end }}
- # This section builds out the service account more information can be found here: https://kubernetes.io/docs/concepts/security/service-accounts/
- serviceAccount:
 diff --git a/helmfile/apps/grist/values.yaml.gotmpl b/helmfile/apps/grist/values.yaml.gotmpl
 index 0d489aa..f8b8458 100644
 --- a/helmfile/apps/grist/values.yaml.gotmpl
