@@ -9,6 +9,7 @@ import hmac
 import http.server
 import json
 import os
+import re
 import secrets
 import time
 import urllib.error
@@ -48,6 +49,9 @@ END_SESSION_ENDPOINT = f"{ISSUER}/protocol/openid-connect/logout"
 JWKS_ENDPOINT = f"{ISSUER}/protocol/openid-connect/certs"
 
 SESSIONS: dict[str, dict[str, object]] = {}
+
+# Nextcloud richdocuments WOPI endpoints (with or without index.php).
+WOPI_PATH = re.compile(r"^/(index\.php/)?apps/richdocuments/wopi/")
 
 # Keys are cached ~10 min so a fresh JWKS fetch is not on every request's path.
 JWKS_CLIENT = PyJWKClient(JWKS_ENDPOINT, cache_keys=True, lifespan=600, timeout=10)
@@ -315,6 +319,16 @@ class Handler(http.server.BaseHTTPRequestHandler):
     def handle_auth(self) -> None:
         if self.headers.get("Access-Control-Request-Method"):
             self.send_preflight()
+            return
+
+        # Collabora's WOPI callbacks (CheckFileInfo, contents) authenticate
+        # with their own WOPI access_token, not a realm token; Nextcloud
+        # additionally IP-restricts them to the pod subnet (wopi_allowlist).
+        # Without this pass-through every document open dies with
+        # "Unauthorized WOPI host".
+        uri = self.headers.get("X-Forwarded-Uri") or self.path or ""
+        if WOPI_PATH.match(uri):
+            self.send_empty(HTTPStatus.NO_CONTENT, {})
             return
 
         # Service-to-service API calls behind gated ingresses pass through on a
