@@ -108,6 +108,29 @@ try {
     ok("matrix SSO completes without consent screen");
   else fail("matrix SSO consent", `landed on ${page.url().slice(0, 80)}`);
 
+  // --- Office: a document actually opens in Collabora ------------------------
+  // (WOPI: gate pass-through + trusted_proxies/allowlist — three separate
+  // breakages found here; the editor toolbar is the proof of life)
+  try {
+    await page.goto(`https://nextcloud.${DOMAIN}/apps/files/`, { waitUntil: "domcontentloaded" });
+    await page.waitForTimeout(4000);
+    await page.getByRole("button", { name: "New", exact: true }).click();
+    await page.locator('[role="menuitem"], .v-popper__popper button, .v-popper__popper li').filter({ hasText: /^Document$/ }).first().click({ timeout: 8000 });
+    await page.waitForTimeout(1200);
+    await page.keyboard.press("Enter");
+    let editorUp = false;
+    for (let i = 0; i < 12; i++) {
+      await page.waitForTimeout(3000);
+      const txt = await page.evaluate(() => document.body.innerText);
+      if (/Document loading failed|Unauthorized WOPI/i.test(txt)) break;
+      if (page.frames().some(f => f.url().includes("cool.html")) && /Page 1 of 1|words/i.test(txt)) { editorUp = true; break; }
+    }
+    if (editorUp) ok("Collabora opens a document (WOPI chain works)");
+    else fail("Collabora document open", "editor never became ready or WOPI failed");
+  } catch (e) {
+    fail("Collabora document open", e.message.slice(0, 100));
+  }
+
   // --- Docs, Grist, Element load --------------------------------------------
   for (const [host, marker] of [
     ["docs", "docs"],
