@@ -125,3 +125,29 @@ WebGL shader work is iterative and "as good as Zoom" is a human judgment call.
 Expect several working sessions, not one pass. The achievable agent-verifiable
 bar is "clearly better than current, clean edges, no halo, stable" — the final
 "ship it" is the human's eyes.
+
+## POC result (2026-07-06) — approach validated
+
+Built an A/B harness (Chromium + real MediaPipe segmentation + the WebGL
+pipeline) over a hard 720p multi-person meeting-room clip (xiph derf vidyo1)
+and compared the current path against the proposed one on identical frames.
+
+Current path (selfie_segmenter binary mask + LiveKit smoothstep composite):
+- Blur mode: all three faces blurred as background — the binary model fails on
+  a wide multi-person shot.
+- Virtual-bg mode: catastrophic — model inverts, people erased into
+  head-shaped holes, room kept as "foreground".
+
+Proposed path (selfie_multiclass confidence mask + joint bilateral filter +
+light-wrap composite):
+- Blur mode: all three people sharp, clean hair/glasses/shoulder edges, room
+  correctly blurred, no halo.
+- Virtual-bg mode: all three cleanly composited onto a replacement office
+  image, natural edges, no haze.
+
+The two changes that carry the win are the multiclass model (handles
+multi-person, softer mask) and the joint bilateral edge refinement. This is
+Google-Meet-class output where the current path is unusable. Remaining before
+ship: temporal EMA for video stability, production integration into the meet
+frontend (patch + baked model + CI), live verification. Harness lives in the
+agent scratchpad (vb-harness/).
