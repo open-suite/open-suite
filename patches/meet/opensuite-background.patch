@@ -1,0 +1,511 @@
+diff --git a/src/frontend/Dockerfile b/src/frontend/Dockerfile
+index 9a1bf38..f0f81c1 100644
+--- a/src/frontend/Dockerfile
++++ b/src/frontend/Dockerfile
+@@ -36,6 +36,14 @@ WORKDIR /home/frontend
+ ARG VITE_API_BASE_URL
+ ENV VITE_API_BASE_URL=${VITE_API_BASE_URL}
+ 
++# Open Suite: bake the segmentation model + version-matched MediaPipe wasm into
++# the static assets so the virtual-background processor has no CDN dependency.
++# See src/features/rooms/livekit/components/blur/OpenSuiteBackgroundProcessor.ts
++RUN mkdir -p public/opensuite-vision/wasm \
++ && cp node_modules/@mediapipe/tasks-vision/wasm/* public/opensuite-vision/wasm/ \
++ && wget -qO public/opensuite-vision/selfie_multiclass.tflite \
++      https://storage.googleapis.com/mediapipe-models/image_segmenter/selfie_multiclass_256x256/float32/latest/selfie_multiclass_256x256.tflite
++
+ RUN npm run build
+ 
+ # ---- Front-end image ----
+diff --git a/src/frontend/src/features/rooms/livekit/components/blur/OpenSuiteBackgroundProcessor.ts b/src/frontend/src/features/rooms/livekit/components/blur/OpenSuiteBackgroundProcessor.ts
+new file mode 100644
+index 0000000..aed6ab0
+--- /dev/null
++++ b/src/frontend/src/features/rooms/livekit/components/blur/OpenSuiteBackgroundProcessor.ts
+@@ -0,0 +1,448 @@
++import type { ProcessorOptions, Track } from 'livekit-client'
++import {
++  FilesetResolver,
++  ImageSegmenter,
++  ImageSegmenterResult,
++} from '@mediapipe/tasks-vision'
++import {
++  CLEAR_TIMEOUT,
++  SET_TIMEOUT,
++  TIMEOUT_TICK,
++  timerWorkerScript,
++} from './TimerWorker'
++import {
++  BackgroundProcessorInterface,
++  type ProcessorConfig,
++  type ProcessorType,
++} from '.'
++
++// Open Suite virtual-background processor.
++//
++// Google-Meet-class quality where the stock LiveKit path is hazy: the selfie
++// MULTICLASS model (soft confidence mask, handles more than one person) is
++// refined with a joint bilateral filter (mask edges snap to real image edges,
++// killing the halo), temporally smoothed with an EMA (kills flicker), and
++// composited with light wrapping for virtual backgrounds. All WebGL2.
++// Reference pipeline: Volcomix/virtual-background (Apache-2.0), which mirrors
++// Google's published Meet pipeline. See UPGRADE-MEET.md in open-suite/open-suite.
++
++const ASSET_BASE = '/opensuite-vision'
++const MODEL_PATH = `${ASSET_BASE}/selfie_multiclass.tflite`
++const WASM_PATH = `${ASSET_BASE}/wasm`
++
++const glsl = (x: TemplateStringsArray) => x.join('')
++
++function compile(gl: WebGL2RenderingContext, type: number, src: string) {
++  const s = gl.createShader(type)!
++  gl.shaderSource(s, src)
++  gl.compileShader(s)
++  if (!gl.getShaderParameter(s, gl.COMPILE_STATUS))
++    throw new Error(gl.getShaderInfoLog(s) + '\n' + src)
++  return s
++}
++function program(gl: WebGL2RenderingContext, vs: string, fs: string) {
++  const p = gl.createProgram()!
++  gl.attachShader(p, compile(gl, gl.VERTEX_SHADER, vs))
++  gl.attachShader(p, compile(gl, gl.FRAGMENT_SHADER, fs))
++  gl.linkProgram(p)
++  if (!gl.getProgramParameter(p, gl.LINK_STATUS))
++    throw new Error(gl.getProgramInfoLog(p) ?? 'link failed')
++  return p
++}
++function texture(
++  gl: WebGL2RenderingContext,
++  w: number,
++  h: number,
++  data: ArrayBufferView | null = null
++) {
++  const t = gl.createTexture()!
++  gl.bindTexture(gl.TEXTURE_2D, t)
++  gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, w, h, 0, gl.RGBA, gl.UNSIGNED_BYTE, data)
++  gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.LINEAR)
++  gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.LINEAR)
++  gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE)
++  gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE)
++  return t
++}
++function framebuffer(gl: WebGL2RenderingContext, t: WebGLTexture) {
++  const f = gl.createFramebuffer()!
++  gl.bindFramebuffer(gl.FRAMEBUFFER, f)
++  gl.framebufferTexture2D(gl.FRAMEBUFFER, gl.COLOR_ATTACHMENT0, gl.TEXTURE_2D, t, 0)
++  return f
++}
++
++const VS = glsl`#version 300 es
++in vec2 position; out vec2 v;
++void main(){ v = position*0.5+0.5; gl_Position = vec4(position,0.0,1.0); }`
++
++const EMA = glsl`#version 300 es
++precision highp float;
++uniform sampler2D u_cur, u_prev; uniform float u_alpha;
++in vec2 v; out vec4 o;
++void main(){ o = vec4(0.0,0.0,0.0, mix(texture(u_prev,v).a, texture(u_cur,v).a, u_alpha)); }`
++
++const BILATERAL = glsl`#version 300 es
++precision highp float;
++uniform sampler2D u_frame, u_mask; uniform vec2 u_texel;
++uniform float u_step, u_radius, u_offset, u_sigmaTexel, u_sigmaColor;
++in vec2 v; out vec4 o;
++float g(float x, float s){ return exp(x*x*(-0.5/(s*s*4.0+1e-6))); }
++void main(){
++  vec3 c = texture(u_frame, v).rgb; float val=0.0, tw=0.0;
++  for(float i=-u_radius+u_offset;i<=u_radius;i+=u_step){
++    for(float j=-u_radius+u_offset;j<=u_radius;j+=u_step){
++      vec2 co = v + vec2(j,i)*u_texel;
++      vec3 fc = texture(u_frame, co).rgb; float m = texture(u_mask, co).a;
++      float sw = g(distance(v,co), u_sigmaTexel); float cw = g(distance(c,fc), u_sigmaColor);
++      tw += sw*cw; val += sw*cw*m;
++    }
++  }
++  o = vec4(vec3(0.0), val/tw);
++}`
++
++const BLUR = glsl`#version 300 es
++precision highp float;
++uniform sampler2D u_tex; uniform vec2 u_dir, u_texel;
++in vec2 v; out vec4 o;
++void main(){
++  float w[5]; w[0]=0.227027;w[1]=0.1945946;w[2]=0.1216216;w[3]=0.054054;w[4]=0.016216;
++  vec3 s = texture(u_tex,v).rgb*w[0];
++  for(int k=1;k<5;k++){ vec2 off=u_dir*u_texel*float(k)*1.6; s+=texture(u_tex,v+off).rgb*w[k]; s+=texture(u_tex,v-off).rgb*w[k]; }
++  o = vec4(s,1.0);
++}`
++
++const COMPOSITE = glsl`#version 300 es
++precision highp float;
++uniform sampler2D u_frame, u_mask, u_bg;
++uniform vec2 u_coverage; uniform float u_lightWrap;
++in vec2 v; out vec4 o;
++vec3 screen(vec3 a, vec3 b){ return 1.0-(1.0-a)*(1.0-b); }
++void main(){
++  vec3 f = texture(u_frame,v).rgb; vec3 bg = texture(u_bg,v).rgb;
++  float m = texture(u_mask,v).a;
++  float lw = 1.0 - max(0.0, m-u_coverage.y)/(1.0-u_coverage.y);
++  f = screen(f, u_lightWrap*lw*bg);
++  m = smoothstep(u_coverage.x, u_coverage.y, m);
++  o = vec4(f*m + bg*(1.0-m), 1.0);
++}`
++
++const QUAD = new Float32Array([-1, -1, 1, -1, -1, 1, -1, 1, 1, -1, 1, 1])
++const FPS = 30
++const EMA_ALPHA = 0.6
++
++export class OpenSuiteBackgroundProcessor
++  implements BackgroundProcessorInterface
++{
++  name = 'blur'
++  options: ProcessorConfig
++  type: ProcessorType
++  processedTrack?: MediaStreamTrack
++
++  private source?: MediaStreamTrack
++  private videoElement?: HTMLVideoElement
++  private videoLoaded = false
++  private canvas?: HTMLCanvasElement
++  private gl?: WebGL2RenderingContext
++  private segmenter?: ImageSegmenter
++  private timerWorker?: Worker
++  private bgImage?: HTMLImageElement
++  private bgTexReady = false
++
++  // GL objects
++  private buf?: WebGLBuffer
++  private pEma?: WebGLProgram
++  private pBil?: WebGLProgram
++  private pBlur?: WebGLProgram
++  private pComp?: WebGLProgram
++  private W = 0
++  private H = 0
++  private frameTex?: WebGLTexture
++  private rawMaskTex?: WebGLTexture
++  private rawW = 0
++  private rawH = 0
++  private emaTex: WebGLTexture[] = []
++  private emaFb: WebGLFramebuffer[] = []
++  private emaIdx = 0
++  private emaInit = false
++  private refTex?: WebGLTexture
++  private refFb?: WebGLFramebuffer
++  private bgTex?: WebGLTexture
++  private blurTex: WebGLTexture[] = []
++  private blurFb: WebGLFramebuffer[] = []
++
++  constructor(opts: ProcessorConfig) {
++    this.options = opts
++    this.type = opts.type
++    this.name = opts.type === 'virtual' ? 'virtual-background' : 'background-blur'
++  }
++
++  static get isSupported() {
++    return (
++      typeof document !== 'undefined' &&
++      !!document.createElement('canvas').getContext('webgl2') &&
++      typeof HTMLCanvasElement.prototype.captureStream === 'function'
++    )
++  }
++
++  async init(opts: ProcessorOptions<Track.Kind>) {
++    if (!opts.element) throw new Error('Element is required for processing')
++    this.source = opts.track as MediaStreamTrack
++    this.videoElement = opts.element as HTMLVideoElement
++
++    const settings = this.source.getSettings()
++    this.canvas = document.createElement('canvas')
++    this.canvas.width = settings.width ?? 1280
++    this.canvas.height = settings.height ?? 720
++    this.gl = this.canvas.getContext('webgl2', {
++      premultipliedAlpha: false,
++    }) as WebGL2RenderingContext
++    this._initGL()
++    this._loadBackground()
++
++    const stream = this.canvas.captureStream(FPS)
++    const tracks = stream.getVideoTracks()
++    if (!tracks.length) throw new Error('No tracks produced by processor canvas')
++    this.processedTrack = tracks[0]
++
++    const vision = await FilesetResolver.forVisionTasks(WASM_PATH)
++    this.segmenter = await ImageSegmenter.createFromOptions(vision, {
++      baseOptions: { modelAssetPath: MODEL_PATH, delegate: 'GPU' },
++      runningMode: 'VIDEO',
++      outputCategoryMask: false,
++      outputConfidenceMasks: true,
++    })
++    this._initWorker()
++  }
++
++  async update(opts: ProcessorConfig) {
++    this.options = opts
++    this.type = opts.type
++    this.name = opts.type === 'virtual' ? 'virtual-background' : 'background-blur'
++    this._loadBackground()
++  }
++
++  async restart(opts: ProcessorOptions<Track.Kind>) {
++    await this.destroy()
++    return this.init(opts)
++  }
++
++  async destroy() {
++    this.timerWorker?.postMessage({ id: CLEAR_TIMEOUT })
++    this.timerWorker?.terminate()
++    this.segmenter?.close()
++  }
++
++  private _loadBackground() {
++    if (this.options.type !== 'virtual') {
++      this.bgImage = undefined
++      return
++    }
++    if (this.options.imagePath && this.bgImage?.src !== this.options.imagePath) {
++      const img = document.createElement('img')
++      img.crossOrigin = 'anonymous'
++      img.onload = () => {
++        this.bgTexReady = false
++      }
++      img.src = this.options.imagePath
++      this.bgImage = img
++    }
++  }
++
++  private _initWorker() {
++    this.timerWorker = new Worker(timerWorkerScript, { name: 'OpenSuiteVB' })
++    this.timerWorker.onmessage = (e) => {
++      if (e.data.id === TIMEOUT_TICK) this._tick()
++    }
++    const arm = () =>
++      this.timerWorker!.postMessage({ id: SET_TIMEOUT, timeMs: 1000 / FPS })
++    if (this.videoLoaded) arm()
++    else
++      this.videoElement!.onloadeddata = () => {
++        this.videoLoaded = true
++        arm()
++      }
++  }
++
++  private _tick() {
++    try {
++      this._process()
++    } finally {
++      this.timerWorker?.postMessage({ id: SET_TIMEOUT, timeMs: 1000 / FPS })
++    }
++  }
++
++  private _initGL() {
++    const gl = this.gl!
++    this.buf = gl.createBuffer()!
++    gl.bindBuffer(gl.ARRAY_BUFFER, this.buf)
++    gl.bufferData(gl.ARRAY_BUFFER, QUAD, gl.STATIC_DRAW)
++    this.pEma = program(gl, VS, EMA)
++    this.pBil = program(gl, VS, BILATERAL)
++    this.pBlur = program(gl, VS, BLUR)
++    this.pComp = program(gl, VS, COMPOSITE)
++  }
++
++  private _alloc(W: number, H: number) {
++    const gl = this.gl!
++    this.W = W
++    this.H = H
++    this.canvas!.width = W
++    this.canvas!.height = H
++    this.frameTex = texture(gl, W, H)
++    this.emaTex = [texture(gl, W, H), texture(gl, W, H)]
++    this.emaFb = [framebuffer(gl, this.emaTex[0]), framebuffer(gl, this.emaTex[1])]
++    this.emaIdx = 0
++    this.emaInit = false
++    this.refTex = texture(gl, W, H)
++    this.refFb = framebuffer(gl, this.refTex)
++    this.bgTex = texture(gl, W, H)
++    this.blurTex = [texture(gl, W, H), texture(gl, W, H)]
++    this.blurFb = [framebuffer(gl, this.blurTex[0]), framebuffer(gl, this.blurTex[1])]
++  }
++
++  private _quad(p: WebGLProgram) {
++    const gl = this.gl!
++    gl.useProgram(p)
++    gl.bindBuffer(gl.ARRAY_BUFFER, this.buf!)
++    const loc = gl.getAttribLocation(p, 'position')
++    gl.enableVertexAttribArray(loc)
++    gl.vertexAttribPointer(loc, 2, gl.FLOAT, false, 0, 0)
++  }
++  private U(p: WebGLProgram, n: string) {
++    return this.gl!.getUniformLocation(p, n)
++  }
++
++  // person probability (1 - background confidence), row-flipped to GL origin.
++  private _mask(res: ImageSegmenterResult) {
++    const cm = res.confidenceMasks![0]
++    const bg = cm.getAsFloat32Array()
++    const w = cm.width,
++      h = cm.height
++    if (!this._maskBuf || this.rawW !== w || this.rawH !== h) {
++      this._maskBuf = new Uint8Array(w * h * 4)
++      this.rawW = w
++      this.rawH = h
++    }
++    const out = this._maskBuf
++    for (let y = 0; y < h; y++)
++      for (let x = 0; x < w; x++) {
++        out[((h - 1 - y) * w + x) * 4 + 3] = Math.round((1 - bg[y * w + x]) * 255)
++      }
++    return out
++  }
++  private _maskBuf?: Uint8Array
++
++  private _process() {
++    const gl = this.gl
++    const video = this.videoElement
++    if (!gl || !video || !this.segmenter) return
++    const W = video.videoWidth,
++      H = video.videoHeight
++    if (!W || !H) return
++
++    const res = this.segmenter.segmentForVideo(video, performance.now())
++    if (!res.confidenceMasks?.length) {
++      res.close()
++      return
++    }
++    const maskData = this._mask(res)
++    res.close()
++
++    if (W !== this.W || H !== this.H) this._alloc(W, H)
++
++    gl.pixelStorei(gl.UNPACK_FLIP_Y_WEBGL, true)
++    gl.activeTexture(gl.TEXTURE0)
++    gl.bindTexture(gl.TEXTURE_2D, this.frameTex!)
++    gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, gl.RGBA, gl.UNSIGNED_BYTE, video)
++    gl.pixelStorei(gl.UNPACK_FLIP_Y_WEBGL, false)
++
++    if (!this.rawMaskTex) this.rawMaskTex = texture(gl, this.rawW, this.rawH, maskData)
++    else {
++      gl.bindTexture(gl.TEXTURE_2D, this.rawMaskTex)
++      gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, this.rawW, this.rawH, 0, gl.RGBA, gl.UNSIGNED_BYTE, maskData)
++    }
++
++    // temporal EMA
++    const cur = this.emaIdx,
++      prev = 1 - this.emaIdx
++    this._quad(this.pEma!)
++    gl.bindFramebuffer(gl.FRAMEBUFFER, this.emaFb[cur])
++    gl.viewport(0, 0, W, H)
++    gl.activeTexture(gl.TEXTURE0)
++    gl.bindTexture(gl.TEXTURE_2D, this.rawMaskTex)
++    gl.uniform1i(this.U(this.pEma!, 'u_cur'), 0)
++    gl.activeTexture(gl.TEXTURE1)
++    gl.bindTexture(gl.TEXTURE_2D, this.emaTex[prev])
++    gl.uniform1i(this.U(this.pEma!, 'u_prev'), 1)
++    gl.uniform1f(this.U(this.pEma!, 'u_alpha'), this.emaInit ? EMA_ALPHA : 1.0)
++    gl.drawArrays(gl.TRIANGLES, 0, 6)
++    this.emaInit = true
++    this.emaIdx = prev
++
++    // joint bilateral refine
++    const ss = 8 * Math.max(W / this.rawW, H / this.rawH)
++    const sparsity = Math.max(1, Math.sqrt(ss) * 0.66)
++    const step = sparsity,
++      radius = ss,
++      offset = step > 1 ? step * 0.5 : 0
++    const sigmaTexel = Math.max(1 / W, 1 / H) * ss
++    this._quad(this.pBil!)
++    gl.bindFramebuffer(gl.FRAMEBUFFER, this.refFb!)
++    gl.viewport(0, 0, W, H)
++    gl.activeTexture(gl.TEXTURE0)
++    gl.bindTexture(gl.TEXTURE_2D, this.frameTex!)
++    gl.uniform1i(this.U(this.pBil!, 'u_frame'), 0)
++    gl.activeTexture(gl.TEXTURE1)
++    gl.bindTexture(gl.TEXTURE_2D, this.emaTex[cur])
++    gl.uniform1i(this.U(this.pBil!, 'u_mask'), 1)
++    gl.uniform2f(this.U(this.pBil!, 'u_texel'), 1 / W, 1 / H)
++    gl.uniform1f(this.U(this.pBil!, 'u_step'), step)
++    gl.uniform1f(this.U(this.pBil!, 'u_radius'), radius)
++    gl.uniform1f(this.U(this.pBil!, 'u_offset'), offset)
++    gl.uniform1f(this.U(this.pBil!, 'u_sigmaTexel'), sigmaTexel)
++    gl.uniform1f(this.U(this.pBil!, 'u_sigmaColor'), 0.1)
++    gl.drawArrays(gl.TRIANGLES, 0, 6)
++
++    // background
++    let bgTex = this.bgTex!
++    const blur = this.options.type === 'blur'
++    if (blur) {
++      this._quad(this.pBlur!)
++      gl.uniform2f(this.U(this.pBlur!, 'u_texel'), 1 / W, 1 / H)
++      for (let pass = 0; pass < 6; pass++) {
++        const hz = pass % 2 === 0
++        gl.bindFramebuffer(gl.FRAMEBUFFER, hz ? this.blurFb[0] : this.blurFb[1])
++        gl.viewport(0, 0, W, H)
++        gl.activeTexture(gl.TEXTURE0)
++        gl.bindTexture(gl.TEXTURE_2D, pass === 0 ? this.frameTex! : hz ? this.blurTex[1] : this.blurTex[0])
++        gl.uniform1i(this.U(this.pBlur!, 'u_tex'), 0)
++        gl.uniform2f(this.U(this.pBlur!, 'u_dir'), hz ? 1 : 0, hz ? 0 : 1)
++        gl.drawArrays(gl.TRIANGLES, 0, 6)
++      }
++      bgTex = this.blurTex[1]
++    } else if (this.bgImage?.complete && !this.bgTexReady) {
++      gl.pixelStorei(gl.UNPACK_FLIP_Y_WEBGL, true)
++      gl.bindTexture(gl.TEXTURE_2D, this.bgTex!)
++      gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, gl.RGBA, gl.UNSIGNED_BYTE, this.bgImage)
++      gl.pixelStorei(gl.UNPACK_FLIP_Y_WEBGL, false)
++      this.bgTexReady = true
++    }
++
++    // composite to canvas
++    this._quad(this.pComp!)
++    gl.bindFramebuffer(gl.FRAMEBUFFER, null)
++    gl.viewport(0, 0, W, H)
++    gl.activeTexture(gl.TEXTURE0)
++    gl.bindTexture(gl.TEXTURE_2D, this.frameTex!)
++    gl.uniform1i(this.U(this.pComp!, 'u_frame'), 0)
++    gl.activeTexture(gl.TEXTURE1)
++    gl.bindTexture(gl.TEXTURE_2D, this.refTex!)
++    gl.uniform1i(this.U(this.pComp!, 'u_mask'), 1)
++    gl.activeTexture(gl.TEXTURE2)
++    gl.bindTexture(gl.TEXTURE_2D, bgTex)
++    gl.uniform1i(this.U(this.pComp!, 'u_bg'), 2)
++    gl.uniform2f(this.U(this.pComp!, 'u_coverage'), 0.4, 0.6)
++    gl.uniform1f(this.U(this.pComp!, 'u_lightWrap'), blur ? 0.0 : 0.3)
++    gl.drawArrays(gl.TRIANGLES, 0, 6)
++  }
++}
+diff --git a/src/frontend/src/features/rooms/livekit/components/blur/index.ts b/src/frontend/src/features/rooms/livekit/components/blur/index.ts
+index f9e9c6d..e0123db 100644
+--- a/src/frontend/src/features/rooms/livekit/components/blur/index.ts
++++ b/src/frontend/src/features/rooms/livekit/components/blur/index.ts
+@@ -1,6 +1,7 @@
+ import { ProcessorWrapper } from '@livekit/track-processors'
+ import type { Track, TrackProcessor } from 'livekit-client'
+ import { BackgroundCustomProcessor } from './BackgroundCustomProcessor'
++import { OpenSuiteBackgroundProcessor } from './OpenSuiteBackgroundProcessor'
+ import { UnifiedBackgroundTrackProcessor } from './UnifiedBackgroundTrackProcessor'
+ import { FaceLandmarksOptions } from './FaceLandmarksProcessor'
+ 
+@@ -26,7 +27,11 @@ export class BackgroundProcessorFactory {
+   }
+ 
+   static isSupported() {
+-    return ProcessorWrapper.isSupported || BackgroundCustomProcessor.isSupported
++    return (
++      OpenSuiteBackgroundProcessor.isSupported ||
++      ProcessorWrapper.isSupported ||
++      BackgroundCustomProcessor.isSupported
++    )
+   }
+ 
+   static getProcessor(
+@@ -37,6 +42,12 @@ export class BackgroundProcessorFactory {
+ 
+     if (!isBlur && !isVirtual) return undefined
+ 
++    // Open Suite high-quality processor (multiclass + joint bilateral + light
++    // wrap + EMA) for any WebGL2 browser; see OpenSuiteBackgroundProcessor.
++    if (OpenSuiteBackgroundProcessor.isSupported) {
++      return new OpenSuiteBackgroundProcessor(config)
++    }
++
+     if (ProcessorWrapper.isSupported) {
+       return new UnifiedBackgroundTrackProcessor(config)
+     }
