@@ -19,10 +19,10 @@ index 9a1bf38..f0f81c1 100644
  # ---- Front-end image ----
 diff --git a/src/frontend/src/features/rooms/livekit/components/blur/OpenSuiteBackgroundProcessor.ts b/src/frontend/src/features/rooms/livekit/components/blur/OpenSuiteBackgroundProcessor.ts
 new file mode 100644
-index 0000000..aed6ab0
+index 0000000..eeef587
 --- /dev/null
 +++ b/src/frontend/src/features/rooms/livekit/components/blur/OpenSuiteBackgroundProcessor.ts
-@@ -0,0 +1,448 @@
+@@ -0,0 +1,456 @@
 +import type { ProcessorOptions, Track } from 'livekit-client'
 +import {
 +  FilesetResolver,
@@ -102,9 +102,15 @@ index 0000000..aed6ab0
 +
 +const EMA = glsl`#version 300 es
 +precision highp float;
-+uniform sampler2D u_cur, u_prev; uniform float u_alpha;
++uniform sampler2D u_cur, u_prev; uniform float u_alpha, u_react;
 +in vec2 v; out vec4 o;
-+void main(){ o = vec4(0.0,0.0,0.0, mix(texture(u_prev,v).a, texture(u_cur,v).a, u_alpha)); }`
++void main(){
++  float c = texture(u_cur,v).a, p = texture(u_prev,v).a;
++  // adaptive: trust the current frame more where the mask is changing, so
++  // motion leaves no trailing halo; smooth hard where it is static.
++  float a = clamp(u_alpha + abs(c-p)*u_react, 0.0, 1.0);
++  o = vec4(0.0,0.0,0.0, mix(p,c,a));
++}`
 +
 +const BILATERAL = glsl`#version 300 es
 +precision highp float;
@@ -153,7 +159,8 @@ index 0000000..aed6ab0
 +
 +const QUAD = new Float32Array([-1, -1, 1, -1, -1, 1, -1, 1, 1, -1, 1, 1])
 +const FPS = 30
-+const EMA_ALPHA = 0.6
++const EMA_ALPHA = 0.5
++const EMA_REACT = 2.5
 +
 +export class OpenSuiteBackgroundProcessor
 +  implements BackgroundProcessorInterface
@@ -400,12 +407,13 @@ index 0000000..aed6ab0
 +    gl.bindTexture(gl.TEXTURE_2D, this.emaTex[prev])
 +    gl.uniform1i(this.U(this.pEma!, 'u_prev'), 1)
 +    gl.uniform1f(this.U(this.pEma!, 'u_alpha'), this.emaInit ? EMA_ALPHA : 1.0)
++    gl.uniform1f(this.U(this.pEma!, 'u_react'), EMA_REACT)
 +    gl.drawArrays(gl.TRIANGLES, 0, 6)
 +    this.emaInit = true
 +    this.emaIdx = prev
 +
 +    // joint bilateral refine
-+    const ss = 8 * Math.max(W / this.rawW, H / this.rawH)
++    const ss = 4 * Math.max(W / this.rawW, H / this.rawH)
 +    const sparsity = Math.max(1, Math.sqrt(ss) * 0.66)
 +    const step = sparsity,
 +      radius = ss,
@@ -425,7 +433,7 @@ index 0000000..aed6ab0
 +    gl.uniform1f(this.U(this.pBil!, 'u_radius'), radius)
 +    gl.uniform1f(this.U(this.pBil!, 'u_offset'), offset)
 +    gl.uniform1f(this.U(this.pBil!, 'u_sigmaTexel'), sigmaTexel)
-+    gl.uniform1f(this.U(this.pBil!, 'u_sigmaColor'), 0.1)
++    gl.uniform1f(this.U(this.pBil!, 'u_sigmaColor'), 0.35)
 +    gl.drawArrays(gl.TRIANGLES, 0, 6)
 +
 +    // background
@@ -466,8 +474,8 @@ index 0000000..aed6ab0
 +    gl.activeTexture(gl.TEXTURE2)
 +    gl.bindTexture(gl.TEXTURE_2D, bgTex)
 +    gl.uniform1i(this.U(this.pComp!, 'u_bg'), 2)
-+    gl.uniform2f(this.U(this.pComp!, 'u_coverage'), 0.4, 0.6)
-+    gl.uniform1f(this.U(this.pComp!, 'u_lightWrap'), blur ? 0.0 : 0.3)
++    gl.uniform2f(this.U(this.pComp!, 'u_coverage'), 0.5, 0.56)
++    gl.uniform1f(this.U(this.pComp!, 'u_lightWrap'), 0.0)
 +    gl.drawArrays(gl.TRIANGLES, 0, 6)
 +  }
 +}
