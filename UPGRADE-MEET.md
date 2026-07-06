@@ -151,3 +151,18 @@ Google-Meet-class output where the current path is unusable. Remaining before
 ship: temporal EMA for video stability, production integration into the meet
 frontend (patch + baked model + CI), live verification. Harness lives in the
 agent scratchpad (vb-harness/).
+
+## Shipped (2026-07-06)
+
+OpenSuiteBackgroundProcessor is live on the demo. patches/meet/opensuite-background.patch
+adds the processor (multiclass confidence mask + joint bilateral + light wrap +
+temporal EMA, WebGL2), makes it the primary path in BackgroundProcessorFactory
+for any WebGL2 browser, and bakes the model + version-matched MediaPipe wasm
+into ghcr.io/open-suite/meet-frontend (no CDN). Built by CI, deployed to demo.
+Confirmed live: enabling Background blur in a real meeting loads
+/opensuite-vision/{selfie_multiclass.tflite,wasm/*} and runs the pipeline with
+zero errors. Person-quality validated in the offline+video harness (identical
+processor code); see docs/meet-vb-poc. Temporal EMA (alpha 0.6) included.
+Fake-webcam getUserMedia y4m format for a fully headless person A/B in the live
+app remains the one thing not automated — the video-driven harness covers it
+with the same code.
