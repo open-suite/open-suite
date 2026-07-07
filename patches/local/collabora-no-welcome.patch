@@ -1,5 +1,5 @@
 diff --git a/helmfile/apps/collabora/values-collabora.yaml.gotmpl b/helmfile/apps/collabora/values-collabora.yaml.gotmpl
-index 7398f68..e33230c 100644
+index 7398f68..5ca7970 100644
 --- a/helmfile/apps/collabora/values-collabora.yaml.gotmpl
 +++ b/helmfile/apps/collabora/values-collabora.yaml.gotmpl
 @@ -72,7 +72,7 @@ collabora:
@@ -7,7 +7,7 @@ index 7398f68..e33230c 100644
  
    # Extra parameters passed to the Collabora start command; in this case, disables SSL inside the container
 -  extra_params: --o:ssl.enable=false --o:ssl.termination=true --o:storage.wopi.alias_groups.mode=groups --o:storage.wopi.alias_groups.group[0].host=https://{{ .Values.global.hostname.nextcloud | default "nextcloud" }}.{{ .Values.global.domain | default "example.com"  }} --o:storage.wopi.alias_groups.group[1].host=https://{{ .Values.global.hostname.drive | default "drive" }}.{{ .Values.global.domain | default "example.com"  }}"
-+  extra_params: --o:ssl.enable=false --o:ssl.termination=true --o:storage.wopi.alias_groups.mode=groups --o:storage.wopi.alias_groups.group[0].host=https://{{ .Values.global.hostname.nextcloud | default "nextcloud" }}.{{ .Values.global.domain | default "example.com"  }} --o:storage.wopi.alias_groups.group[1].host=https://{{ .Values.global.hostname.drive | default "drive" }}.{{ .Values.global.domain | default "example.com"  }} --o:welcome.enable=false
++  extra_params: --o:ssl.enable=false --o:ssl.termination=true --o:storage.wopi.alias_groups.mode=groups --o:storage.wopi.alias_groups.group[0].host=https://{{ .Values.global.hostname.nextcloud | default "nextcloud" }}.{{ .Values.global.domain | default "example.com"  }} --o:storage.wopi.alias_groups.group[1].host=https://{{ .Values.global.hostname.drive | default "drive" }}.{{ .Values.global.domain | default "example.com"  }} --o:welcome.enable=false --o:home_mode.enable=true
  
    # When true, enables OpenShift-specific initContainer workaround.
    enableInsecureCoolWSD : {{ .Values.application.collabora.enableInsecureCoolWSD  | quote }}
