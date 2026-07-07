@@ -100,6 +100,18 @@ echo "==> Enforcing one block editor (disable Nextcloud Text)"
 kubectl -n mb-nextcloud exec deploy/nextcloud -c nextcloud -- \
   sh -c "cd /var/www/html && php occ app:disable text" >/dev/null 2>&1 || true
 
+# The CI smoke proves Collabora works by creating (and then deleting) a
+# Document.docx on every run; the file goes but its create/delete activity
+# entries stay and surface in the portal's NextCloud widget. Purge them as
+# part of the daily reset so the widget only shows real demo files.
+echo "==> Purging smoke-test activity entries"
+NC_DB_USER=$(kubectl -n mb-nextcloud get secret nextcloud-externaldatabase -o jsonpath='{.data.username}' | base64 -d)
+NC_DB_PASS=$(kubectl -n mb-nextcloud get secret nextcloud-externaldatabase -o jsonpath='{.data.password}' | base64 -d)
+kubectl -n mb-nextcloud exec nextcloud-cluster-rw-0 -c postgresql -- \
+  env PGPASSWORD="${NC_DB_PASS}" psql -qAt -h 127.0.0.1 -U "${NC_DB_USER}" -d nextcloud \
+  -c "DELETE FROM oc_activity WHERE file ~ '/Document( \\(\\d+\\))?\\.docx$'" >/dev/null || \
+  echo "    !! activity purge failed (non-fatal)"
+
 echo "==> [1/3] Calendar — upcoming events (each with a Meet link)"
 # Meet is OIDC-native; mint johndoe a token (direct-access grant on the meet
 # client) so we can create a room per event. Its URL goes in the event location,
