@@ -134,6 +134,32 @@ try {
     }
     if (editorUp) ok("Collabora opens a document (WOPI chain works)");
     else fail("Collabora document open", "editor never became ready or WOPI failed");
+
+    // Clean up: the New→Document click above creates a real file every run
+    // (nightly + each push), which once littered the demo with 21 copies of
+    // "Document (n).docx". Delete anything matching that pattern via the
+    // session's own WebDAV access.
+    const cleaned = await page.evaluate(async () => {
+      const uid = OC.getCurrentUser().uid;
+      const base = `/remote.php/dav/files/${encodeURIComponent(uid)}/`;
+      const res = await fetch(base, {
+        method: "PROPFIND",
+        headers: { requesttoken: OC.requestToken, Depth: "1" },
+      });
+      const xml = await res.text();
+      const names = [...xml.matchAll(/<d:href>([^<]+)<\/d:href>/g)]
+        .map(m => decodeURIComponent(m[1].split("/").pop() || ""))
+        .filter(n => /^Document( \(\d+\))?\.docx$/.test(n));
+      for (const n of names) {
+        await fetch(base + encodeURIComponent(n), {
+          method: "DELETE",
+          headers: { requesttoken: OC.requestToken },
+        });
+      }
+      return names.length;
+    }).catch(() => -1);
+    if (cleaned >= 0) ok(`cleaned up ${cleaned} smoke-created document(s)`);
+    else fail("smoke document cleanup", "could not delete the created file");
   } catch (e) {
     fail("Collabora document open", e.message.slice(0, 100));
   }
