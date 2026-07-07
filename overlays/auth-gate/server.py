@@ -50,8 +50,12 @@ JWKS_ENDPOINT = f"{ISSUER}/protocol/openid-connect/certs"
 
 SESSIONS: dict[str, dict[str, object]] = {}
 
-# Nextcloud richdocuments WOPI endpoints (with or without index.php).
-WOPI_PATH = re.compile(r"^/(index\.php/)?apps/richdocuments/wopi/")
+# Nextcloud richdocuments endpoints Collabora fetches server-to-server (with
+# or without index.php): the WOPI callbacks, and since CODE 26.04 also
+# /apps/richdocuments/settings/... (browsersetting/presets json). These carry
+# WOPI tokens, not a realm session; a gate 302 here makes docbrokers abort and
+# the editor hangs at "Connecting...".
+WOPI_PATH = re.compile(r"^/(index\.php/)?apps/richdocuments/(wopi|settings)/")
 
 # Keys are cached ~10 min so a fresh JWKS fetch is not on every request's path.
 JWKS_CLIENT = PyJWKClient(JWKS_ENDPOINT, cache_keys=True, lifespan=600, timeout=10)
