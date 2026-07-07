@@ -16,19 +16,44 @@ set -euo pipefail
 export KUBECONFIG=/etc/rancher/k3s/k3s.yaml
 
 # --- config (from env, falling back to the demo-seed secret) -----------------
+# load_secret must not fail hard under set -e: a missing secret would kill the
+# script inside the assignment with no message (this hid an empty demo for
+# days). Return empty instead and let the explicit check below report it.
 load_secret() {
   local key="$1"
-  kubectl -n mb-bureaublad get secret demo-seed -o jsonpath="{.data.$key}" 2>/dev/null | base64 -d
+  kubectl -n mb-bureaublad get secret demo-seed -o jsonpath="{.data.$key}" 2>/dev/null | base64 -d || true
 }
 DOMAIN="${DOMAIN:-$(load_secret DOMAIN)}"
 NC_LOGIN="${NC_LOGIN:-$(load_secret NC_LOGIN)}"
 NC_PASS="${NC_PASS:-$(load_secret NC_PASS)}"
 DEMO_PASS="${DEMO_PASS:-$(load_secret DEMO_PASS)}"   # johndoe's Keycloak password
-: "${DOMAIN:?}"; : "${NC_LOGIN:?}"; : "${NC_PASS:?}"; : "${DEMO_PASS:?}"
+for v in DOMAIN NC_LOGIN NC_PASS DEMO_PASS; do
+  if [ -z "${!v}" ]; then
+    echo "!! seed-demo: $v is unset and the demo-seed secret in mb-bureaublad is missing or incomplete — seeding ABORTED" >&2
+    exit 1
+  fi
+done
 
-NC="https://nextcloud.${DOMAIN}/remote.php/dav"
+# WebDAV uses johndoe's app password (basic auth), which the edge auth gate
+# does not pass through — it 302s to the login page and curl treats that as
+# success. Talk to the Nextcloud service in-cluster instead, with the public
+# Host so Nextcloud accepts the request.
+NC_SVC=$(kubectl -n mb-nextcloud get svc nextcloud -o jsonpath='{.spec.clusterIP}')
+NC_HOST="nextcloud.${DOMAIN}"
+NC="http://${NC_SVC}:8080/remote.php/dav"
 CAL="${NC}/calendars/${NC_LOGIN}/personal"
 FILES="${NC}/files/${NC_LOGIN}"
+
+# curl -f does not fail on redirects; assert an actual 2xx so a gate/login
+# bounce can never again masquerade as a successful write.
+dav() { # method url [curl args...]
+  local method="$1" url="$2" code; shift 2
+  code=$(curl -sS --max-time 20 -o /dev/null -w '%{http_code}' \
+    -u "${NC_LOGIN}:${NC_PASS}" -H "Host: ${NC_HOST}" -X "${method}" "$url" "$@")
+  case "$code" in 2*) return 0 ;; *)
+    echo "!! seed-demo: ${method} ${url} returned HTTP ${code}" >&2; return 1 ;;
+  esac
+}
 
 # Direct-access grants are enabled on the meet/docs clients only for the
 # duration of the run (needed to mint johndoe tokens) and re-disabled on exit,
@@ -117,8 +142,8 @@ put_event() {
   start="${d}T${hour}0000Z"
   end="${d}T$(printf '%02d' $((10#${hour}+dur)))0000Z"
   [ -n "${MEET_TOK}" ] && meet="https://meet.${DOMAIN}/$(meet_slug "${summary}")"
-  curl -fsS -u "${NC_LOGIN}:${NC_PASS}" -X PUT "${CAL}/${uid}.ics" \
-    -H "Content-Type: text/calendar" --data-binary @- >/dev/null <<ICS
+  dav PUT "${CAL}/${uid}.ics" \
+    -H "Content-Type: text/calendar" --data-binary @- <<ICS
 BEGIN:VCALENDAR
 VERSION:2.0
 PRODID:-//Open Suite//demo//EN
