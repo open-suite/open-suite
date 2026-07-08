@@ -1,0 +1,31 @@
+diff --git a/helmfile/apps/keycloak/keycloak.yaml.gotmpl b/helmfile/apps/keycloak/keycloak.yaml.gotmpl
+index 5e284cb..c2d36e4 100644
+--- a/helmfile/apps/keycloak/keycloak.yaml.gotmpl
++++ b/helmfile/apps/keycloak/keycloak.yaml.gotmpl
+@@ -139,6 +139,26 @@ autoscaling:
+ 
+ pdb: {{ .Values.pdb.keycloak | toYaml | nindent 2 }}
+ 
++# Open Suite login theme: mount the theme files the deploy ships in the
++# `opensuite-keycloak-theme` configmap onto the Keycloak server. Declared here
++# (not as a kubectl patch on the StatefulSet) so a bare `helmfile apply` cannot
++# drop the mount and leave the realm's loginTheme:opensuite pointing at absent
++# files. The configmap itself is created by 10-keycloak-login.sh (it carries the
++# demo-credential panel JS rendered at deploy time) and is not chart-managed, so
++# it survives a re-apply.
++extraVolumes:
++  - name: opensuite-keycloak-theme
++    configMap:
++      name: opensuite-keycloak-theme
++      items:
++        - { key: theme.properties, path: login/theme.properties }
++        - { key: styles.css, path: login/resources/css/styles.css }
++        - { key: opensuite-login.js, path: login/resources/js/opensuite-login.js }
++extraVolumeMounts:
++  - name: opensuite-keycloak-theme
++    mountPath: /opt/bitnami/keycloak/themes/opensuite
++    readOnly: true
++
+ metrics:
+   enabled: {{ .Values.metric.enabled | default false  }}
+   serviceMonitor:

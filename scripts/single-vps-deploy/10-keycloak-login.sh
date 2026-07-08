@@ -234,40 +234,10 @@ body#keycloak-bg {
 " \
   --dry-run=client -o yaml | kubectl apply -f -
 
-kubectl -n mb-keycloak patch sts keycloak-keycloak --type strategic -p '{
-  "spec": {
-    "template": {
-      "spec": {
-        "volumes": [
-          {
-            "name": "opensuite-keycloak-theme",
-            "configMap": {
-              "name": "opensuite-keycloak-theme",
-              "items": [
-                {"key": "theme.properties", "path": "login/theme.properties"},
-                {"key": "styles.css", "path": "login/resources/css/styles.css"},
-                {"key": "opensuite-login.js", "path": "login/resources/js/opensuite-login.js"}
-              ]
-            }
-          }
-        ],
-        "containers": [
-          {
-            "name": "keycloak",
-            "volumeMounts": [
-              {
-                "name": "opensuite-keycloak-theme",
-                "mountPath": "/opt/bitnami/keycloak/themes/opensuite",
-                "readOnly": true
-              }
-            ]
-          }
-        ]
-      }
-    }
-  }
-}'
-
+# The theme volume + mount live in the chart values now
+# (patches/local/keycloak-login-theme-mount.patch) so a bare `helmfile apply`
+# keeps them — no kubectl patch on the StatefulSet here. Restart to pick up the
+# configmap this script (re)created above.
 kubectl -n mb-keycloak rollout restart sts/keycloak-keycloak
 kubectl -n mb-keycloak rollout status sts/keycloak-keycloak --timeout=240s
 
