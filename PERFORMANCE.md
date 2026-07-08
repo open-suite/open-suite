@@ -99,22 +99,26 @@ cached; the cache self-sweeps expired keys. Pinned via PORTAL_REF (#130).
 - `/api/v1/meet/rooms`: ~2.4s → ~0.14s
 - `/api/v1/caldav/calendars/<date>`: ~5s → ~3.1s
 
-The caldav endpoint stays slow, but not for the reason first assumed. Measured
-2026-07-08:
+The caldav endpoint stays slow, and the cost is downstream of the portal (the
+token exchange is cached — 16 hits confirmed in the backend logs). What is
+established vs still a hypothesis, as of 2026-07-08:
 
-- A single CalDAV request with basic auth (an app password) from the portal pod
-  to Nextcloud is ~5ms, whether through the public gated ingress or the
-  in-cluster service. So neither the auth gate hop nor network is the cost.
-- The portal uses a bearer token (the exchanged nextcloud-audience token). On a
-  bearer request Nextcloud's user_oidc (`provider-1-checkBearer=1`) validates it
-  and, on that path, tries to reach the provider — but `id.<domain>` resolves via
-  the CoreDNS split-horizon rewrite to the in-cluster Keycloak ClusterIP and the
-  fetch throws `LocalServerException: Host "…" (id.<domain>:80) violates local
-  access rules` (seen repeatedly in nextcloud.log) despite
-  `allow_local_remote_servers=true`. Each CalDAV request (principal + calendars
-  + one search per calendar, ~4 for johndoe) eats that stall, ~3s total.
+- Established: docs/meet call one portal→service round trip; caldav drives the
+  `caldav` library, which does multiple sequential requests per load — principal
+  discovery, calendar list, then one REPORT search per calendar (~4 for johndoe)
+  — against Nextcloud with the exchanged bearer token.
+- Observed: nextcloud.log repeatedly logs `LocalServerException: Host "…"
+  (id.<domain>:80) violates local access rules` when user_oidc tries to reach the
+  provider discovery endpoint (`id.<domain>` resolves via the CoreDNS
+  split-horizon rewrite to the in-cluster Keycloak ClusterIP), despite
+  `allow_local_remote_servers=true`. Those log lines are from the browser login
+  path; whether the bearer-validation path (`provider-1-checkBearer=1`) hits the
+  same stall per DAV request is the leading hypothesis but is NOT yet confirmed —
+  a clean bearer-vs-basic timing was blocked by the backend pod's egress
+  NetworkPolicy to the Nextcloud ClusterIP.
 
-The real fix is Nextcloud reaching Keycloak's discovery/JWKS over a working
-in-cluster backchannel (the KC_BACKCHANNEL pattern the other apps use for OIDC),
-not the portal. Login-critical, so it needs its own change + verification —
-tracked as a follow-up, not bundled with the token-exchange cache.
+Next step: confirm where the 3s goes (instrument the caldav route, or time a
+bearer PROPFIND from a pod allowed to reach Nextcloud), then, if it is the OIDC
+provider reachability, give Nextcloud a working in-cluster Keycloak backchannel
+(the KC_BACKCHANNEL pattern the other apps use). Login-critical — its own change
+with verification, not bundled with the token-exchange cache.
