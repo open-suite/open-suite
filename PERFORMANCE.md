@@ -99,9 +99,22 @@ cached; the cache self-sweeps expired keys. Pinned via PORTAL_REF (#130).
 - `/api/v1/meet/rooms`: ~2.4s → ~0.14s
 - `/api/v1/caldav/calendars/<date>`: ~5s → ~3.1s
 
-The caldav endpoint stays slow because its cost is NOT the token exchange (now
-cached — 16 cache hits confirmed in the backend logs) but the CalDAV fetch to
-Nextcloud itself (WebDAV against the Nextcloud origin through the sidecar/proxy
-hops). That is a separate downstream fix — likely reducing the number of
-PROPFINDs or the per-request Nextcloud round trips — not a token-exchange
-concern. Tracked as follow-up.
+The caldav endpoint stays slow, but not for the reason first assumed. Measured
+2026-07-08:
+
+- A single CalDAV request with basic auth (an app password) from the portal pod
+  to Nextcloud is ~5ms, whether through the public gated ingress or the
+  in-cluster service. So neither the auth gate hop nor network is the cost.
+- The portal uses a bearer token (the exchanged nextcloud-audience token). On a
+  bearer request Nextcloud's user_oidc (`provider-1-checkBearer=1`) validates it
+  and, on that path, tries to reach the provider — but `id.<domain>` resolves via
+  the CoreDNS split-horizon rewrite to the in-cluster Keycloak ClusterIP and the
+  fetch throws `LocalServerException: Host "…" (id.<domain>:80) violates local
+  access rules` (seen repeatedly in nextcloud.log) despite
+  `allow_local_remote_servers=true`. Each CalDAV request (principal + calendars
+  + one search per calendar, ~4 for johndoe) eats that stall, ~3s total.
+
+The real fix is Nextcloud reaching Keycloak's discovery/JWKS over a working
+in-cluster backchannel (the KC_BACKCHANNEL pattern the other apps use for OIDC),
+not the portal. Login-critical, so it needs its own change + verification —
+tracked as a follow-up, not bundled with the token-exchange cache.
