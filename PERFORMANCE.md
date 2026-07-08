@@ -124,10 +124,11 @@ token for client `nextcloud` 401s as a bearer, so the portal's exact exchanged
 -token path could not be reproduced pod-side; the ~2s gap above that 0.9s is the
 unconfirmed bearer/OIDC portion.)
 
-Two independent levers, both follow-ups:
-- Portal-side (safe, no login risk): cut the request count. The caldav client
-  re-runs principal + calendar discovery on every dashboard load; caching the
-  discovered calendar URLs per token would drop ~2 of the ~4 requests.
-- Nextcloud-side (login-critical): if bearer validation is the bulk, give
+Two independent levers:
+- Portal-side (DONE, portal #36 / bump #135): cache the discovered calendar
+  URLs per token so repeat loads skip principal + calendar discovery (~2 of the
+  ~4 requests). Measured on the demo: caldav steady-state ~3.1s → ~1.57s.
+- Nextcloud-side (login-critical, follow-up): the remaining ~1.5s is the search
+  REPORTs plus bearer validation. If bearer validation is the bulk, give
   Nextcloud a working in-cluster Keycloak backchannel (the KC_BACKCHANNEL
   pattern the other apps use) — its own change with verification.
