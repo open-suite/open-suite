@@ -74,3 +74,34 @@ If this is still visibly slow, the next clean step is not a fallback and not a
 fork: make `/spreadsheets`, `/documents`, `/presentations`, and `/diagrams`
 first-party Open Suite pages backed by Nextcloud APIs, then open Collabora or
 Nextcloud only when the user opens/creates a file.
+
+## 2026-07-08: Portal widget token-exchange cache
+
+### Problem
+
+Every portal widget (calendar, docs, meet, files) minted its downstream token
+via a Keycloak token exchange on every request. Measured on the demo, each
+widget API call took ~2.4s, dominated by that round trip — a dashboard load
+fired several in sequence and felt slow.
+
+### Change
+
+`open-suite-portal` PR #35 (`⚡️(backend) cache exchanged tokens`): the portal
+backend caches the exchanged token in-process, keyed by
+`(audience, sha256(subject token))`, until a safety margin before the token's
+own expiry. A session refresh rotates the subject token and so misses
+naturally; caching is per-pod (no shared state); short-lived tokens are never
+cached; the cache self-sweeps expired keys. Pinned via PORTAL_REF (#130).
+
+### Measured impact (demo, steady state)
+
+- `/api/v1/docs/documents`: ~2.4s → ~0.13s
+- `/api/v1/meet/rooms`: ~2.4s → ~0.14s
+- `/api/v1/caldav/calendars/<date>`: ~5s → ~3.1s
+
+The caldav endpoint stays slow because its cost is NOT the token exchange (now
+cached — 16 cache hits confirmed in the backend logs) but the CalDAV fetch to
+Nextcloud itself (WebDAV against the Nextcloud origin through the sidecar/proxy
+hops). That is a separate downstream fix — likely reducing the number of
+PROPFINDs or the per-request Nextcloud round trips — not a token-exchange
+concern. Tracked as follow-up.
