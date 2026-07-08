@@ -13,9 +13,11 @@ DOMAIN="$(cat /etc/mijnbureau/domain)"
 AUTH_HOST="auth.${DOMAIN}"
 CLIENT_ID="opensuite-auth-gate"
 NAMESPACE="mb-bureaublad"
-# Prebuilt in CI and pulled from GHCR (ticket 3.1). Override AUTH_GATE_IMAGE to
-# pin a specific tag/digest; the default tracks main.
-IMAGE="${AUTH_GATE_IMAGE:-ghcr.io/open-suite/auth-gate:main}"
+# Prebuilt in CI and pulled from GHCR (ticket 3.1). Pinned to a specific build
+# (not floating :main) so a redeploy is reproducible; bump this when the gate
+# changes. sha-309302a = the #114 build with the richdocuments/settings WOPI
+# pass-through. Override AUTH_GATE_IMAGE to test another tag.
+IMAGE="${AUTH_GATE_IMAGE:-ghcr.io/open-suite/auth-gate:sha-309302a}"
 OPEN_SUITE_TLS_MODE="${OPEN_SUITE_TLS_MODE:-letsencrypt}"
 
 echo "==> [1/5] Ensuring auth-gate secrets"
