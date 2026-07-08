@@ -23,6 +23,10 @@ MEET_TAG="${MEET_TAG:-v1.20.0}"
 # meetcal + patched user_oidc). Tracks the upstream base tag; use a sha- tag
 # to pin a specific build.
 NEXTCLOUD_TAG="${NEXTCLOUD_TAG:-34.0.0-apache}"
+# Open Suite Element Web image tag (element-image workflow: pinned upstream with
+# the verification-reminder toasts patched out of the bundle). Matches the
+# upstream tag it is built from; use a sha- tag to pin a specific build.
+ELEMENT_TAG="${ELEMENT_TAG:-v1.12.21}"
 # TLS mode: letsencrypt (default; needs public DNS + ports) or selfsigned
 # (local VMs: every chart generates its own cert, no cert-manager, no ACME).
 OPEN_SUITE_TLS_MODE="${OPEN_SUITE_TLS_MODE:-letsencrypt}"
@@ -218,6 +222,10 @@ container:
     registry: "ghcr.io"
     repository: "open-suite/meet-frontend"
     tag: "${MEET_TAG}"
+  elementweb:
+    registry: "ghcr.io"
+    repository: "open-suite/element-web"
+    tag: "${ELEMENT_TAG}"
 
 authentication:
   oidc:

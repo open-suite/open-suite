@@ -48,11 +48,10 @@ probe_keycloak_theme() {   # 10-keycloak-login.sh: kubectl patch sts (theme volu
   kubectl -n mb-keycloak get sts keycloak-keycloak -o json 2>/dev/null \
     | grep -c '/opt/bitnami/keycloak/themes/opensuite' | head -c1
 }
-probe_element_bundle() {   # 11-element-web.sh: kubectl patch deploy (bundle-patch initContainer)
-  local n
-  n=$(kubectl -n mb-element get deploy element-web \
-        -o jsonpath='{.spec.template.spec.initContainers}' 2>/dev/null)
-  [ -n "${n}" ] && [ "${n}" != "[]" ] && echo 1 || echo 0
+probe_element_bundle() {   # Phase 2.2: element-web runs the patched GHCR image (values-owned, survives apply)
+  kubectl -n mb-element get deploy element-web \
+    -o jsonpath='{.spec.template.spec.containers[?(@.name=="element-web")].image}' 2>/dev/null \
+    | grep -qc 'open-suite/element-web' && echo 1 || echo 0
 }
 probe_meet_header() {      # 09-portal-header.sh: patch_static overwrites the cm data key
   kubectl -n mb-meet get cm meet-static-files \
@@ -109,7 +108,7 @@ export OPEN_SUITE_DEMO_USERNAME="$(cat /etc/mijnbureau/demo-username 2>/dev/null
 export OPEN_SUITE_DEMO_PASSWORD="$(cat /etc/mijnbureau/demo-password 2>/dev/null || true)"
 export OPEN_SUITE_DEMO_ADMIN_USERNAME="$(cat /etc/mijnbureau/demo-admin-username 2>/dev/null || true)"
 for step in 03-restart-oidc-apps 04-nextcloud-office 08-open-suite-portal \
-            09-portal-header 10-keycloak-login 11-element-web; do
+            09-portal-header 10-keycloak-login; do
   echo "  -> ${step}"
   bash "${DIR}/${step}.sh" >/dev/null 2>&1 || echo "     WARN: ${step} exited nonzero"
 done

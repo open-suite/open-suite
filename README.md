@@ -40,7 +40,6 @@ idempotent; re-running is safe):
 | `08-open-suite-portal.sh` | builds and deploys our portal fork (`open-suite/open-suite-portal`) |
 | `09-portal-header.sh` | injects the shared Open Suite header into every app |
 | `10-keycloak-login.sh` | Keycloak login theme (+ demo credential panel when `OPEN_SUITE_DEMO_MODE=true`) |
-| `11-element-web.sh` | Element: no default E2EE, device-verification toasts off |
 | `12-auth-gate.sh` | edge auth gate at `auth.DOMAIN`; ingress attachment is declarative via `patches/local/auth-gate-ingress-middleware.patch` |
 
 Gaps in the numbering are deleted steps whose work moved into

@@ -1,0 +1,57 @@
+name: element image
+
+# Build the Open Suite Element Web image (pinned upstream + verification-reminder
+# toasts patched out of the bundle at build time; see images/element/README.md)
+# and push it to GHCR (Phase 2.2). Tags: the upstream tag (e.g. v1.12.21) and
+# the commit sha.
+on:
+  push:
+    branches: [main]
+    paths:
+      - "images/element/**"
+      - ".github/workflows/element-image.yaml"
+  pull_request:
+    branches: [main]
+    paths:
+      - "images/element/**"
+      - ".github/workflows/element-image.yaml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  packages: write
+
+env:
+  ELEMENT_TAG: v1.12.21
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: docker/setup-qemu-action@v3
+      - uses: docker/setup-buildx-action@v3
+      - uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - id: meta
+        uses: docker/metadata-action@v5
+        with:
+          images: ghcr.io/open-suite/element-web
+          tags: |
+            type=raw,value=${{ env.ELEMENT_TAG }}
+            type=sha
+      - uses: docker/build-push-action@v6
+        with:
+          context: ./images/element
+          build-args: |
+            ELEMENT_BASE=registry-1.docker.io/vectorim/element-web:${{ env.ELEMENT_TAG }}
+          # Only push from the canonical repo (main / dispatch), never PRs. The
+          # patch script's grep assertions run during the build, so a PR build
+          # still fails loudly if the bundle drifted.
+          push: ${{ github.event_name != 'pull_request' }}
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          platforms: linux/amd64,linux/arm64
