@@ -99,23 +99,12 @@ cached; the cache self-sweeps expired keys. Pinned via PORTAL_REF (#130).
 - `/api/v1/meet/rooms`: ~2.4s → ~0.14s
 - `/api/v1/caldav/calendars/<date>`: ~5s → ~3.1s
 
-The caldav endpoint stays slow, and the cost is downstream of the portal (the
-token exchange is cached — 16 hits confirmed in the backend logs). What is
-established vs still a hypothesis, as of 2026-07-08:
-
-- Established: docs/meet call one portal→service round trip; caldav drives the
-  `caldav` library, which does multiple sequential requests per load — principal
-  discovery, calendar list, then one REPORT search per calendar (~4 for johndoe)
-  — against Nextcloud with the exchanged bearer token.
-- Observed: nextcloud.log repeatedly logs `LocalServerException: Host "…"
-  (id.<domain>:80) violates local access rules` when user_oidc tries to reach the
-  provider discovery endpoint (`id.<domain>` resolves via the CoreDNS
-  split-horizon rewrite to the in-cluster Keycloak ClusterIP), despite
-  `allow_local_remote_servers=true`. Those log lines are from the browser login
-  path; whether the bearer-validation path (`provider-1-checkBearer=1`) hits the
-  same stall per DAV request is the leading hypothesis but is NOT yet confirmed —
-  a clean bearer-vs-basic timing was blocked by the backend pod's egress
-  NetworkPolicy to the Nextcloud ClusterIP.
+The caldav cost is downstream of the portal (the token exchange is cached — 16
+hits confirmed in the backend logs). docs/meet make one portal→service round
+trip; caldav drives the `caldav` library, which does multiple sequential
+requests per load — principal discovery, calendar list, then one REPORT search
+per calendar (~4 for johndoe) — against Nextcloud with the exchanged bearer
+token.
 
 Baseline measured inside the Nextcloud pod (to localhost:8080, basic auth): a
 single calendar PROPFIND is ~220ms — so the caldav-lib flow's ~4 sequential
@@ -124,11 +113,17 @@ token for client `nextcloud` 401s as a bearer, so the portal's exact exchanged
 -token path could not be reproduced pod-side; the ~2s gap above that 0.9s is the
 unconfirmed bearer/OIDC portion.)
 
-Two independent levers:
-- Portal-side (DONE, portal #36 / bump #135): cache the discovered calendar
-  URLs per token so repeat loads skip principal + calendar discovery (~2 of the
-  ~4 requests). Measured on the demo: caldav steady-state ~3.1s → ~1.57s.
-- Nextcloud-side (login-critical, follow-up): the remaining ~1.5s is the search
-  REPORTs plus bearer validation. If bearer validation is the bulk, give
-  Nextcloud a working in-cluster Keycloak backchannel (the KC_BACKCHANNEL
-  pattern the other apps use) — its own change with verification.
+Fixed portal-side (portal #36 / bump #135): cache the discovered calendar URLs
+per token so repeat loads skip principal + calendar discovery (~2 of the ~4
+requests). Measured on the demo: caldav steady-state ~3.1s → ~1.57s.
+
+The earlier suspicion that user_oidc bearer validation stalls on an unreachable
+in-cluster discovery fetch was disproven: the `LocalServerException` log lines
+were all from 2026-07-04, before `allow_local_remote_servers` was mounted (#94).
+As of 2026-07-08 a discovery fetch from inside the Nextcloud pod returns 200 in
+~13ms and recent logs show zero user_oidc errors. So the OIDC backchannel is
+healthy and is NOT the cost. The remaining ~1.5s is inherent Nextcloud CalDAV:
+two search REPORTs against the PHP CalDAV backend (~220ms base each) plus
+per-request bearer signature validation. Reducing it further would mean deeper
+Nextcloud work (or fewer calendars queried) — not pursued; caldav is otherwise
+healthy and the widget loads in ~1.5s.
