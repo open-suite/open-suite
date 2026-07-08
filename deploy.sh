@@ -3,9 +3,10 @@
 #
 # Single happy-path deploy for open-suite on a fresh Ubuntu 24.04 VPS (k3s).
 # Runs the MinBZK base (01-04: helmfile + patches, networking, cert wait,
-# restarts, office cache) then the Open Suite layer (08-13: portal, header,
-# login theme, Element, auth gate, Meet). Gaps in the numbering are steps
-# made declarative and deleted (ticket 3.4). Final URL: https://bridge.DOMAIN
+# restarts, office cache) then the Open Suite layer (08-12: portal, header,
+# login theme, auth gate). Gaps in the numbering are steps made declarative and
+# deleted (tickets 3.4, 2.1, 2.2). Element and Meet ship as CI-built images
+# pinned in the demo values. Final URL: https://bridge.DOMAIN
 #
 # Run this from a checkout of the open-suite repo on the target VPS, as root.
 # Every step is idempotent, so re-running is safe.
@@ -61,7 +62,9 @@ bash "${DIR}/04-nextcloud-office.sh"
 bash "${DIR}/08-open-suite-portal.sh"
 bash "${DIR}/09-portal-header.sh"
 bash "${DIR}/10-keycloak-login.sh"
-bash "${DIR}/11-element-web.sh"
+# 11 (Element bundle patch) is gone: the verification-reminder fix is now baked
+# into the ghcr.io/open-suite/element-web image (images/element/), pinned in the
+# demo values, so a bare helmfile apply keeps it. See Phase 2.2.
 bash "${DIR}/12-auth-gate.sh"
 
 echo ""
