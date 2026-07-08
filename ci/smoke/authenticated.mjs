@@ -71,11 +71,39 @@ try {
     else fail(`${host}: header script`, `not in HTML (HTTP ${r?.status()})`);
   }
 
-  // --- Portal calendar API --------------------------------------------------
+  // --- Portal widgets answer AND carry seeded content -----------------------
+  // The empty-widget incident (Jul 2026) passed every "widget renders" check
+  // while the widgets were empty because the seed had silently died. These
+  // assert the seeded data is actually present, so a dead seed turns CI red.
   const today = new Date().toISOString().slice(0, 10);
   const cal = await page.request.get(`https://bridge.${DOMAIN}/api/v1/caldav/calendars/${today}`);
-  if (cal.ok()) ok(`calendar API answers (${cal.status()})`);
-  else fail("calendar API", `HTTP ${cal.status()}`);
+  if (!cal.ok()) {
+    fail("calendar API", `HTTP ${cal.status()}`);
+  } else {
+    const events = await cal.json().catch(() => []);
+    const standup = (events || []).find((e) => /Team standup/i.test(e.title || ""));
+    if (!standup) {
+      fail("calendar widget content", `no seeded "Team standup" event (widget empty? seed dead?)`);
+    } else {
+      ok("calendar widget shows seeded event");
+      // Freshness: the seed recomputes event dates on every run to stay in the
+      // near future, so a live seed puts the standup in the future. A stale
+      // seed (not run in days) leaves it in the past.
+      if (new Date(standup.start) > new Date()) ok("seed is fresh (standup is upcoming)");
+      else fail("seed freshness", `standup start ${standup.start} is not in the future — seed stale`);
+    }
+  }
+
+  const docsW = await page.request.get(`https://bridge.${DOMAIN}/api/v1/docs/documents`);
+  const docsBody = await docsW.json().catch(() => ({}));
+  if (docsW.ok() && (docsBody.results || []).some((d) => /Q3 plan|Welcome to Open Suite/i.test(d.title || "")))
+    ok("docs widget shows seeded documents");
+  else fail("docs widget content", `HTTP ${docsW.status()}, ${(docsBody.results || []).length} docs`);
+
+  const meetW = await page.request.get(`https://bridge.${DOMAIN}/api/v1/meet/rooms`);
+  const meetBody = await meetW.json().catch(() => ({}));
+  if (meetW.ok() && (meetBody.results || []).length > 0) ok("meet widget shows rooms");
+  else fail("meet widget content", `HTTP ${meetW.status()}, ${(meetBody.results || []).length} rooms`);
 
   // --- meetcal mints a joinable room ----------------------------------------
   // Needs the Nextcloud session (same browser context) + CSRF token.
@@ -165,14 +193,22 @@ try {
   }
 
   // --- Docs, Grist, Element load --------------------------------------------
-  for (const [host, marker] of [
-    ["docs", "docs"],
-    ["grist", "grist"],
-    ["element", "element"],
-  ]) {
+  for (const host of ["docs", "grist", "element"]) {
     const r = await page.goto(`https://${host}.${DOMAIN}/`, { waitUntil: "domcontentloaded" });
     if (r && r.status() < 400) ok(`${host}: loads (HTTP ${r.status()})`);
     else fail(`${host}: load`, `HTTP ${r?.status()}`);
+  }
+
+  // --- Element carries the Open Suite nav (static-SPA header) ---------------
+  // Element injects the header as /bureaublad-button.js (not the sidecar's
+  // opensuite-header.js). This is one of the two header paths a helmfile
+  // re-apply reverts (Phase 2, ticket 3.5). Meet's static header is a known
+  // separate gap tracked there, so it is not asserted here yet.
+  {
+    await page.goto(`https://element.${DOMAIN}/`, { waitUntil: "domcontentloaded" });
+    const html = await page.content();
+    if (html.includes("bureaublad-button.js")) ok("element: Open Suite nav injected");
+    else fail("element header", "bureaublad-button.js not in HTML");
   }
 } catch (e) {
   fail("unexpected error", e.message);
