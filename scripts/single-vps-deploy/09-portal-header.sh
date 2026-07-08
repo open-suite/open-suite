@@ -65,7 +65,9 @@ PY
 }
 
 echo "==> [1/2] Static SPAs (already inject a same-origin tag)"
-patch_static mb-meet    meet-static-files             meet-frontend meet-static-nginx
+# Meet's header ships inside the meet-frontend SPA bundle (patches/meet), served
+# on meet.<domain>; the old meet-static-files injection only reached
+# meet-static-nginx on the unused static-meet.<domain> host, so it did nothing.
 patch_static mb-element element-web-bureaublad-button element-web
 
 echo "==> [2/2] Header JS for the sidecar apps"
