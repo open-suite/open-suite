@@ -117,8 +117,17 @@ established vs still a hypothesis, as of 2026-07-08:
   a clean bearer-vs-basic timing was blocked by the backend pod's egress
   NetworkPolicy to the Nextcloud ClusterIP.
 
-Next step: confirm where the 3s goes (instrument the caldav route, or time a
-bearer PROPFIND from a pod allowed to reach Nextcloud), then, if it is the OIDC
-provider reachability, give Nextcloud a working in-cluster Keycloak backchannel
-(the KC_BACKCHANNEL pattern the other apps use). Login-critical — its own change
-with verification, not bundled with the token-exchange cache.
+Baseline measured inside the Nextcloud pod (to localhost:8080, basic auth): a
+single calendar PROPFIND is ~220ms — so the caldav-lib flow's ~4 sequential
+requests are already ~0.9s before any bearer/OIDC overhead. (A password-grant
+token for client `nextcloud` 401s as a bearer, so the portal's exact exchanged
+-token path could not be reproduced pod-side; the ~2s gap above that 0.9s is the
+unconfirmed bearer/OIDC portion.)
+
+Two independent levers, both follow-ups:
+- Portal-side (safe, no login risk): cut the request count. The caldav client
+  re-runs principal + calendar discovery on every dashboard load; caching the
+  discovered calendar URLs per token would drop ~2 of the ~4 requests.
+- Nextcloud-side (login-critical): if bearer validation is the bulk, give
+  Nextcloud a working in-cluster Keycloak backchannel (the KC_BACKCHANNEL
+  pattern the other apps use) — its own change with verification.
