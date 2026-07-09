@@ -45,8 +45,10 @@ metadata:
   namespace: mb-bureaublad
 spec:
   redirectRegex:
-    regex: "^https?://${DOMAIN//./\\.}/(.*)"
-    replacement: "https://bridge.${DOMAIN}/\${1}"
+    # Single-quoted YAML scalar: backslashes are literal, so the regex dots stay
+    # escaped (a double-quoted scalar rejects \. as an unknown escape).
+    regex: '^https?://${DOMAIN//./\.}/(.*)'
+    replacement: 'https://bridge.${DOMAIN}/\${1}'
     permanent: true
 ---
 apiVersion: networking.k8s.io/v1
