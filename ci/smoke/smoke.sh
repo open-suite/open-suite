@@ -81,6 +81,13 @@ case "$loc" in
      FAILURES=$((FAILURES + 1)) ;;
 esac
 
+# The bare apex has no app; it must 301 to the portal. In secure mode redirect()
+# curls without -k, so an untrusted apex cert (Traefik's default self-signed,
+# ERR_CERT_AUTHORITY_INVALID) makes this fail with an empty result — the check
+# covers both the cert and the redirect. SMOKE_INSECURE relaxes the cert.
+echo "== Apex redirects to the portal (with a valid cert in secure mode)"
+check "apex -> bridge redirect" "https://bridge.${DOMAIN}/" "$(redirect "https://${DOMAIN}/")"
+
 echo
 if [ "$FAILURES" -eq 0 ]; then
   echo "SMOKE PASS (unauthenticated)"
