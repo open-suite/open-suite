@@ -134,125 +134,14 @@ else
   KC_BACKCHANNEL="https://id.${DOMAIN}"
 fi
 
-cat > helmfile/environments/demo/mijnbureau.yaml.gotmpl <<YAML
----
-global:
-  domain: "${DOMAIN}"
-  # Open Suite serves the portal at bridge.DOMAIN (upstream default: bureaublad).
-  # This one value also drives the portal's Keycloak client redirect URIs and the
-  # cross-app "open portal" buttons, so they all move together.
-  hostname:
-    bureaublad: "bridge"
-  resourcesPreset: "none"
-  resourcesPresetPerApp:
-    collabora: "none"
-    elementweb: "none"
-    keycloak: "none"
-    ollama: "none"
-    synapse: "none"
-    grist: "none"
-    livekit: "none"
-    meet: { backend: "none", frontend: "none" }
-    nextcloud: "none"
-    docs: { backend: "none", frontend: "none", celery: "none", yProvider: "none", docspec: "none" }
-    drive: { backend: "none", frontend: "none" }
-    conversations: { backend: "none", frontend: "none" }
-    bureaublad: { backend: "none", frontend: "none" }
-  tls:
-    enabled: true
-    selfSigned: ${TLS_SELF_SIGNED}
-
-autoscaling:
-  horizontal:
-    # Grist keeps upload state on the pod and has no session affinity, so a
-    # second replica breaks file imports ("Unknown upload"). Disable the HPA;
-    # the chart then pins the deployment to replicaCount (1). Same reasoning
-    # as upstream's collabora exception.
-    grist:
-      enabled: false
-
-cluster:
-  routingMode: ingress
-  ingress:
-    type: traefik
-    annotations: { ${INGRESS_ANNOTATIONS} }
-  networking:
-    podSubnet:
-      - "10.42.0.0/16"
-    serviceSubnet:
-      - "10.43.0.0/16"
-
-application:
-  ollama:
-    enabled: false
-  # Antivirus and project-management are disabled for this install. To re-enable:
-  # set enabled: true and give each a namespace. OpenProject additionally needs
-  # the security.openproject and tls.openproject blocks (see the guide).
-  clamav:
-    enabled: false
-  openproject:
-    enabled: false
-  keycloak:    { namespace: mb-keycloak }
-  grist:       { namespace: mb-grist }
-  element:     { namespace: mb-element }
-  collabora:   { namespace: mb-collabora }
-  nextcloud:   { namespace: mb-nextcloud }
-  livekit:     { namespace: mb-livekit }
-  meet:        { namespace: mb-meet }
-  docs:        { namespace: mb-docs }
-  bureaublad:  { namespace: mb-bureaublad }
-
-# Open Suite images (CI-built; see .github/workflows and the portal repo's
-# publish-images workflow). Declared here so helmfile owns the images and a
-# re-apply can never revert them to upstream (which a kubectl-patch pin did).
-container:
-  nextcloud:
-    registry: "ghcr.io"
-    repository: "open-suite/nextcloud"
-    tag: "${NEXTCLOUD_TAG}"
-  bureaublad:
-    registry: "ghcr.io"
-    backend:
-      repository: "open-suite/portal-api"
-      tag: "sha-${PORTAL_REF:0:7}"
-    frontend:
-      repository: "open-suite/portal-frontend"
-      tag: "sha-${PORTAL_REF:0:7}"
-  meet_frontend:
-    registry: "ghcr.io"
-    repository: "open-suite/meet-frontend"
-    tag: "${MEET_TAG}"
-  elementweb:
-    registry: "ghcr.io"
-    repository: "open-suite/element-web"
-    tag: "${ELEMENT_TAG}"
-
-authentication:
-  oidc:
-    issuer: "https://id.${DOMAIN}/realms/mijnbureau"
-    authorization_endpoint: "https://id.${DOMAIN}/realms/mijnbureau/protocol/openid-connect/auth"
-    end_session_endpoint: "https://id.${DOMAIN}/realms/mijnbureau/protocol/openid-connect/logout"
-    # Backchannel endpoints (server-to-server): in selfsigned mode the apps
-    # cannot verify the chart-generated certs, so they talk to Keycloak's
-    # in-cluster plain-HTTP service instead. issuer and the browser-facing
-    # endpoints above stay on the public https host either way.
-    token_endpoint: "${KC_BACKCHANNEL}/realms/mijnbureau/protocol/openid-connect/token"
-    introspection_endpoint: "${KC_BACKCHANNEL}/realms/mijnbureau/protocol/openid-connect/token/introspect"
-    userinfo_endpoint: "${KC_BACKCHANNEL}/realms/mijnbureau/protocol/openid-connect/userinfo"
-    jwks_uri: "${KC_BACKCHANNEL}/realms/mijnbureau/protocol/openid-connect/certs"
-
-# Open Suite: gate the workspace app ingresses behind the edge auth gate
-# (12-auth-gate.sh deploys the gate itself). Consumed by
-# patches/local/auth-gate-ingress-middleware.patch, which appends the
-# forwardAuth middleware to each patched ingress's middleware chain. Keycloak
-# stays ungated — gating the IdP would loop the login. Until 12 creates the
-# Middleware object the gated routers fail closed; on a first deploy that
-# window is before the stack is usable anyway.
-opensuite:
-  authGate:
-    enabled: true
-
-YAML
+# Render the demo environment values from the checked-in template. Only these
+# variables are substituted (scoped envsubst) — anything else is left verbatim.
+# PORTAL_SHA is the 7-char image tag the portal publish-images workflow uses.
+PORTAL_SHA="${PORTAL_REF:0:7}"
+export DOMAIN TLS_SELF_SIGNED INGRESS_ANNOTATIONS NEXTCLOUD_TAG PORTAL_SHA MEET_TAG ELEMENT_TAG KC_BACKCHANNEL
+envsubst '${DOMAIN} ${TLS_SELF_SIGNED} ${INGRESS_ANNOTATIONS} ${NEXTCLOUD_TAG} ${PORTAL_SHA} ${MEET_TAG} ${ELEMENT_TAG} ${KC_BACKCHANNEL}' \
+  < "${REPO_ROOT}/helmfile/demo-values.yaml.tmpl" \
+  > helmfile/environments/demo/mijnbureau.yaml.gotmpl
 
 echo "==> [4/4] Deploying (this takes 10-20 minutes)"
 export KUBECONFIG=/etc/rancher/k3s/k3s.yaml
