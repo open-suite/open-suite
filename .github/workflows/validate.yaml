@@ -34,7 +34,7 @@ jobs:
           TLS_SELF_SIGNED: "true"
           INGRESS_ANNOTATIONS: ""
           NEXTCLOUD_TAG: 34.0.0-apache
-          PORTAL_SHA: 34512e5
+          PORTAL_SHA: "34512e5"
           MEET_TAG: v1.20.0
           ELEMENT_TAG: v1.12.21
           KC_BACKCHANNEL: http://keycloak-keycloak.mb-keycloak
