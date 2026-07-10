@@ -82,8 +82,15 @@ try {
   // Visiting nextcloud also establishes its user_oidc session (auto-SSO) and
   // stores the login token the meetcal/caldav token exchange needs.
   for (const host of ["nextcloud", "grist", "docs", "meet", "element"]) {
-    const r = await page.goto(`https://${host}.${DOMAIN}/`, { waitUntil: "domcontentloaded" });
-    if (!r || r.status() >= 400) fail(`${host}: load`, `HTTP ${r?.status()}`);
+    // Some OIDC SPAs replace the initial navigation while Playwright is still
+    // awaiting it, which surfaces as net::ERR_ABORTED even though the redirect
+    // succeeds. The rendered-header assertion below remains the acceptance
+    // signal, so tolerate that navigation exception and continue waiting.
+    const r = await page
+      .goto(`https://${host}.${DOMAIN}/`, { waitUntil: "domcontentloaded" })
+      .catch(() => null);
+    await page.waitForLoadState("domcontentloaded").catch(() => {});
+    if (r && r.status() >= 400) fail(`${host}: load`, `HTTP ${r.status()}`);
     await assertGlobalHeader(host);
   }
 
