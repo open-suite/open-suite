@@ -2,10 +2,11 @@ diff --git a/helmfile/apps/bureaublad/values.yaml.gotmpl b/helmfile/apps/bureaub
 index d78c692..e932c80 100644
 --- a/helmfile/apps/bureaublad/values.yaml.gotmpl
 +++ b/helmfile/apps/bureaublad/values.yaml.gotmpl
-@@ -69,6 +69,17 @@ backend:
+@@ -69,6 +69,18 @@ backend:
      OIDC_POST_LOGIN_REDIRECT_URI: {{ $baseUrl }}
      OIDC_POST_LOGOUT_REDIRECT_URI: {{ $baseUrl }}
      OIDC_TOKEN_ENDPOINT: {{ .Values.authentication.oidc.token_endpoint | quote }}
++    OIDC_INTROSPECTION_ENDPOINT: {{ .Values.authentication.oidc.introspection_endpoint | quote }}
 +    # Open Suite: wire the portal calendar/tasks to Nextcloud (CalDAV). The
 +    # fork's backend reads these; upstream ignores unknown env vars.
 +    CALENDAR_URL: "https://{{ .Values.global.hostname.nextcloud | default "nextcloud" }}.{{ .Values.global.domain }}/apps/calendar"
