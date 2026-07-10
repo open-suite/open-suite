@@ -17,15 +17,13 @@ OPEN_SUITE_DEMO_ADMIN_USERNAME="${OPEN_SUITE_DEMO_ADMIN_USERNAME:-demoadmin}"
 # Pinned open-suite-portal commit: selects the CI-built portal images
 # (ghcr.io/open-suite/portal-{api,frontend}:sha-<short>). Bump deliberately.
 PORTAL_REF="${PORTAL_REF:-34512e55b70295e7b50814dfc8120bdf5966fa55}"
-# Pinned upstream Meet ref the meet-frontend-image workflow builds+tags.
-MEET_TAG="${MEET_TAG:-v1.20.0}"
-# Open Suite Nextcloud image tag (nextcloud-image workflow: upstream base +
-# meetcal + patched user_oidc). Tracks the upstream base tag; use a sha- tag
-# to pin a specific build.
-NEXTCLOUD_TAG="${NEXTCLOUD_TAG:-34.0.0-apache}"
+# Pinned Open Suite build of the v1.20.0-based Meet frontend.
+MEET_TAG="${MEET_TAG:-sha-03c989f}"
+# Pinned Open Suite Nextcloud build (upstream base + meetcal + patched user_oidc).
+NEXTCLOUD_TAG="${NEXTCLOUD_TAG:-sha-03c989f}"
 # Open Suite Element Web image tag (element-image workflow: pinned upstream with
-# the verification-reminder toasts patched out of the bundle). Matches the
-# upstream tag it is built from; use a sha- tag to pin a specific build.
+# the verification-reminder toasts patched out of the bundle). This remaining
+# version tag is tracked for conversion to a digest in the release manifest.
 ELEMENT_TAG="${ELEMENT_TAG:-v1.12.21}"
 # TLS mode: letsencrypt (default; needs public DNS + ports) or selfsigned
 # (local VMs: every chart generates its own cert, no cert-manager, no ACME).

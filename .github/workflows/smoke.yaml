@@ -49,7 +49,7 @@ jobs:
           SMOKE_PASS: ${{ secrets.SMOKE_PASS }}
         run: |
           if [ -z "$SMOKE_PASS" ]; then
-            echo "SMOKE_PASS secret not set — skipping authenticated suite" >&2
-            exit 0
+            echo "SMOKE_PASS secret not set — authenticated smoke is required" >&2
+            exit 2
           fi
           node ci/smoke/authenticated.mjs
