@@ -47,24 +47,34 @@ Gaps in the numbering are deleted steps whose work moved into
 portal, Meet, auth gate — are CI-built and pinned in the demo values). Result:
 `https://bridge.DOMAIN`.
 
-## Repo shape (current)
+## Where customization lives
+
+Four upstreams are curated without forking, so a change goes in one of three
+places depending on WHAT it touches:
+
+| To change… | Put it in… | Applied |
+|---|---|---|
+| MinBZK helm charts or their values (most config) | `patches/local/*.patch` | at deploy by `01`, `git apply --3way` over the pinned `UPSTREAM_REF` checkout |
+| Code inside an app container (Nextcloud apps, patched user_oidc, Element bundle) | `images/<app>/` (Dockerfile + files/patches) | built in CI to GHCR, pinned in the demo values |
+| La Suite Meet frontend source | `patches/meet/*.patch` | applied to Meet source in CI, built into `meet-frontend` |
+| Browser-side injection (shared portal header) | `overlays/portal-header/` | uploaded as a configmap by `09` |
+| The edge auth gate | `overlays/auth-gate/` | built in CI to GHCR |
 
 ```
 deploy.sh                    entry point (see table above)
 scripts/single-vps-deploy/   the numbered steps
-patches/
-  local/                     opinionated/integration patches applied over the vendored MinBZK infra
-  meet/                      patches for the La Suite Meet frontend build (13)
-  upstreamable/              (empty) clean, single-concern patches headed upstream — retire when released
-overlays/                    auth-gate build context, shared portal header
-.github/workflows/           CI: auth-gate image build to GHCR
-ci/                          (placeholder) assembled-stack smoke tests
-helmfile/                    (placeholder) will absorb the demo values 01 currently writes inline
-docs/                        PLAN.md; operator/end-user docs to come
-tickets/                     work tracking, one file per ticket
+patches/local/               chart/values patches over the vendored MinBZK infra (deploy-time)
+patches/meet/                La Suite Meet frontend source patches (CI image build)
+images/<app>/                custom app images (nextcloud, element) built in CI
+overlays/                    auth-gate source; shared portal-header JS
+helmfile/                    demo values template 01 renders (demo-values.yaml.tmpl)
+ci/smoke/                    assembled-stack smoke tests (run in CI + manually)
+.github/workflows/           image builds to GHCR + smoke
+docs/ , tickets/             design notes and work tracking
 ```
 
 The MinBZK infra is **vendored at deploy time**: `01` clones it at the single
 pinned commit in `UPSTREAM_REF` and applies `patches/local/*` to a pristine
 tree before `helmfile apply` — never a floating branch, never patches on an
-already-patched checkout.
+already-patched checkout. Fixes we intend to send upstream are not yet split
+into a separate bucket; they live in `patches/local/` with the rest.
