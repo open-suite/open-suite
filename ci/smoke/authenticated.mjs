@@ -200,13 +200,20 @@ try {
         // File/Insert row while this check still passed.
         editorUp = /Page 1 of|words|characters/i.test(inner) || (inner.includes("File") && inner.includes("Insert"));
         const controls = await cool.evaluate(() => {
-          const visibleExactText = (label) => [...document.querySelectorAll("button,a,div,span")].some((el) => {
-            if ((el.textContent || "").trim() !== label) return false;
-            const rect = el.getBoundingClientRect();
-            const style = getComputedStyle(el);
-            return rect.width > 0 && rect.height > 0 && rect.bottom > 0 && rect.top < innerHeight
-              && style.display !== "none" && style.visibility !== "hidden";
-          });
+          const visibleExactText = (label) => {
+            const walker = document.createTreeWalker(document.body, NodeFilter.SHOW_TEXT);
+            let node;
+            while ((node = walker.nextNode())) {
+              if ((node.nodeValue || "").trim() !== label) continue;
+              const range = document.createRange();
+              range.selectNodeContents(node);
+              const rect = range.getBoundingClientRect();
+              const style = getComputedStyle(node.parentElement);
+              if (rect.width > 0 && rect.height > 0 && rect.bottom > 0 && rect.top < innerHeight
+                && style.display !== "none" && style.visibility !== "hidden") return true;
+            }
+            return false;
+          };
           return { file: visibleExactText("File"), insert: visibleExactText("Insert") };
         }).catch(() => ({ file: false, insert: false }));
         const officeBox = await page.locator(".office-viewer:not(.office-viewer__embedding)").last().boundingBox().catch(() => null);
