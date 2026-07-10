@@ -187,6 +187,7 @@ try {
     // frame directly. Failure overlays render in the top document.
     let editorUp = false;
     let editorControlsVisible = false;
+    let editorDiagnostic = {};
     for (let i = 0; i < 12; i++) {
       await page.waitForTimeout(3000);
       const txt = await page.evaluate(() => document.body.innerText);
@@ -209,6 +210,13 @@ try {
           return { file: visibleExactText("File"), insert: visibleExactText("Insert") };
         }).catch(() => ({ file: false, insert: false }));
         const officeBox = await page.locator(".office-viewer:not(.office-viewer__embedding)").last().boundingBox().catch(() => null);
+        const parentStyle = await page.locator(".office-viewer:not(.office-viewer__embedding)").last().evaluate((el) => ({
+          htmlClass: document.documentElement.className,
+          transform: getComputedStyle(el).transform,
+          height: getComputedStyle(el).height,
+          top: getComputedStyle(el).top,
+        })).catch(() => null);
+        editorDiagnostic = { controls, officeBox, parentStyle, viewport: page.viewportSize() };
         editorControlsVisible = Boolean(
           controls.file && controls.insert && officeBox && officeBox.y >= 46
             && officeBox.y + officeBox.height <= page.viewportSize().height + 2
@@ -217,7 +225,7 @@ try {
       }
     }
     if (editorUp && editorControlsVisible) ok("Collabora opens with visible File and Insert controls");
-    else if (editorUp) fail("Collabora editor controls", "File/Insert row is hidden or overlapped by the suite header");
+    else if (editorUp) fail("Collabora editor controls", `File/Insert row is hidden or overlapped: ${JSON.stringify(editorDiagnostic)}`);
     else fail("Collabora document open", "editor never became ready or WOPI failed");
 
     // Clean up: the New→Document click above creates a real file every run
