@@ -186,6 +186,7 @@ try {
     // The editor renders inside the cross-origin Collabora iframe; ask that
     // frame directly. Failure overlays render in the top document.
     let editorUp = false;
+    let editorControlsVisible = false;
     for (let i = 0; i < 12; i++) {
       await page.waitForTimeout(3000);
       const txt = await page.evaluate(() => document.body.innerText);
@@ -193,11 +194,30 @@ try {
       const cool = page.frames().find(f => f.url().includes("cool.html"));
       if (cool) {
         const inner = await cool.evaluate(() => document.body?.innerText || "").catch(() => "");
-        // Menubar or status bar — either proves the editor rendered.
-        if (/Page 1 of|words|characters/i.test(inner) || (inner.includes("File") && inner.includes("Insert"))) { editorUp = true; break; }
+        // A status bar proves the WOPI chain loaded, but it does not prove the
+        // editor is usable: the suite header once covered Collabora's entire
+        // File/Insert row while this check still passed.
+        editorUp = /Page 1 of|words|characters/i.test(inner) || (inner.includes("File") && inner.includes("Insert"));
+        const controls = await cool.evaluate(() => {
+          const visibleExactText = (label) => [...document.querySelectorAll("button,a,div,span")].some((el) => {
+            if ((el.textContent || "").trim() !== label) return false;
+            const rect = el.getBoundingClientRect();
+            const style = getComputedStyle(el);
+            return rect.width > 0 && rect.height > 0 && rect.bottom > 0 && rect.top < innerHeight
+              && style.display !== "none" && style.visibility !== "hidden";
+          });
+          return { file: visibleExactText("File"), insert: visibleExactText("Insert") };
+        }).catch(() => ({ file: false, insert: false }));
+        const officeBox = await page.locator(".office-viewer:not(.office-viewer__embedding)").last().boundingBox().catch(() => null);
+        editorControlsVisible = Boolean(
+          controls.file && controls.insert && officeBox && officeBox.y >= 46
+            && officeBox.y + officeBox.height <= page.viewportSize().height + 2
+        );
+        if (editorUp && editorControlsVisible) break;
       }
     }
-    if (editorUp) ok("Collabora opens a document (WOPI chain works)");
+    if (editorUp && editorControlsVisible) ok("Collabora opens with visible File and Insert controls");
+    else if (editorUp) fail("Collabora editor controls", "File/Insert row is hidden or overlapped by the suite header");
     else fail("Collabora document open", "editor never became ready or WOPI failed");
 
     // Clean up: the New→Document click above creates a real file every run
