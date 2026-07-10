@@ -223,9 +223,11 @@ try {
           height: getComputedStyle(el).height,
           top: getComputedStyle(el).top,
         })).catch(() => null);
-        editorDiagnostic = { controls, officeBox, parentStyle, viewport: page.viewportSize() };
+        const suiteHeaderBox = await page.locator("#ko-portal-header").boundingBox().catch(() => null);
+        editorDiagnostic = { controls, officeBox, suiteHeaderBox, parentStyle, viewport: page.viewportSize() };
         editorControlsVisible = Boolean(
-          controls.file && controls.insert && officeBox && officeBox.y >= 46
+          controls.file && controls.insert && officeBox && suiteHeaderBox
+            && Math.abs(officeBox.y - (suiteHeaderBox.y + suiteHeaderBox.height)) <= 2
             && officeBox.y + officeBox.height <= page.viewportSize().height + 2
         );
         if (editorUp && editorControlsVisible) break;
@@ -234,6 +236,28 @@ try {
     if (editorUp && editorControlsVisible) ok("Collabora opens with visible File and Insert controls");
     else if (editorUp) fail("Collabora editor controls", `File/Insert row is hidden or overlapped: ${JSON.stringify(editorDiagnostic)}`);
     else fail("Collabora document open", "editor never became ready or WOPI failed");
+
+    if (editorUp && editorControlsVisible) {
+      for (const viewport of [
+        { width: 1024, height: 768 },
+        { width: 390, height: 844 },
+      ]) {
+        await page.setViewportSize(viewport);
+        await page.waitForTimeout(250);
+        const headerBox = await page.locator("#ko-portal-header").boundingBox();
+        const officeBox = await page.locator(".office-viewer:not(.office-viewer__embedding)").last().boundingBox();
+        if (
+          headerBox && officeBox
+          && Math.abs(officeBox.y - (headerBox.y + headerBox.height)) <= 2
+          && officeBox.y + officeBox.height <= viewport.height + 2
+        ) ok(`Collabora/header geometry at ${viewport.width}x${viewport.height}`);
+        else fail(
+          `Collabora/header geometry at ${viewport.width}x${viewport.height}`,
+          `header=${JSON.stringify(headerBox)}, office=${JSON.stringify(officeBox)}`,
+        );
+      }
+      await page.setViewportSize({ width: 1280, height: 720 });
+    }
 
     // Clean up: the New→Document click above creates a real file every run
     // (nightly + each push), which once littered the demo with 21 copies of
