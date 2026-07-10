@@ -22,6 +22,9 @@
 
   var HEADER_ID = "ko-portal-header";
   var HEADER_HEIGHT = 48; // px
+  var HEADER_HEIGHT_VAR = "--ko-header-height";
+  var headerResizeObserver = null;
+  document.documentElement.style.setProperty(HEADER_HEIGHT_VAR, HEADER_HEIGHT + "px");
 
   // host = "meet.opensuite.ritzademo.com" -> base = "opensuite.ritzademo.com"
   var host = window.location.hostname;
@@ -87,19 +90,19 @@
       // aren't clipped. On the bridge portal we instead hide its built-in nav
       // and push content down, since our bar replaces that nav entirely.
       "html.ko-on-bridge .ant-layout-header{display:none !important;}",
-      "html.ko-on-bridge body{padding-top:" + HEADER_HEIGHT + "px !important;}",
+      "html.ko-on-bridge body{padding-top:var(" + HEADER_HEIGHT_VAR + ") !important;}",
       // Element fills the viewport (#matrixchat = 100vh) and puts controls at the
       // very top, which the overlay would cover — push it below the bar and
       // shrink it so nothing (room search, message composer) is hidden or cut.
-      "html.ko-on-element #matrixchat{margin-top:" + HEADER_HEIGHT + "px !important;height:calc(100vh - " + HEADER_HEIGHT + "px) !important;}",
+      "html.ko-on-element #matrixchat{margin-top:var(" + HEADER_HEIGHT_VAR + ") !important;height:calc(100vh - var(" + HEADER_HEIGHT_VAR + ")) !important;}",
       // Nextcloud Office deliberately moves its full-screen Collabora iframe
       // over Nextcloud's own 50px header. Our fixed suite header occupies that
       // same space, so without an offset it covers Collabora's File/Insert tab
       // row. Move only the full-screen editor down; embedded/split previews keep
       // their native geometry.
       "html.ko-on-nextcloud .viewer__content:not(.viewer--split) .office-viewer:not(.viewer__file--hidden):not(.widget-file){",
-      "transform:translateY(" + HEADER_HEIGHT + "px);height:calc(100vh - " + HEADER_HEIGHT + "px) !important;",
-      "height:calc(100dvh - " + HEADER_HEIGHT + "px) !important;}",
+      "transform:translateY(var(" + HEADER_HEIGHT_VAR + "));height:calc(100vh - var(" + HEADER_HEIGHT_VAR + ")) !important;",
+      "height:calc(100dvh - var(" + HEADER_HEIGHT_VAR + ")) !important;}",
       // Nextcloud Calendar's new-event popover sizes its max-height as
       // (100vh - its top), but NC's own 50px header offsets the real top, so the
       // popover renders ~50px too tall and its footer (Save) falls off-screen.
@@ -116,6 +119,11 @@
     // Office (nextcloud, no path): active on nextcloud except the calendar path.
     if (item.children) return window.location.pathname.indexOf("/apps/calendar") !== 0;
     return true;
+  }
+
+  function syncHeaderHeight(bar) {
+    var height = Math.round(bar.getBoundingClientRect().height);
+    if (height > 0) document.documentElement.style.setProperty(HEADER_HEIGHT_VAR, height + "px");
   }
 
   function buildItem(item) {
@@ -177,6 +185,12 @@
 
     NAV.forEach(function (item) { bar.appendChild(buildItem(item)); });
     document.body.appendChild(bar);
+    syncHeaderHeight(bar);
+    if (typeof ResizeObserver !== "undefined") {
+      if (headerResizeObserver) headerResizeObserver.disconnect();
+      headerResizeObserver = new ResizeObserver(function () { syncHeaderHeight(bar); });
+      headerResizeObserver.observe(bar);
+    }
 
     // Close any open dropdown when clicking elsewhere.
     document.addEventListener("click", function () {
