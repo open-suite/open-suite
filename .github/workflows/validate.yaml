@@ -1,0 +1,78 @@
+name: validate distribution
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+permissions:
+  contents: read
+
+jobs:
+  static:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install validators
+        run: sudo apt-get update -qq && sudo apt-get install -y -qq shellcheck gettext-base
+      - name: Check shell
+        run: |
+          find . -type f -name '*.sh' -not -path './.git/*' -print0 | xargs -0 -n1 bash -n
+          find . -type f -name '*.sh' -not -path './.git/*' -print0 | xargs -0 shellcheck --severity=warning
+      - name: Test host state helpers
+        run: bash ci/test-state.sh
+      - name: Check JavaScript
+        run: |
+          node --check ci/smoke/authenticated.mjs
+          node --check overlays/portal-header/opensuite-header.js
+      - name: Check PHP
+        run: find images/nextcloud/meetcal -name '*.php' -print0 | xargs -0 -n1 php -l
+      - name: Render environment values
+        env:
+          DOMAIN: example.test
+          TLS_SELF_SIGNED: "true"
+          INGRESS_ANNOTATIONS: ""
+          NEXTCLOUD_TAG: 34.0.0-apache
+          PORTAL_SHA: 34512e5
+          MEET_TAG: v1.20.0
+          ELEMENT_TAG: v1.12.21
+          KC_BACKCHANNEL: http://keycloak-keycloak.mb-keycloak
+        run: |
+          envsubst '${DOMAIN} ${TLS_SELF_SIGNED} ${INGRESS_ANNOTATIONS} ${NEXTCLOUD_TAG} ${PORTAL_SHA} ${MEET_TAG} ${ELEMENT_TAG} ${KC_BACKCHANNEL}' \
+            < helmfile/demo-values.yaml.tmpl > /tmp/opensuite-values.yaml
+          python3 - <<'PY'
+          import pathlib
+          rendered = pathlib.Path('/tmp/opensuite-values.yaml').read_text()
+          if '${' in rendered:
+              raise SystemExit('unrendered variable in demo values')
+          for expected in ('example.test', 'sha-34512e5', '34.0.0-apache'):
+              if expected not in rendered:
+                  raise SystemExit(f'missing rendered value: {expected}')
+          PY
+
+  patch-series:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Apply infra patch series
+        run: |
+          ref=$(cat UPSTREAM_REF)
+          git clone -q https://github.com/MinBZK/mijn-bureau-infra /tmp/infra
+          git -C /tmp/infra checkout -q "$ref"
+          for patch in patches/local/*.patch; do
+            git -C /tmp/infra apply --3way --check "$GITHUB_WORKSPACE/$patch"
+          done
+          for patch in patches/local/*.patch; do
+            git -C /tmp/infra apply --3way "$GITHUB_WORKSPACE/$patch"
+          done
+      - name: Assemble patched Meet source
+        run: |
+          git clone -q --depth 1 --branch v1.20.0 https://github.com/suitenumerique/meet.git /tmp/meet
+          for patch in patches/meet/*.patch; do
+            git -C /tmp/meet apply --check "$GITHUB_WORKSPACE/$patch"
+            git -C /tmp/meet apply "$GITHUB_WORKSPACE/$patch"
+          done
+          cp overlays/portal-header/opensuite-header.js /tmp/meet/src/frontend/public/opensuite-header.js
+          grep -Fq '<script src="/opensuite-header.js"></script>' /tmp/meet/src/frontend/index.html
+          test -s /tmp/meet/src/frontend/public/opensuite-header.js

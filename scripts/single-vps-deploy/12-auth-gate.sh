@@ -6,6 +6,7 @@
 # appends the forwardAuth middleware to each gated ingress's annotation when
 # the demo values set opensuite.authGate.enabled (01-deploy.sh does).
 set -euo pipefail
+umask 077
 
 export KUBECONFIG=/etc/rancher/k3s/k3s.yaml
 
@@ -21,13 +22,14 @@ IMAGE="${AUTH_GATE_IMAGE:-ghcr.io/open-suite/auth-gate:sha-309302a}"
 OPEN_SUITE_TLS_MODE="${OPEN_SUITE_TLS_MODE:-letsencrypt}"
 
 echo "==> [1/5] Ensuring auth-gate secrets"
-mkdir -p /etc/mijnbureau
+install -d -m 0700 /etc/mijnbureau
 if [ ! -f /etc/mijnbureau/auth-gate-client-secret ]; then
   openssl rand -base64 36 | tr -d '\n' > /etc/mijnbureau/auth-gate-client-secret
 fi
 if [ ! -f /etc/mijnbureau/auth-gate-cookie-secret ]; then
   openssl rand -base64 48 | tr -d '\n' > /etc/mijnbureau/auth-gate-cookie-secret
 fi
+chmod 0600 /etc/mijnbureau/auth-gate-client-secret /etc/mijnbureau/auth-gate-cookie-secret
 CLIENT_SECRET="$(cat /etc/mijnbureau/auth-gate-client-secret)"
 COOKIE_SECRET="$(cat /etc/mijnbureau/auth-gate-cookie-secret)"
 

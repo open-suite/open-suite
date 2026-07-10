@@ -33,6 +33,21 @@ const fail = (name, detail) => {
   failures.push(name);
 };
 
+const assertGlobalHeader = async (host) => {
+  const header = page.locator("#ko-portal-header");
+  try {
+    await header.waitFor({ state: "visible", timeout: 15000 });
+    const home = header.getByRole("link", { name: "Home", exact: true });
+    const href = await home.getAttribute("href");
+    const box = await header.boundingBox();
+    if (href === `https://bridge.${DOMAIN}` && box && box.height >= 40 && box.y <= 1)
+      ok(`${host}: rendered Open Suite navigation`);
+    else fail(`${host} header`, `bad Home href or geometry: ${href}, ${JSON.stringify(box)}`);
+  } catch (e) {
+    fail(`${host} header`, e.message.slice(0, 120));
+  }
+};
+
 const browser = await chromium.launch();
 // SMOKE_INSECURE=1: tolerate self-signed certs (local VM deploys).
 const ctx = await browser.newContext({ ignoreHTTPSErrors: process.env.SMOKE_INSECURE === "1" });
@@ -61,14 +76,15 @@ try {
   await dashboard.waitFor({ timeout: 30000 });
   ok("portal renders (dashboard widgets present)");
 
-  // --- Header injection on the sidecar apps ---------------------------------
+  // --- Rendered global navigation on every app surface -----------------------
+  await assertGlobalHeader("bridge");
+
   // Visiting nextcloud also establishes its user_oidc session (auto-SSO) and
   // stores the login token the meetcal/caldav token exchange needs.
-  for (const host of ["nextcloud", "grist", "docs"]) {
+  for (const host of ["nextcloud", "grist", "docs", "meet", "element"]) {
     const r = await page.goto(`https://${host}.${DOMAIN}/`, { waitUntil: "domcontentloaded" });
-    const html = await page.content();
-    if (html.includes("/opensuite-header.js")) ok(`${host}: header script injected`);
-    else fail(`${host}: header script`, `not in HTML (HTTP ${r?.status()})`);
+    if (!r || r.status() >= 400) fail(`${host}: load`, `HTTP ${r?.status()}`);
+    await assertGlobalHeader(host);
   }
 
   // --- Portal widgets answer AND carry seeded content -----------------------
@@ -110,19 +126,33 @@ try {
   await page.goto(`https://nextcloud.${DOMAIN}/apps/calendar/`, { waitUntil: "domcontentloaded" });
   const room = await page.evaluate(async () => {
     const token = document.querySelector("head[data-requesttoken]")?.dataset.requesttoken ?? "";
-    const res = await fetch("/apps/meetcal/room", {
-      method: "POST",
-      headers: { requesttoken: token, "Content-Type": "application/json" },
-      body: "{}",
-      credentials: "same-origin",
-    });
-    return { status: res.status, body: await res.text() };
+    const create = async () => {
+      const res = await fetch("/apps/meetcal/room", {
+        method: "POST",
+        headers: { requesttoken: token, "Content-Type": "application/json" },
+        body: JSON.stringify({ idempotencyKey: "opensuite-smoke-room-v1" }),
+        credentials: "same-origin",
+      });
+      return { status: res.status, body: await res.text() };
+    };
+    return { first: await create(), second: await create() };
   });
-  let roomUrl = "";
-  try { roomUrl = JSON.parse(room.body).url ?? ""; } catch {}
-  if (room.status === 200 && /https:\/\/meet\..*\/[a-z0-9]{3}-[a-z0-9]{4}-[a-z0-9]{3}/.test(roomUrl))
-    ok(`meetcal mints a joinable room (${roomUrl})`);
-  else fail("meetcal room", `HTTP ${room.status}, body ${room.body.slice(0, 120)}`);
+  let firstRoomUrl = "";
+  let secondRoomUrl = "";
+  try { firstRoomUrl = JSON.parse(room.first.body).url ?? ""; } catch {}
+  try { secondRoomUrl = JSON.parse(room.second.body).url ?? ""; } catch {}
+  if (
+    room.first.status === 200 &&
+    room.second.status === 200 &&
+    firstRoomUrl === secondRoomUrl &&
+    /https:\/\/meet\..*\/[a-z0-9]{3}-[a-z0-9]{4}-[a-z0-9]{3}/.test(firstRoomUrl)
+  )
+    ok(`meetcal retries reuse one joinable room (${firstRoomUrl})`);
+  else
+    fail(
+      "meetcal room idempotency",
+      `HTTP ${room.first.status}/${room.second.status}, URLs ${firstRoomUrl}/${secondRoomUrl}`
+    );
 
   // --- Matrix SSO flows through without a consent screen --------------------
   // (sso.client_whitelist; the Chat widget breaks UX without it)
@@ -199,17 +229,6 @@ try {
     else fail(`${host}: load`, `HTTP ${r?.status()}`);
   }
 
-  // --- Element carries the Open Suite nav (static-SPA header) ---------------
-  // Element injects the header as /bureaublad-button.js (not the sidecar's
-  // opensuite-header.js). This is one of the two header paths a helmfile
-  // re-apply reverts (Phase 2, ticket 3.5). Meet's static header is a known
-  // separate gap tracked there, so it is not asserted here yet.
-  {
-    await page.goto(`https://element.${DOMAIN}/`, { waitUntil: "domcontentloaded" });
-    const html = await page.content();
-    if (html.includes("bureaublad-button.js")) ok("element: Open Suite nav injected");
-    else fail("element header", "bureaublad-button.js not in HTML");
-  }
 } catch (e) {
   fail("unexpected error", e.message);
 } finally {

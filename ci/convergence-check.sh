@@ -1,127 +1,198 @@
 #!/usr/bin/env bash
-# Convergence check — the test the empty-demo/broken-Collabora incident was
-# missing (PLAN.md Phase 1, ticket-class 3.6).
+# Verify that the rendered Helmfile layer does not erase required Open Suite
+# behavior. This is destructive to the live demo while it runs: Helmfile may
+# roll workloads, and the heal phase reapplies all remaining procedural state.
 #
-# The demo's history is a string of fixes that only ever lived as imperative
-# cluster mutations (kubectl patch / occ / kcadm). A bare `helmfile -e demo
-# apply` re-renders the workloads and silently reverts any fix not captured in
-# a patch or values — which is exactly how a "clean redeploy" kept
-# reintroducing bugs. This script makes that reversion visible on demand
-# instead of by surprise months later:
-#
-#   1. snapshot the known imperative artifacts (must all be present to start)
-#   2. run `helmfile -e demo apply` (the declarative layer only)
-#   3. re-check — whatever reverted is imperative debt still owed to Phase 2
-#   4. heal by re-running deploy.sh's imperative steps (09/10/11 …)
-#   5. re-check — confirm the demo is whole again
-#
-# DESTRUCTIVE to the live demo while it runs (steps 2–4 take ~5–15 min and the
-# demo is degraded in between). Run only in a maintenance window, on the box,
-# as root. Per repo policy, report before and after touching the live server.
-#
-# Usage (on 95.217.109.206):
-#   MASTER_PASSWORD=... ci/convergence-check.sh
-#   ci/convergence-check.sh <master-password>
+# Usage:
+#   OPEN_SUITE_MASTER_PASSWORD_FILE=/root/master-password ci/convergence-check.sh
+#   MIJNBUREAU_MASTER_PASSWORD=... ci/convergence-check.sh
 set -uo pipefail
-
-MASTER_PASSWORD="${MASTER_PASSWORD:-${1:-}}"
-if [ -z "${MASTER_PASSWORD}" ]; then
-  echo "ERROR: master password required (MASTER_PASSWORD=... or as \$1)." >&2
-  echo "It is the third arg deploy.sh was run with; not stored in this repo." >&2
-  exit 2
-fi
 
 export KUBECONFIG="${KUBECONFIG:-/etc/rancher/k3s/k3s.yaml}"
 REPO="$(cd "$(dirname "$0")/.." && pwd)"
 INFRA="${INFRA_DIR:-/root/mijn-bureau-infra}"
 DIR="${REPO}/scripts/single-vps-deploy"
+EXPECTED_AUTH_GATE_IMAGE="${AUTH_GATE_IMAGE:-ghcr.io/open-suite/auth-gate:sha-309302a}"
+source "${REPO}/scripts/lib/state.sh"
+
+MASTER_PASSWORD="$(opensuite_read_master_password)" || exit 2
+[ -n "${MASTER_PASSWORD}" ] || { echo "ERROR: master password must not be empty." >&2; exit 2; }
+DOMAIN="$(cat /etc/mijnbureau/domain 2>/dev/null || true)"
+[ -n "${DOMAIN}" ] || { echo "ERROR: /etc/mijnbureau/domain is missing." >&2; exit 2; }
+opensuite_guard_install_identity "${DOMAIN}" "${MASTER_PASSWORD}"
 
 if [ ! -d "${INFRA}/helmfile" ]; then
-  echo "ERROR: no helmfile checkout at ${INFRA} (set INFRA_DIR). Run deploy.sh once first." >&2
+  echo "ERROR: no Helmfile checkout at ${INFRA} (set INFRA_DIR)." >&2
   exit 2
 fi
 
-# --- the imperative artifacts a bare helmfile apply reverts ------------------
-# Each probe echoes "1" if the fix is present, "0" if reverted. Add a probe
-# here when a new imperative fix lands, so this check keeps pace with the debt.
-probe_keycloak_theme() {   # 10-keycloak-login.sh: kubectl patch sts (theme volume mount)
-  kubectl -n mb-keycloak get sts keycloak-keycloak -o json 2>/dev/null \
-    | grep -c '/opt/bitnami/keycloak/themes/opensuite' | head -c1
+probe_contains() { # command output on stdin, fixed string
+  local needle="$1"
+  grep -Fq "${needle}" && echo 1 || echo 0
 }
-probe_element_bundle() {   # Phase 2.2: element-web runs the patched GHCR image (values-owned, survives apply)
+
+probe_keycloak_theme() {
+  kubectl -n mb-keycloak get sts keycloak-keycloak -o json 2>/dev/null \
+    | probe_contains '/opt/bitnami/keycloak/themes/opensuite'
+}
+
+probe_element_image() {
   kubectl -n mb-element get deploy element-web \
     -o jsonpath='{.spec.template.spec.containers[?(@.name=="element-web")].image}' 2>/dev/null \
-    | grep -qc 'open-suite/element-web' && echo 1 || echo 0
+    | probe_contains 'ghcr.io/open-suite/element-web'
 }
-probe_meet_header() {      # 09-portal-header.sh: patch_static overwrites the cm data key
-  kubectl -n mb-meet get cm meet-static-files \
-    -o jsonpath='{.data.bureaublad-button\.js}' 2>/dev/null \
-    | grep -qc 'Open Suite portal header' && echo 1 || echo 0
+
+probe_meet_image() {
+  kubectl -n mb-meet get deploy meet-frontend \
+    -o jsonpath='{.spec.template.spec.containers[0].image}' 2>/dev/null \
+    | probe_contains 'ghcr.io/open-suite/meet-frontend'
 }
-probe_element_header() {   # 09-portal-header.sh: patch_static (element)
+
+probe_element_header() {
   kubectl -n mb-element get cm element-web-bureaublad-button \
     -o jsonpath='{.data.bureaublad-button\.js}' 2>/dev/null \
-    | grep -qc 'Open Suite portal header' && echo 1 || echo 0
+    | probe_contains 'Open Suite portal header'
 }
 
-PROBES="keycloak_theme element_bundle meet_header element_header"
+probe_sidecar_headers() {
+  local ns
+  for ns in mb-nextcloud mb-grist mb-docs mb-bureaublad; do
+    kubectl -n "${ns}" get cm opensuite-header-js \
+      -o jsonpath='{.data.opensuite-header\.js}' 2>/dev/null \
+      | grep -Fq 'Open Suite portal header' || { echo 0; return; }
+  done
+  echo 1
+}
 
-snapshot() {  # prints "name=0/1" per probe
-  local p
-  for p in ${PROBES}; do printf '%s=%s ' "${p}" "$(probe_${p})"; done
+expected_public_ip() {
+  if [ -n "${OPEN_SUITE_PUBLIC_IP:-}" ]; then
+    printf '%s' "${OPEN_SUITE_PUBLIC_IP}"
+    return
+  fi
+  local ip
+  ip="$(kubectl get node -o jsonpath='{.items[0].status.addresses[?(@.type=="ExternalIP")].address}' 2>/dev/null \
+    | awk '{print $1}')"
+  if [ -z "${ip}" ]; then
+    ip="$(kubectl get node -o jsonpath='{.items[0].status.addresses[?(@.type=="InternalIP")].address}' 2>/dev/null \
+      | awk '{print $1}')"
+  fi
+  printf '%s' "${ip}"
+}
+
+probe_livekit_public_ip() {
+  local expected config
+  expected="$(expected_public_ip)"
+  config="$(kubectl -n mb-livekit get cm livekit-server -o jsonpath='{.data.config\.yaml}' 2>/dev/null)"
+  [ -n "${expected}" ] && grep -Fq "node_ip: ${expected}" <<<"${config}" && echo 1 || echo 0
+}
+
+probe_auth_gate() {
+  local desired available image
+  desired="$(kubectl -n mb-bureaublad get deploy opensuite-auth-gate \
+    -o jsonpath='{.spec.replicas}' 2>/dev/null)"
+  available="$(kubectl -n mb-bureaublad get deploy opensuite-auth-gate \
+    -o jsonpath='{.status.availableReplicas}' 2>/dev/null)"
+  image="$(kubectl -n mb-bureaublad get deploy opensuite-auth-gate \
+    -o jsonpath='{.spec.template.spec.containers[0].image}' 2>/dev/null)"
+  [ -n "${desired}" ] && [ "${desired}" = "${available}" ] \
+    && [ "${image}" = "${EXPECTED_AUTH_GATE_IMAGE}" ] && echo 1 || echo 0
+}
+
+probe_apex_redirect() {
+  kubectl -n mb-bureaublad get ingress/apex-redirect middleware/apex-redirect >/dev/null 2>&1 \
+    && echo 1 || echo 0
+}
+
+probe_networking() {
+  local ns
+  kubectl -n kube-system get cm coredns-custom >/dev/null 2>&1 || { echo 0; return; }
+  for ns in mb-keycloak mb-grist mb-element mb-collabora mb-nextcloud \
+            mb-livekit mb-meet mb-docs mb-bureaublad; do
+    kubectl -n "${ns}" get networkpolicy allow-egress-traefik >/dev/null 2>&1 \
+      || { echo 0; return; }
+  done
+  echo 1
+}
+
+PROBES=(
+  keycloak_theme
+  element_image
+  meet_image
+  element_header
+  sidecar_headers
+  livekit_public_ip
+  auth_gate
+  apex_redirect
+  networking
+)
+
+snapshot() {
+  local p probe
+  for p in "${PROBES[@]}"; do
+    probe="probe_${p}"
+    printf '%s=%s ' "${p}" "$("${probe}")"
+  done
   echo
 }
 
-echo "== 1/5 baseline (before apply) =="
-BEFORE="$(snapshot)"; echo "  ${BEFORE}"
-for p in ${PROBES}; do
-  case " ${BEFORE} " in *" ${p}=1 "*) ;; *)
-    echo "  WARN: ${p} is already reverted before we started — heal the demo first." ;;
-  esac
-done
+missing_from_snapshot() { # snapshot string
+  local state="$1" p missing=""
+  for p in "${PROBES[@]}"; do
+    case " ${state} " in *" ${p}=1 "*) ;; *) missing="${missing} ${p}" ;; esac
+  done
+  printf '%s' "${missing}"
+}
 
-echo "== 2/5 helmfile -e demo apply (declarative layer only) =="
-( cd "${INFRA}" \
-  && export MIJNBUREAU_MASTER_PASSWORD="${MASTER_PASSWORD}" MIJNBUREAU_CREATE_NAMESPACES=true \
-  && helmfile -e demo apply --skip-diff-on-install )
+echo "== 1/5 baseline =="
+BEFORE="$(snapshot)"
+echo "  ${BEFORE}"
+BASELINE_BROKEN="$(missing_from_snapshot "${BEFORE}")"
+[ -z "${BASELINE_BROKEN}" ] || echo "  PRE-EXISTING DRIFT:${BASELINE_BROKEN}"
+
+echo "== 2/5 Helmfile apply =="
+(
+  cd "${INFRA}" || exit
+  export MIJNBUREAU_MASTER_PASSWORD="${MASTER_PASSWORD}" MIJNBUREAU_CREATE_NAMESPACES=true
+  helmfile -e demo apply --skip-diff-on-install
+)
 APPLY_RC=$?
 echo "  helmfile apply exit=${APPLY_RC}"
 
-echo "== 3/5 after bare apply — what reverted? =="
-AFTER="$(snapshot)"; echo "  ${AFTER}"
+echo "== 3/5 post-apply snapshot =="
+AFTER="$(snapshot)"
+echo "  ${AFTER}"
 REVERTED=""
-for p in ${PROBES}; do
-  b=$(printf '%s' "${BEFORE}" | tr ' ' '\n' | sed -n "s/^${p}=//p")
-  a=$(printf '%s' "${AFTER}"  | tr ' ' '\n' | sed -n "s/^${p}=//p")
+for p in "${PROBES[@]}"; do
+  b="$(tr ' ' '\n' <<<"${BEFORE}" | sed -n "s/^${p}=//p")"
+  a="$(tr ' ' '\n' <<<"${AFTER}" | sed -n "s/^${p}=//p")"
   if [ "${b}" = "1" ] && [ "${a}" = "0" ]; then REVERTED="${REVERTED} ${p}"; fi
 done
-if [ -n "${REVERTED}" ]; then
-  echo "  IMPERATIVE DEBT (reverted by a bare apply):${REVERTED}"
-  echo "  → each of these must move into a patch/values/image (PLAN.md Phase 2)."
-else
-  echo "  none reverted — the declarative layer converges. Phase 2 debt cleared."
-fi
+[ -z "${REVERTED}" ] || echo "  REVERTED BY APPLY:${REVERTED}"
 
-echo "== 4/5 heal — re-run the imperative deploy steps =="
-export OPEN_SUITE_DEMO_MODE="$(cat /etc/mijnbureau/demo-mode 2>/dev/null || echo false)"
-export OPEN_SUITE_DEMO_USERNAME="$(cat /etc/mijnbureau/demo-username 2>/dev/null || true)"
-export OPEN_SUITE_DEMO_PASSWORD="$(cat /etc/mijnbureau/demo-password 2>/dev/null || true)"
-export OPEN_SUITE_DEMO_ADMIN_USERNAME="$(cat /etc/mijnbureau/demo-admin-username 2>/dev/null || true)"
-for step in 03-restart-oidc-apps 04-nextcloud-office 08-open-suite-portal \
-            09-portal-header 10-keycloak-login; do
+echo "== 4/5 heal all remaining procedural state =="
+OPEN_SUITE_DEMO_MODE="$(cat /etc/mijnbureau/demo-mode 2>/dev/null || echo false)"
+OPEN_SUITE_DEMO_USERNAME="$(cat /etc/mijnbureau/demo-username 2>/dev/null || true)"
+OPEN_SUITE_DEMO_PASSWORD="$(cat /etc/mijnbureau/demo-password 2>/dev/null || true)"
+OPEN_SUITE_DEMO_ADMIN_USERNAME="$(cat /etc/mijnbureau/demo-admin-username 2>/dev/null || true)"
+export OPEN_SUITE_DEMO_MODE OPEN_SUITE_DEMO_USERNAME OPEN_SUITE_DEMO_PASSWORD
+export OPEN_SUITE_DEMO_ADMIN_USERNAME
+export OPEN_SUITE_PUBLIC_IP="${OPEN_SUITE_PUBLIC_IP:-$(expected_public_ip)}"
+HEAL_FAILED=""
+for step in 02-networking 03-restart-oidc-apps 04-nextcloud-office \
+            08-open-suite-portal 09-portal-header 10-keycloak-login 12-auth-gate; do
   echo "  -> ${step}"
-  bash "${DIR}/${step}.sh" >/dev/null 2>&1 || echo "     WARN: ${step} exited nonzero"
+  bash "${DIR}/${step}.sh" >/dev/null 2>&1 || HEAL_FAILED="${HEAL_FAILED} ${step}"
 done
 
-echo "== 5/5 after heal — is the demo whole again? =="
-HEALED="$(snapshot)"; echo "  ${HEALED}"
-STILL_BROKEN=""
-for p in ${PROBES}; do
-  case " ${HEALED} " in *" ${p}=1 "*) ;; *) STILL_BROKEN="${STILL_BROKEN} ${p}" ;; esac
-done
-if [ -n "${STILL_BROKEN}" ]; then
-  echo "  STILL BROKEN after heal:${STILL_BROKEN} — the demo needs manual attention."
-  exit 1
-fi
-echo "  demo restored. Run the authenticated smoke to confirm end-to-end."
-[ -n "${REVERTED}" ] && exit 3 || exit 0
+echo "== 5/5 final snapshot =="
+HEALED="$(snapshot)"
+echo "  ${HEALED}"
+STILL_BROKEN="$(missing_from_snapshot "${HEALED}")"
+[ -z "${HEAL_FAILED}" ] || echo "  HEAL COMMANDS FAILED:${HEAL_FAILED}"
+[ -z "${STILL_BROKEN}" ] || echo "  STILL BROKEN:${STILL_BROKEN}"
+
+if [ "${APPLY_RC}" -ne 0 ]; then exit 2; fi
+if [ -n "${HEAL_FAILED}" ] || [ -n "${STILL_BROKEN}" ]; then exit 1; fi
+if [ -n "${REVERTED}" ]; then exit 3; fi
+if [ -n "${BASELINE_BROKEN}" ]; then exit 4; fi
+echo "  convergence verified"

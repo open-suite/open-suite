@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Usage: sudo ./deploy.sh <domain> <email> <master-password>
+# Usage: sudo ./deploy.sh <domain> <email>
 #
 # Single happy-path deploy for open-suite on a fresh Ubuntu 24.04 VPS (k3s).
 # Runs the MinBZK base (01-04: helmfile + patches, networking, cert wait,
@@ -12,9 +12,13 @@
 # Every step is idempotent, so re-running is safe.
 set -euo pipefail
 
-DOMAIN="${1:?Usage: $0 <domain> <email> <master-password>}"
-EMAIL="${2:?Usage: $0 <domain> <email> <master-password>}"
-MASTER_PASSWORD="${3:?Usage: $0 <domain> <email> <master-password>}"
+DOMAIN="${1:?Usage: $0 <domain> <email>}"
+EMAIL="${2:?Usage: $0 <domain> <email>}"
+if [ "$#" -gt 2 ]; then
+  echo "ERROR: do not pass the master password on the command line." >&2
+  echo "Use OPEN_SUITE_MASTER_PASSWORD_FILE, MIJNBUREAU_MASTER_PASSWORD, or the interactive prompt." >&2
+  exit 2
+fi
 OPEN_SUITE_DEMO_MODE="${OPEN_SUITE_DEMO_MODE:-false}"
 OPEN_SUITE_DEMO_USERNAME="${OPEN_SUITE_DEMO_USERNAME:-johndoe}"
 OPEN_SUITE_DEMO_PASSWORD="${OPEN_SUITE_DEMO_PASSWORD:-myStrongPassword123}"
@@ -26,7 +30,11 @@ export OPEN_SUITE_DEMO_MODE OPEN_SUITE_DEMO_USERNAME OPEN_SUITE_DEMO_PASSWORD
 export OPEN_SUITE_DEMO_ADMIN_USERNAME OPEN_SUITE_DEMO_ADMIN_PASSWORD
 export OPEN_SUITE_TLS_MODE="${OPEN_SUITE_TLS_MODE:-letsencrypt}"
 
-DIR="$(cd "$(dirname "$0")/scripts/single-vps-deploy" && pwd)"
+REPO_ROOT="$(cd "$(dirname "$0")" && pwd)"
+DIR="${REPO_ROOT}/scripts/single-vps-deploy"
+source "${REPO_ROOT}/scripts/lib/state.sh"
+MASTER_PASSWORD="$(opensuite_read_master_password)"
+[ -n "${MASTER_PASSWORD}" ] || { echo "ERROR: master password must not be empty." >&2; exit 2; }
 export KUBECONFIG=/etc/rancher/k3s/k3s.yaml
 
 wait_for_certs() {
@@ -35,8 +43,8 @@ wait_for_certs() {
   # Bounded: 80 iterations x 15s = 20 minutes, far beyond a healthy Let's
   # Encrypt issuance. Timing out means DNS/ingress/issuer is broken — fail
   # loudly instead of polling forever.
-  local prev=-1 stable=0 total ready i
-  for i in $(seq 1 80); do
+  local prev=-1 stable=0 total ready attempt
+  for ((attempt = 1; attempt <= 80; attempt++)); do
     total=$(kubectl get certificate -A --no-headers 2>/dev/null | wc -l | tr -d ' ')
     ready=$(kubectl get certificate -A --no-headers 2>/dev/null | awk '$3=="True"' | wc -l | tr -d ' ')
     echo "  certificates ready: ${ready}/${total}"
@@ -52,7 +60,7 @@ wait_for_certs() {
   return 1
 }
 
-bash "${DIR}/01-deploy.sh"            "${DOMAIN}" "${EMAIL}" "${MASTER_PASSWORD}"
+MIJNBUREAU_MASTER_PASSWORD="${MASTER_PASSWORD}" bash "${DIR}/01-deploy.sh" "${DOMAIN}" "${EMAIL}"
 bash "${DIR}/02-networking.sh"        "${DOMAIN}"
 # selfsigned mode has no cert-manager Certificates to wait for — every chart
 # generates its own cert secret at render time.

@@ -51,18 +51,17 @@ Why this is the right first change:
 - It removes per-request PHP file timestamp checks in the immutable container
   runtime.
 
-### Patch 2: static asset cache headers in the Open Suite sidecar
+### Patch 2: static asset cache headers in the Open Suite sidecar (reverted)
 
-Updated `scripts/single-vps-deploy/09-portal-header.sh` so the sidecar used for
-Nextcloud, Docs, Grist, and the portal sends immutable browser cache headers for
-static assets while keeping HTML uncached and header-injected.
+The sidecar initially replaced upstream cache policy with a one-year immutable
+header for every URL ending in a static extension. The 2026-07-10 distribution
+audit removed that override: not every such URL is content-addressed, so the
+optimization could retain stale application assets across upgrades. The sidecar
+now preserves each application's cache headers and forwards WebSocket/SSE
+connections correctly.
 
-Why this is the right first change:
-
-- It avoids changing upstream application source.
-- It improves repeat navigation and reloads for heavy SPAs.
-- It leaves the HTML route as the single supported route and only changes asset
-  cache policy.
+Future immutable caching must target only proven content-hashed asset paths and
+must be backed by an upgrade test that rejects stale bundles.
 
 ### Expected impact
 

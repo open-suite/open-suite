@@ -9,6 +9,7 @@ use OCP\AppFramework\Http\JSONResponse;
 use OCP\EventDispatcher\IEventDispatcher;
 use OCP\Http\Client\IClientService;
 use OCP\IRequest;
+use OCP\IUserSession;
 use Psr\Log\LoggerInterface;
 
 class MeetController extends Controller {
@@ -17,31 +18,36 @@ class MeetController extends Controller {
         IRequest $request,
         private IEventDispatcher $eventDispatcher,
         private IClientService $clientService,
+        private IUserSession $userSession,
         private LoggerInterface $logger,
     ) {
         parent::__construct($appName, $request);
     }
 
     /**
-     * Create (or get) a Meet room for `name` and return its URL.
+     * Create (or get) a Meet room for an event idempotency key and return its URL.
      * Same-origin endpoint called by the Calendar editor's injected JS.
      */
-    /** La Suite Meet rooms are addressed by a code-format slug (xxx-yyyy-zzz);
-     *  a human title isn't a joinable slug, so each room gets a fresh code. */
-    private function generateCode(): string {
-        $letters = 'abcdefghijklmnopqrstuvwxyz';
-        $pick = function (int $n) use ($letters): string {
-            $s = '';
-            for ($i = 0; $i < $n; $i++) {
-                $s .= $letters[random_int(0, strlen($letters) - 1)];
-            }
-            return $s;
-        };
-        return $pick(3) . '-' . $pick(4) . '-' . $pick(3);
+    /** Build a stable, non-identifying xxx-yyyy-zzz code for this user's event. */
+    private function roomCode(string $userId, string $idempotencyKey): string {
+        $digest = hash('sha256', $userId . "\0" . $idempotencyKey, true);
+        $letters = '';
+        for ($i = 0; $i < 10; $i++) {
+            $letters .= chr(ord($digest[$i]) % 26 + ord('a'));
+        }
+        return substr($letters, 0, 3) . '-' . substr($letters, 3, 4) . '-' . substr($letters, 7, 3);
     }
 
     #[NoAdminRequired]
-    public function room(string $name = ''): JSONResponse {
+    public function room(string $idempotencyKey = ''): JSONResponse {
+        $userId = $this->userSession->getUser()?->getUID() ?? '';
+        if ($userId === '') {
+            return new JSONResponse(['error' => 'not_authenticated'], Http::STATUS_UNAUTHORIZED);
+        }
+        if (strlen($idempotencyKey) < 8 || strlen($idempotencyKey) > 200) {
+            return new JSONResponse(['error' => 'invalid_idempotency_key'], Http::STATUS_BAD_REQUEST);
+        }
+
         $eventClass = 'OCA\\UserOIDC\\Event\\ExchangedTokenRequestedEvent';
         if (!class_exists($eventClass)) {
             return new JSONResponse(['error' => 'user_oidc unavailable'], Http::STATUS_SERVICE_UNAVAILABLE);
@@ -66,8 +72,9 @@ class MeetController extends Controller {
         $host = $this->request->getServerHost();
         $meetBase = 'https://' . preg_replace('/^nextcloud\./', 'meet.', $host, 1);
         $api = $meetBase . '/api/v1.0/rooms/';
-        // The room is identified by a generated code; the event keeps its own title.
-        $roomName = $this->generateCode();
+        // Repeated requests for the same event resolve to the same room. This
+        // prevents Calendar DOM remounts, retries, and smoke runs leaking rooms.
+        $roomName = $this->roomCode($userId, $idempotencyKey);
 
         $client = $this->clientService->newClient();
         $headers = ['Authorization' => 'Bearer ' . $accessToken, 'Content-Type' => 'application/json'];
@@ -84,7 +91,7 @@ class MeetController extends Controller {
                 $slug = (json_decode($resp->getBody(), true)['slug'] ?? null);
             }
         } catch (\Throwable $e) {
-            // Likely a duplicate-name 400; fall through to lookup.
+            // A duplicate-name response is expected on an idempotent retry.
             $this->logger->debug('meetcal: create returned error, will look up: ' . $e->getMessage());
         }
 

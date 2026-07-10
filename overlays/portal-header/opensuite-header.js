@@ -298,15 +298,27 @@
   if (!/\/apps\/calendar/.test(window.location.pathname)) return;
 
   var BTN_CLASS = "os-add-meet";
+  var draftKey = "";
+  var editorWasOpen = false;
+  var clearDraftTimer = null;
 
-  // Ask the meetcal app to create/get a room for this event name (same origin).
-  function ensureRoom(name, cb) {
+  function idempotencyKey() {
+    if (!draftKey) {
+      draftKey = window.crypto && window.crypto.randomUUID
+        ? window.crypto.randomUUID()
+        : "draft-" + Date.now() + "-" + Math.random().toString(36).slice(2);
+    }
+    return draftKey;
+  }
+
+  // Ask the meetcal app to create/get a room for this event draft (same origin).
+  function ensureRoom(key, cb) {
     var token = (window.OC && window.OC.requestToken) || "";
     fetch("/apps/meetcal/room", {
       method: "POST",
       credentials: "include",
       headers: { "Content-Type": "application/json", requesttoken: token },
-      body: JSON.stringify({ name: name }),
+      body: JSON.stringify({ idempotencyKey: key }),
     })
       .then(function (r) { return r.ok ? r.json() : null; })
       .then(function (j) { cb(j && j.url ? j.url : null); })
@@ -335,19 +347,9 @@
     return null;
   }
 
-  function findTitle() {
-    var inputs = document.querySelectorAll("input");
-    for (var i = 0; i < inputs.length; i++) {
-      var ph = (inputs[i].getAttribute("placeholder") || "").toLowerCase();
-      if (ph === "title" || ph === "titel") return (inputs[i].value || "").trim();
-    }
-    return "";
-  }
-
   function addLink(loc, btn) {
     if (btn) { btn.disabled = true; btn.textContent = "Adding…"; }
-    var title = findTitle() || "Meeting";
-    ensureRoom(title, function (url) {
+    ensureRoom(idempotencyKey(), function (url) {
       if (btn) { btn.disabled = false; btn.textContent = "Add Meet link"; }
       if (url) setReactive(loc, url);
     });
@@ -355,7 +357,26 @@
 
   function decorate() {
     var loc = findLocationInput();
-    if (!loc) return;
+    if (!loc) {
+      if (editorWasOpen && !clearDraftTimer) {
+        // Vue can briefly replace the editor DOM. Keep the key through short
+        // remounts, but discard it after the editor really closes so the next
+        // event receives a different room.
+        clearDraftTimer = setTimeout(function () {
+          clearDraftTimer = null;
+          if (!findLocationInput()) {
+            editorWasOpen = false;
+            draftKey = "";
+          }
+        }, 2500);
+      }
+      return;
+    }
+    editorWasOpen = true;
+    if (clearDraftTimer) {
+      clearTimeout(clearDraftTimer);
+      clearDraftTimer = null;
+    }
     var wrap = loc.parentElement;
     if (!wrap || wrap.querySelector("." + BTN_CLASS)) return;
 
