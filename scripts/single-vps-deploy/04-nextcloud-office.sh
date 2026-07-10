@@ -25,6 +25,13 @@ for i in $(seq 1 30); do
   sleep 10
 done
 
+# A custom app image can carry a newer app version than the database. Until the
+# upgrade runs, Nextcloud restricts occ to a small command set, so the
+# richdocuments cache warm below fails with "no commands defined". This is a
+# no-op when core and all apps are already current.
+echo "==> Applying pending Nextcloud/core app database upgrades"
+kubectl exec -n mb-nextcloud deploy/nextcloud -c nextcloud -- php occ upgrade
+
 # Self-signed deploys: Nextcloud's outbound HTTP client (richdocuments WOPI
 # discovery, user_oidc, meetcal) verifies TLS against Nextcloud's own cert
 # store. Import the local certs so every occ/app fetch below verifies.
