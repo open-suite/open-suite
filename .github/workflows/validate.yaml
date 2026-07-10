@@ -42,11 +42,11 @@ jobs:
           envsubst '${DOMAIN} ${TLS_SELF_SIGNED} ${INGRESS_ANNOTATIONS} ${NEXTCLOUD_TAG} ${PORTAL_SHA} ${MEET_TAG} ${ELEMENT_TAG} ${KC_BACKCHANNEL}' \
             < helmfile/demo-values.yaml.tmpl > /tmp/opensuite-values.yaml
           python3 - <<'PY'
-          import pathlib
+          import os, pathlib
           rendered = pathlib.Path('/tmp/opensuite-values.yaml').read_text()
           if '${' in rendered:
               raise SystemExit('unrendered variable in demo values')
-          for expected in ('example.test', 'sha-34512e5', '34.0.0-apache'):
+          for expected in ('example.test', f"sha-{os.environ['PORTAL_SHA']}", '34.0.0-apache'):
               if expected not in rendered:
                   raise SystemExit(f'missing rendered value: {expected}')
           PY
