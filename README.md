@@ -24,11 +24,17 @@ On a fresh Ubuntu 24.04 box (≥12 vCPU, ≥48 GiB RAM) with `*.DOMAIN` pointing
 it, as root, from a checkout of this repo:
 
 ```bash
-sudo ./deploy.sh DOMAIN you@example.com 'MASTER_PASSWORD'
+sudo ./deploy.sh DOMAIN you@example.com
 ```
 
-`deploy.sh` runs `scripts/single-vps-deploy/` in order (every step is
-idempotent; re-running is safe):
+The installer prompts for the master password without putting it in shell
+history or the process list. For unattended runs, point
+`OPEN_SUITE_MASTER_PASSWORD_FILE` at a root-readable `0600` file. Re-runs verify
+a salted fingerprint and refuse a different password before rendering secrets.
+
+`deploy.sh` runs `scripts/single-vps-deploy/` in order. Steps are designed to be
+rerunnable; the master-password guard refuses the credential-changing failure
+case before Helmfile runs:
 
 | Step | What it does |
 |---|---|
@@ -37,14 +43,14 @@ idempotent; re-running is safe):
 | *(wait)* | blocks until every TLS certificate is issued |
 | `03-restart-oidc-apps.sh` | restarts the OIDC apps so they re-read Keycloak discovery |
 | `04-nextcloud-office.sh` | warms the Collabora capabilities cache |
-| `08-open-suite-portal.sh` | builds and deploys our portal fork (`open-suite/open-suite-portal`) |
-| `09-portal-header.sh` | injects the shared Open Suite header into every app |
+| `08-open-suite-portal.sh` | installs required Nextcloud integration apps and configures the apex redirect |
+| `09-portal-header.sh` | publishes the shared Open Suite header asset (Meet carries the same asset in its image) |
 | `10-keycloak-login.sh` | Keycloak login theme (+ demo credential panel when `OPEN_SUITE_DEMO_MODE=true`) |
 | `12-auth-gate.sh` | edge auth gate at `auth.DOMAIN`; ingress attachment is declarative via `patches/local/auth-gate-ingress-middleware.patch` |
 
 Gaps in the numbering are deleted steps whose work moved into
-`patches/local/` and helmfile values (tickets 3.4/3.1; all app images —
-portal, Meet, auth gate — are CI-built and pinned in the demo values). Result:
+`patches/local/` and helmfile values (tickets 3.4/3.1; application images are
+CI-built, while the auth-gate image is still pinned in step 12). Result:
 `https://bridge.DOMAIN`.
 
 ## Where customization lives

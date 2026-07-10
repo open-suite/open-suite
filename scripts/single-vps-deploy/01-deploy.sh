@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Usage: ./01-deploy.sh <domain> <email> <master-password>
+# Usage: MIJNBUREAU_MASTER_PASSWORD=... ./01-deploy.sh <domain> <email>
 # Runs steps 1-4 of the MijnBureau Hetzner quickstart.
 # Must be run as root on a fresh Ubuntu 24.04 server.
 #
@@ -7,9 +7,9 @@
 # this folder pick it up automatically — you only pass it here.
 set -euo pipefail
 
-DOMAIN="${1:?Usage: $0 <domain> <email> <master-password>}"
-EMAIL="${2:?Usage: $0 <domain> <email> <master-password>}"
-MASTER_PASSWORD="${3:?Usage: $0 <domain> <email> <master-password>}"
+DOMAIN="${1:?Usage: $0 <domain> <email>}"
+EMAIL="${2:?Usage: $0 <domain> <email>}"
+MASTER_PASSWORD="${MIJNBUREAU_MASTER_PASSWORD:?Set MIJNBUREAU_MASTER_PASSWORD or run deploy.sh}"
 OPEN_SUITE_DEMO_MODE="${OPEN_SUITE_DEMO_MODE:-false}"
 OPEN_SUITE_DEMO_USERNAME="${OPEN_SUITE_DEMO_USERNAME:-johndoe}"
 OPEN_SUITE_DEMO_PASSWORD="${OPEN_SUITE_DEMO_PASSWORD:-myStrongPassword123}"
@@ -46,16 +46,20 @@ else
   OPEN_SUITE_DEMO_ADMIN_PASSWORD="$(head -c 32 /dev/urandom | base64 | tr -dc 'A-Za-z0-9' | head -c 24)"
 fi
 
-# Persist the domain for the later scripts (02-networking.sh, 03-...).
-mkdir -p /etc/mijnbureau
-echo "${DOMAIN}" > /etc/mijnbureau/domain
-printf '%s' "${OPEN_SUITE_DEMO_MODE}" > /etc/mijnbureau/demo-mode
-printf '%s' "${OPEN_SUITE_DEMO_USERNAME}" > /etc/mijnbureau/demo-username
-printf '%s' "${OPEN_SUITE_DEMO_PASSWORD}" > /etc/mijnbureau/demo-password
-printf '%s' "${OPEN_SUITE_DEMO_ADMIN_USERNAME}" > /etc/mijnbureau/demo-admin-username
-(umask 077; printf '%s' "${OPEN_SUITE_DEMO_ADMIN_PASSWORD}" > /etc/mijnbureau/demo-admin-password)
-chmod 600 /etc/mijnbureau/demo-admin-password
-printf '%s' "${OPEN_SUITE_DEMO_ADMIN_SHOW}" > /etc/mijnbureau/demo-admin-show
+# Persist state for later steps. Guard the install identity before installing or
+# rendering anything: a wrong master password would otherwise rotate every
+# derived database/application credential on a rerun.
+REPO_ROOT="$(cd "$(dirname "$0")/../.." && pwd)"
+source "${REPO_ROOT}/scripts/lib/state.sh"
+opensuite_prepare_state_dir
+opensuite_guard_install_identity "${DOMAIN}" "${MASTER_PASSWORD}"
+opensuite_write_state 0644 /etc/mijnbureau/domain "${DOMAIN}"
+opensuite_write_state 0600 /etc/mijnbureau/demo-mode "${OPEN_SUITE_DEMO_MODE}"
+opensuite_write_state 0600 /etc/mijnbureau/demo-username "${OPEN_SUITE_DEMO_USERNAME}"
+opensuite_write_state 0600 /etc/mijnbureau/demo-password "${OPEN_SUITE_DEMO_PASSWORD}"
+opensuite_write_state 0600 /etc/mijnbureau/demo-admin-username "${OPEN_SUITE_DEMO_ADMIN_USERNAME}"
+opensuite_write_state 0600 /etc/mijnbureau/demo-admin-password "${OPEN_SUITE_DEMO_ADMIN_PASSWORD}"
+opensuite_write_state 0600 /etc/mijnbureau/demo-admin-show "${OPEN_SUITE_DEMO_ADMIN_SHOW}"
 
 HELMFILE_V=1.1.7
 
@@ -77,6 +81,7 @@ if [ "${OPEN_SUITE_TLS_MODE}" = "selfsigned" ]; then
 else
   echo "==> [2/4] Installing cert-manager and ClusterIssuer"
   TLS_SELF_SIGNED=false
+  # shellcheck disable=SC2089 # literal YAML rendered by scoped envsubst below
   INGRESS_ANNOTATIONS='"cert-manager.io/cluster-issuer": "letsencrypt-prod"'
   kubectl apply -f https://github.com/cert-manager/cert-manager/releases/download/v1.16.2/cert-manager.yaml
   kubectl -n cert-manager rollout status deploy/cert-manager-webhook --timeout=180s
@@ -98,7 +103,6 @@ echo "==> [3/4] Cloning repo and writing config"
 # Single-source pin for MinBZK/mijn-bureau-infra: the one commit the local
 # patches are known to apply to. Bump UPSTREAM_REF deliberately, re-verifying
 # the patch series, never implicitly.
-REPO_ROOT="$(cd "$(dirname "$0")/../.." && pwd)"
 UPSTREAM_REF="$(cat "${REPO_ROOT}/UPSTREAM_REF")"
 cd /root
 # Clone-or-reset: re-runs must start from a pristine upstream tree at the
@@ -138,6 +142,7 @@ fi
 # variables are substituted (scoped envsubst) — anything else is left verbatim.
 # PORTAL_SHA is the 7-char image tag the portal publish-images workflow uses.
 PORTAL_SHA="${PORTAL_REF:0:7}"
+# shellcheck disable=SC2090 # INGRESS_ANNOTATIONS intentionally contains YAML quotes
 export DOMAIN TLS_SELF_SIGNED INGRESS_ANNOTATIONS NEXTCLOUD_TAG PORTAL_SHA MEET_TAG ELEMENT_TAG KC_BACKCHANNEL
 envsubst '${DOMAIN} ${TLS_SELF_SIGNED} ${INGRESS_ANNOTATIONS} ${NEXTCLOUD_TAG} ${PORTAL_SHA} ${MEET_TAG} ${ELEMENT_TAG} ${KC_BACKCHANNEL}' \
   < "${REPO_ROOT}/helmfile/demo-values.yaml.tmpl" \

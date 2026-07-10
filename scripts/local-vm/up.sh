@@ -58,7 +58,8 @@ git -C /root/open-suite checkout -q "origin/${REF}" 2>/dev/null || git -C /root/
 cd /root/open-suite
 export OPEN_SUITE_TLS_MODE=selfsigned
 export OPEN_SUITE_DEMO_MODE=true
-./deploy.sh "${DOMAIN}" local@example.invalid 'localMasterPassword123'
+MIJNBUREAU_MASTER_PASSWORD='localMasterPassword123' \
+  ./deploy.sh "${DOMAIN}" local@example.invalid
 VMEOF
 
 echo

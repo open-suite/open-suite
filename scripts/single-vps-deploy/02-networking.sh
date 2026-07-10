@@ -61,20 +61,35 @@ done
 
 echo "==> [5c] Set LiveKit's advertised IP so WebRTC media connects"
 # Without node_ip, LiveKit advertises its pod IP in ICE candidates, which the
-# browser can't reach, so calls get stuck on "Reconnecting". Set it to the node's
-# public IPv4 (the exposed media ports 30001-30009 map 1:1 to it).
-NODE_IP=$(kubectl get node -o jsonpath='{.items[0].status.addresses[?(@.type=="InternalIP")].address}' \
-  | tr ' ' '\n' | grep -E '^[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+$' | head -1)
+# browser can't reach, so calls get stuck on "Reconnecting". Prefer the node's
+# ExternalIP and allow an explicit override for clouds where Kubernetes only
+# reports a private InternalIP.
+NODE_IP="${OPEN_SUITE_PUBLIC_IP:-}"
+if [ -z "${NODE_IP}" ]; then
+  NODE_IP="$(kubectl get node -o jsonpath='{.items[0].status.addresses[?(@.type=="ExternalIP")].address}' \
+    | awk '{print $1}')"
+fi
+if [ -z "${NODE_IP}" ]; then
+  NODE_IP="$(kubectl get node -o jsonpath='{.items[0].status.addresses[?(@.type=="InternalIP")].address}' \
+    | awk '{print $1}')"
+fi
+if ! grep -Eq '^[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+$' <<<"${NODE_IP}"; then
+  echo "ERROR: could not determine a public IPv4; set OPEN_SUITE_PUBLIC_IP." >&2
+  exit 1
+fi
 python3 - "$NODE_IP" <<'PY'
-import json, subprocess, sys
+import json, re, subprocess, sys
 ip = sys.argv[1]
 cur = subprocess.check_output(['kubectl','get','cm','livekit-server','-n','mb-livekit',
                                '-o','jsonpath={.data.config\\.yaml}']).decode()
-if 'node_ip:' not in cur:
-    cur = cur.replace('  use_external_ip: false',
-                      '  use_external_ip: false\n  node_ip: %s' % ip)
+if re.search(r'(?m)^\s*node_ip:', cur):
+    updated = re.sub(r'(?m)^(\s*)node_ip:.*$', r'\1node_ip: %s' % ip, cur)
+else:
+    updated = cur.replace('  use_external_ip: false',
+                          '  use_external_ip: false\n  node_ip: %s' % ip)
+if updated != cur:
     subprocess.run(['kubectl','patch','cm','livekit-server','-n','mb-livekit',
-                    '--type','merge','-p',json.dumps({'data': {'config.yaml': cur}})], check=True)
+                    '--type','merge','-p',json.dumps({'data': {'config.yaml': updated}})], check=True)
 PY
 kubectl rollout restart deploy/livekit-server -n mb-livekit
 

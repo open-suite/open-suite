@@ -11,4 +11,15 @@ cat > /etc/cron.d/opensuite-demo-seed <<'EOF'
 # smoke-test residue leaves the demo clean for the day.
 0 6 * * * root KUBECONFIG=/etc/rancher/k3s/k3s.yaml /opt/opensuite/seed-demo.sh >> /var/log/opensuite-demo-seed.log 2>&1
 EOF
+cat > /etc/logrotate.d/opensuite-demo-seed <<'EOF'
+/var/log/opensuite-demo-seed.log {
+    daily
+    rotate 14
+    size 1M
+    compress
+    missingok
+    notifempty
+    copytruncate
+}
+EOF
 echo "Installed /opt/opensuite/seed-demo.sh + /etc/cron.d/opensuite-demo-seed"

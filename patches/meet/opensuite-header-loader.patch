@@ -1,0 +1,11 @@
+diff --git a/src/frontend/index.html b/src/frontend/index.html
+index 35da043..5b13479 100644
+--- a/src/frontend/index.html
++++ b/src/frontend/index.html
+@@ -12,5 +12,6 @@
+   <body>
+     <div id="root"></div>
+     <script type="module" src="/src/main.tsx"></script>
++    <script src="/opensuite-header.js"></script>
+   </body>
+ </html>

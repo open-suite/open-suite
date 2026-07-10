@@ -12,7 +12,7 @@
     <name>Open Suite Calendar Meet</name>
     <summary>Create La Suite Meet rooms from Calendar events</summary>
     <description>Adds a same-origin endpoint to create/get a Meet room for the current user, used by the Calendar event editor.</description>
-    <version>1.0.0</version>
+    <version>1.1.0</version>
     <licence>agpl</licence>
     <author>Open Suite</author>
     <namespace>Meetcal</namespace>

@@ -80,7 +80,7 @@ index d78c692..f83339e 100644
    image:
      registry: {{ (coalesce .Values.container.bureaublad.registry .Values.container.default.registry) | quote }}
      repository: {{ .Values.container.bureaublad.frontend.repository | quote }}
-@@ -172,3 +200,66 @@ networkPolicy:
+@@ -172,3 +200,64 @@ networkPolicy:
                app.kubernetes.io/name: redis
                app.kubernetes.io/component: master
        {{- end }}
@@ -112,6 +112,10 @@ index d78c692..f83339e 100644
 +            default "";
 +            "~nonce-(?<n>[A-Za-z0-9+/=_-]+)" $n;
 +          }
++          map $http_upgrade $connection_upgrade {
++            default upgrade;
++            "" close;
++          }
 +          server {
 +            listen 8091;
 +            client_max_body_size 0;
@@ -122,19 +126,13 @@ index d78c692..f83339e 100644
 +              add_header Cache-Control "no-cache";
 +              alias /usr/share/opensuite/opensuite-header.js;
 +            }
-+            location ~* \.(?:avif|css|gif|ico|jpe?g|js|mjs|png|svg|webp|woff2?)$ {
-+              proxy_pass http://127.0.0.1:8080;
-+              proxy_set_header Host $host;
-+              proxy_set_header X-Real-IP $remote_addr;
-+              proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
-+              proxy_set_header X-Forwarded-Proto $scheme;
-+              proxy_redirect off;
-+              proxy_hide_header Cache-Control;
-+              add_header Cache-Control "public, max-age=31536000, immutable";
-+            }
 +            location / {
 +              rewrite ^/apps/office/(documents|spreadsheets|presentations|diagrams)/?$ /apps/office/?koOfficeSection=$1 break;
 +              proxy_pass http://127.0.0.1:8080;
++              proxy_http_version 1.1;
++              proxy_set_header Upgrade $http_upgrade;
++              proxy_set_header Connection $connection_upgrade;
++              proxy_buffering off;
 +              proxy_set_header Host $host;
 +              proxy_set_header X-Real-IP $remote_addr;
 +              proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
@@ -215,7 +213,7 @@ index ce4df2c..3f3bea0 100644
    image:
      registry: {{(coalesce .Values.container.docs.registry .Values.container.default.registry) | quote }}
      repository: {{ .Values.container.docs.frontend.repository | quote }}
-@@ -649,3 +677,66 @@ ingressMedia:
+@@ -649,3 +677,64 @@ ingressMedia:
    tls: {{ .Values.global.tls.enabled | default true }}
    selfSigned: {{ and .Values.global.tls.enabled .Values.global.tls.selfSigned | default false }}
    extraTls: {{ .Values.tls.docs | toYaml | nindent 4 }}
@@ -247,6 +245,10 @@ index ce4df2c..3f3bea0 100644
 +            default "";
 +            "~nonce-(?<n>[A-Za-z0-9+/=_-]+)" $n;
 +          }
++          map $http_upgrade $connection_upgrade {
++            default upgrade;
++            "" close;
++          }
 +          server {
 +            listen 8091;
 +            client_max_body_size 0;
@@ -257,19 +259,13 @@ index ce4df2c..3f3bea0 100644
 +              add_header Cache-Control "no-cache";
 +              alias /usr/share/opensuite/opensuite-header.js;
 +            }
-+            location ~* \.(?:avif|css|gif|ico|jpe?g|js|mjs|png|svg|webp|woff2?)$ {
-+              proxy_pass http://127.0.0.1:8080;
-+              proxy_set_header Host $host;
-+              proxy_set_header X-Real-IP $remote_addr;
-+              proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
-+              proxy_set_header X-Forwarded-Proto $scheme;
-+              proxy_redirect off;
-+              proxy_hide_header Cache-Control;
-+              add_header Cache-Control "public, max-age=31536000, immutable";
-+            }
 +            location / {
 +              rewrite ^/apps/office/(documents|spreadsheets|presentations|diagrams)/?$ /apps/office/?koOfficeSection=$1 break;
 +              proxy_pass http://127.0.0.1:8080;
++              proxy_http_version 1.1;
++              proxy_set_header Upgrade $http_upgrade;
++              proxy_set_header Connection $connection_upgrade;
++              proxy_buffering off;
 +              proxy_set_header Host $host;
 +              proxy_set_header X-Real-IP $remote_addr;
 +              proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
@@ -313,7 +309,7 @@ index 0d489aa..aeee611 100644
     {{- if .Values.metric.enabled }}
     # Allow Prometheus to scrape metrics. Port is pinned to the chart's
     # containerPorts.metrics (charts/grist/values.yaml); change both together.
-@@ -364,3 +369,94 @@ metrics:
+@@ -364,3 +369,92 @@ metrics:
  # no access to the chart's default).
  containerPorts:
    metrics: {{ $metricsPort }}
@@ -373,6 +369,10 @@ index 0d489aa..aeee611 100644
 +            default "";
 +            "~nonce-(?<n>[A-Za-z0-9+/=_-]+)" $n;
 +          }
++          map $http_upgrade $connection_upgrade {
++            default upgrade;
++            "" close;
++          }
 +          server {
 +            listen 8091;
 +            client_max_body_size 0;
@@ -383,19 +383,13 @@ index 0d489aa..aeee611 100644
 +              add_header Cache-Control "no-cache";
 +              alias /usr/share/opensuite/opensuite-header.js;
 +            }
-+            location ~* \.(?:avif|css|gif|ico|jpe?g|js|mjs|png|svg|webp|woff2?)$ {
-+              proxy_pass http://127.0.0.1:8484;
-+              proxy_set_header Host $host;
-+              proxy_set_header X-Real-IP $remote_addr;
-+              proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
-+              proxy_set_header X-Forwarded-Proto $scheme;
-+              proxy_redirect off;
-+              proxy_hide_header Cache-Control;
-+              add_header Cache-Control "public, max-age=31536000, immutable";
-+            }
 +            location / {
 +              rewrite ^/apps/office/(documents|spreadsheets|presentations|diagrams)/?$ /apps/office/?koOfficeSection=$1 break;
 +              proxy_pass http://127.0.0.1:8484;
++              proxy_http_version 1.1;
++              proxy_set_header Upgrade $http_upgrade;
++              proxy_set_header Connection $connection_upgrade;
++              proxy_buffering off;
 +              proxy_set_header Host $host;
 +              proxy_set_header X-Real-IP $remote_addr;
 +              proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
@@ -478,7 +472,7 @@ index 706e9e2..e2e5fd1 100644
    - name: bureaublad-button-app
      configMap:
        name: nextcloud-bureaublad-button-app
-@@ -265,6 +298,67 @@ extraVolumeMounts:
+@@ -265,6 +298,65 @@ extraVolumeMounts:
      readOnly: true
  
  extraDeploy:
@@ -508,6 +502,10 @@ index 706e9e2..e2e5fd1 100644
 +            default "";
 +            "~nonce-(?<n>[A-Za-z0-9+/=_-]+)" $n;
 +          }
++          map $http_upgrade $connection_upgrade {
++            default upgrade;
++            "" close;
++          }
 +          server {
 +            listen 8091;
 +            client_max_body_size 0;
@@ -518,19 +516,13 @@ index 706e9e2..e2e5fd1 100644
 +              add_header Cache-Control "no-cache";
 +              alias /usr/share/opensuite/opensuite-header.js;
 +            }
-+            location ~* \.(?:avif|css|gif|ico|jpe?g|js|mjs|png|svg|webp|woff2?)$ {
-+              proxy_pass http://127.0.0.1:8080;
-+              proxy_set_header Host $host;
-+              proxy_set_header X-Real-IP $remote_addr;
-+              proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
-+              proxy_set_header X-Forwarded-Proto $scheme;
-+              proxy_redirect off;
-+              proxy_hide_header Cache-Control;
-+              add_header Cache-Control "public, max-age=31536000, immutable";
-+            }
 +            location / {
 +              rewrite ^/apps/office/(documents|spreadsheets|presentations|diagrams)/?$ /apps/office/?koOfficeSection=$1 break;
 +              proxy_pass http://127.0.0.1:8080;
++              proxy_http_version 1.1;
++              proxy_set_header Upgrade $http_upgrade;
++              proxy_set_header Connection $connection_upgrade;
++              proxy_buffering off;
 +              proxy_set_header Host $host;
 +              proxy_set_header X-Real-IP $remote_addr;
 +              proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;

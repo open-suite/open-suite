@@ -15,6 +15,14 @@
 set -euo pipefail
 export KUBECONFIG=/etc/rancher/k3s/k3s.yaml
 
+# Prevent cron, a manual repair, and a smoke-adjacent run from mutating the same
+# fixtures or Keycloak client settings concurrently.
+exec 9>/run/lock/opensuite-demo-seed.lock
+if ! flock -n 9; then
+  echo "==> seed-demo: another run holds the lock; skipping"
+  exit 0
+fi
+
 # --- config (from env, falling back to the demo-seed secret) -----------------
 # load_secret must not fail hard under set -e: a missing secret would kill the
 # script inside the assignment with no message (this hid an empty demo for
@@ -42,7 +50,6 @@ NC_SVC=$(kubectl -n mb-nextcloud get svc nextcloud -o jsonpath='{.spec.clusterIP
 NC_HOST="nextcloud.${DOMAIN}"
 NC="http://${NC_SVC}:8080/remote.php/dav"
 CAL="${NC}/calendars/${NC_LOGIN}/personal"
-FILES="${NC}/files/${NC_LOGIN}"
 
 # curl -f does not fail on redirects; assert an actual 2xx so a gate/login
 # bounce can never again masquerade as a successful write.
@@ -59,7 +66,7 @@ dav() { # method url [curl args...]
 # duration of the run (needed to mint johndoe tokens) and re-disabled on exit,
 # including on failure.
 set_direct_access() { # clientId true|false
-  kubectl -n mb-keycloak exec -i keycloak-keycloak-0 -c keycloak -- sh -s -- "$1" "$2" <<'SH' || true
+  kubectl -n mb-keycloak exec -i keycloak-keycloak-0 -c keycloak -- sh -s -- "$1" "$2" <<'SH'
 set -e
 CLIENT_ID="$1"; VALUE="$2"
 KC=/opt/bitnami/keycloak/bin/kcadm.sh; CFG=/tmp/kc.config
@@ -70,8 +77,10 @@ ID=$("$KC" get clients -r mijnbureau --config "$CFG" -q clientId="$CLIENT_ID" --
 SH
 }
 restore_direct_access() {
-  set_direct_access meet false
-  set_direct_access docs false
+  local rc=0
+  set_direct_access meet false || rc=1
+  set_direct_access docs false || rc=1
+  return "$rc"
 }
 
 # The Synapse admin token minted for step 3 lives only for this run.
@@ -87,11 +96,19 @@ cleanup_matrix_token() {
   printf "DELETE FROM access_tokens WHERE token = '%s';\n" "${SEED_ADMIN_TOKEN}" | \
     synapse_sql >/dev/null 2>&1 || true
 }
-seed_cleanup() {
-  restore_direct_access
-  cleanup_matrix_token
+seed_cleanup() { # original exit status
+  local original_status="$1" cleanup_status=0
+  trap - EXIT
+  set +e
+  restore_direct_access || {
+    echo "!! seed-demo: CRITICAL: failed to disable temporary Keycloak direct grants" >&2
+    cleanup_status=1
+  }
+  cleanup_matrix_token || cleanup_status=1
+  if [ "$original_status" -ne 0 ]; then exit "$original_status"; fi
+  exit "$cleanup_status"
 }
-trap seed_cleanup EXIT
+trap 'seed_cleanup $?' EXIT
 
 # Opinionation: Nextcloud is files + Collabora office only. La Suite Docs is the
 # single block editor, so disable Nextcloud Text — otherwise opening a file in
@@ -123,16 +140,14 @@ MEET_TOK=$(curl -fsS --max-time 20 -X POST "https://id.${DOMAIN}/realms/mijnbure
   -d username=johndoe -d password="${DEMO_PASS}" -d scope=openid \
   | python3 -c "import json,sys;print(json.load(sys.stdin).get('access_token',''))")
 
-# Create (idempotently) a Meet room for an event and echo its slug. On a re-run
-# the room already exists (La Suite 400s with a slug error list), so fall back
-# to looking the room up by name to get its real slug.
-meet_slug() {
+# Create (idempotently) a Meet room for an event and echo its slug. Each seeded
+# event owns one fixed code-format name; on a re-run La Suite returns a duplicate
+# error, so look up that same name instead of creating another public room.
+meet_slug() { # stable code-format room name
   # La Suite Meet only treats code-format slugs (xxx-yyyy-zzz) as joinable, and
-  # rooms default to "restricted" (owner only). So name the room with a random
-  # code (not the event title) and make it public, like the meetcal app does.
-  local resp slug code
-  code=$(LC_ALL=C tr -dc 'a-z' </dev/urandom | head -c 10)
-  code="${code:0:3}-${code:3:4}-${code:7:3}"
+  # rooms default to "restricted" (owner only). Use the event's fixed code (not
+  # its mutable title) and make it public, like the meetcal app does.
+  local code="$1" resp slug
   resp=$(curl -s --max-time 20 -X POST "https://meet.${DOMAIN}/api/v1.0/rooms/" \
     -H "Authorization: Bearer ${MEET_TOK}" -H "Content-Type: application/json" \
     -d "{\"name\":\"${code}\",\"access_level\":\"public\"}")
@@ -148,12 +163,12 @@ except Exception:
 # Fixed UIDs so re-runs replace (no duplicates); dates relative to today so they
 # always stay in the near future.
 put_event() {
-  local uid="$1" days="$2" hour="$3" dur="$4" summary="$5"
+  local uid="$1" days="$2" hour="$3" dur="$4" code="$5" summary="$6"
   local d start end meet=""
   d=$(date -u -d "+${days} days" +%Y%m%d 2>/dev/null || date -u -v+"${days}"d +%Y%m%d)
   start="${d}T${hour}0000Z"
   end="${d}T$(printf '%02d' $((10#${hour}+dur)))0000Z"
-  [ -n "${MEET_TOK}" ] && meet="https://meet.${DOMAIN}/$(meet_slug "${summary}")"
+  [ -n "${MEET_TOK}" ] && meet="https://meet.${DOMAIN}/$(meet_slug "${code}")"
   dav PUT "${CAL}/${uid}.ics" \
     -H "Content-Type: text/calendar" --data-binary @- <<ICS
 BEGIN:VCALENDAR
@@ -171,9 +186,9 @@ END:VCALENDAR
 ICS
   echo "    + ${summary} (in ${days}d) -> ${meet:-no meet link}"
 }
-put_event demo-standup-os    1 09 1 "Team standup"
-put_event demo-review-os      3 14 1 "Q3 deck review with Jane"
-put_event demo-1on1-os        5 11 1 "1:1 John and Jane"
+put_event demo-standup-os 1 09 1 dmo-stnd-upx "Team standup"
+put_event demo-review-os  3 14 1 dmo-rviw-qtr "Q3 deck review with Jane"
+put_event demo-1on1-os    5 11 1 dmo-oneo-one "1:1 John and Jane"
 
 echo "==> [2/3] Docs — La Suite documents"
 # La Suite Docs is OIDC-native; mint johndoe a token via Keycloak direct-access

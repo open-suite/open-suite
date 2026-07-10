@@ -6,9 +6,9 @@
 # shows the Open Suite top bar. ONE asset, served same-origin everywhere.
 #
 # Two delivery paths, by how each app is served:
-#   - Static SPAs that already inject a same-origin `<script src=
-#     "/bureaublad-button.js">` tag (Meet, Element): we overwrite that file's
-#     contents with our shared header.
+#   - Element already injects a same-origin `/bureaublad-button.js` tag: we
+#     overwrite that configmap file's contents with our shared header.
+#   - Meet carries `/opensuite-header.js` in the Open Suite frontend image.
 #   - Nextcloud, Grist, Docs, Bureaublad: an nginx sidecar proxies the app and
 #     sub_filters a same-origin <script> tag into the HTML. The sidecar itself
 #     is DECLARATIVE — patches/local/opensuite-header-sidecar.patch adds the
@@ -64,7 +64,7 @@ print(json.dumps({"apiVersion":"v1","kind":"ConfigMap",
 PY
 }
 
-echo "==> [1/2] Static SPAs (already inject a same-origin tag)"
+echo "==> [1/2] Element static SPA (already injects a same-origin tag)"
 # Meet's header ships inside the meet-frontend SPA bundle (patches/meet), served
 # on meet.<domain>; the old meet-static-files injection only reached
 # meet-static-nginx on the unused static-meet.<domain> host, so it did nothing.
