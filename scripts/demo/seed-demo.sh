@@ -139,6 +139,7 @@ MEET_TOK=$(curl -fsS --max-time 20 -X POST "https://id.${DOMAIN}/realms/mijnbure
   -d grant_type=password -d client_id=meet -d client_secret="${MEET_CID}" \
   -d username=johndoe -d password="${DEMO_PASS}" -d scope=openid \
   | python3 -c "import json,sys;print(json.load(sys.stdin).get('access_token',''))")
+[ -n "${MEET_TOK}" ] || { echo "!! seed-demo: Keycloak returned no Meet access token" >&2; exit 1; }
 
 # Create (idempotently) a Meet room for an event and echo its slug. Each seeded
 # event owns one fixed code-format name; on a re-run La Suite returns a duplicate
@@ -147,16 +148,42 @@ meet_slug() { # stable code-format room name
   # La Suite Meet only treats code-format slugs (xxx-yyyy-zzz) as joinable, and
   # rooms default to "restricted" (owner only). Use the event's fixed code (not
   # its mutable title) and make it public, like the meetcal app does.
-  local code="$1" resp slug
-  resp=$(curl -s --max-time 20 -X POST "https://meet.${DOMAIN}/api/v1.0/rooms/" \
+  local code="$1" response body status slug
+  response=$(curl -sS --max-time 20 -w $'\n%{http_code}' \
+    -X POST "https://meet.${DOMAIN}/api/v1.0/rooms/" \
     -H "Authorization: Bearer ${MEET_TOK}" -H "Content-Type: application/json" \
     -d "{\"name\":\"${code}\",\"access_level\":\"public\"}")
-  slug=$(printf '%s' "$resp" | python3 -c "import json,sys
+  status=${response##*$'\n'}
+  body=${response%$'\n'*}
+
+  case "$status" in
+    2*) ;;
+    400|409)
+      # A fixed room from an earlier seed is expected. Fetching it by slug also
+      # proves this user owns it; an unknown slug would return no usable slug.
+      body=$(curl -fsS --max-time 20 \
+        -H "Authorization: Bearer ${MEET_TOK}" \
+        "https://meet.${DOMAIN}/api/v1.0/rooms/${code}/") || {
+          echo "!! seed-demo: Meet rejected room ${code} (HTTP ${status}) and lookup failed" >&2
+          return 1
+        }
+      ;;
+    *)
+      echo "!! seed-demo: Meet room create for ${code} returned HTTP ${status}" >&2
+      return 1
+      ;;
+  esac
+
+  slug=$(printf '%s' "$body" | python3 -c "import json,sys
 try:
     s = json.load(sys.stdin).get('slug')
     print(s if isinstance(s, str) else '')
 except Exception:
     print('')")
+  if [ "$slug" != "$code" ]; then
+    echo "!! seed-demo: Meet returned unexpected slug '${slug}' for ${code}" >&2
+    return 1
+  fi
   printf '%s' "$slug"
 }
 
@@ -164,11 +191,12 @@ except Exception:
 # always stay in the near future.
 put_event() {
   local uid="$1" days="$2" hour="$3" dur="$4" code="$5" summary="$6"
-  local d start end meet=""
+  local d start end slug meet
   d=$(date -u -d "+${days} days" +%Y%m%d 2>/dev/null || date -u -v+"${days}"d +%Y%m%d)
   start="${d}T${hour}0000Z"
   end="${d}T$(printf '%02d' $((10#${hour}+dur)))0000Z"
-  [ -n "${MEET_TOK}" ] && meet="https://meet.${DOMAIN}/$(meet_slug "${code}")"
+  slug=$(meet_slug "${code}")
+  meet="https://meet.${DOMAIN}/${slug}"
   dav PUT "${CAL}/${uid}.ics" \
     -H "Content-Type: text/calendar" --data-binary @- <<ICS
 BEGIN:VCALENDAR
