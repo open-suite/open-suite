@@ -92,6 +92,14 @@
       // very top, which the overlay would cover — push it below the bar and
       // shrink it so nothing (room search, message composer) is hidden or cut.
       "html.ko-on-element #matrixchat{margin-top:" + HEADER_HEIGHT + "px !important;height:calc(100vh - " + HEADER_HEIGHT + "px) !important;}",
+      // Nextcloud Office deliberately moves its full-screen Collabora iframe
+      // over Nextcloud's own 50px header. Our fixed suite header occupies that
+      // same space, so without an offset it covers Collabora's File/Insert tab
+      // row. Move only the full-screen editor down; embedded/split previews keep
+      // their native geometry.
+      "html.ko-on-nextcloud .viewer__content:not(.viewer--split) .office-viewer:not(.viewer__file--hidden):not(.widget-file){",
+      "transform:translateY(" + HEADER_HEIGHT + "px);height:calc(100vh - " + HEADER_HEIGHT + "px) !important;",
+      "height:calc(100dvh - " + HEADER_HEIGHT + "px) !important;}",
       // Nextcloud Calendar's new-event popover sizes its max-height as
       // (100vh - its top), but NC's own 50px header offsets the real top, so the
       // popover renders ~50px too tall and its footer (Save) falls off-screen.
@@ -154,6 +162,8 @@
       document.documentElement.classList.add("ko-on-bridge");
     } else if (host.indexOf("element.") === 0) {
       document.documentElement.classList.add("ko-on-element");
+    } else if (host.indexOf("nextcloud.") === 0) {
+      document.documentElement.classList.add("ko-on-nextcloud");
     }
 
     var bar = document.createElement("nav");
