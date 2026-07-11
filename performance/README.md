@@ -17,6 +17,15 @@ BENCHMARK_OUTPUT=/tmp/open-suite-apps.json \
 npm run benchmark:apps
 ```
 
+Exercise isolated Element sessions in a burst to detect false login throttling:
+
+```bash
+BENCHMARK_USER=johndoe \
+BENCHMARK_PASS='<demo password>' \
+BENCHMARK_ATTEMPTS=10 \
+npm run benchmark:element-login
+```
+
 Limit a run with `BENCHMARK_APPS=nextcloud` or `BENCHMARK_APPS=element`.
 
 Capture the Kubernetes resource state on the target server with:
