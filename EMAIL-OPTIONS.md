@@ -43,6 +43,13 @@ portal nav; IMAP/SMTP pointed at the provider; a small provisioning step that
 creates mailboxes for demo users via the provider API. The provider is a
 config choice, not a hard dependency — the chart takes IMAP/SMTP host + creds.
 
+Separate from user mailboxes, the suite needs a transactional relay for system
+mail (password resets, invites, notifications) regardless of which mailbox
+option is chosen — see option B′ below. A pay-per-message European relay
+(Scaleway TEM) covers that, and is also the outbound half of the self-host
+path. So the relay is wanted in every scenario; the per-user-vs-per-message
+question is only about the user-mailbox tier.
+
 ## The deliverability tax (why "just self-host email" is the trap)
 
 Running a mailbox is the easy 20%; getting mail from a fresh VPS IP into
@@ -73,16 +80,46 @@ white-label engine several of them and openDesk/IONOS run on; consumable as OX
 Cloud or self-hosted, best-in-class multi-tenant provisioning, but partner-only
 pricing. Verdict: fastest sovereign path, lowest ops, keeps standards.
 
-### B. Hybrid self-host: Stalwart mailbox + EU outbound relay
+### B. Hybrid self-host: Stalwart mailbox + EU outbound relay (pay-per-message)
 Self-host inbound/storage/IMAP/JMAP/webmail on the k3s box with Stalwart Mail
 Server (Rust single daemon: SMTP/IMAP/JMAP/POP3/CalDAV/CardDAV, built-in spam
 filtering, OIDC/Keycloak auth across the whole server, AGPL, k8s StatefulSet
-docs). Relay outbound through an EU transactional provider (Scaleway TEM,
-Mailjet, Brevo) on 587/465 to borrow warmed IPs and dodge port-25 blocks; SPF
-includes the relay, relay DKIM-signs with alignment. Verdict: strongest
-sovereignty with real deliverability; medium ops; the right endgame if we want
-to own the mailbox. Stalwart is the standout self-host engine — the only one
-that closes the OIDC loop end-to-end and is JMAP-native.
+docs). Relay outbound through a European SES-alternative on 587/465 to borrow
+warmed IPs and dodge port-25 blocks; SPF includes the relay, relay DKIM-signs
+with alignment. Verdict: strongest sovereignty with real deliverability; medium
+ops; the right endgame if we want to own the mailbox. Stalwart is the standout
+self-host engine — the only one that closes the OIDC loop end-to-end and is
+JMAP-native. See "the pay-per-message model" below for why the relay economics
+often beat per-user for this shape.
+
+### B′. European SES-alternative for outbound (pay-per-message) — the relay tier
+A European transactional-email API/SMTP relay is the sovereign equivalent of
+Amazon SES, billed per message rather than per user. Primary pick: Scaleway
+Transactional Email (France, Iliad) — SES-style API + SMTP, €0.25 per 1,000
+emails, 300/month free, no fixed monthly fee, EU datacentres. Alternates:
+Sweego (FR), Mailjet (FR, GDPR/ISO), Brevo (FR), all EU/EEA.
+
+This is not a standalone email solution — a relay only sends. It has no mailbox
+storage and no IMAP/receiving, so it cannot be the user-inbox tier by itself. It
+is exactly the outbound half of option B, and it independently covers a need the
+suite has regardless of user mailboxes: transactional/system mail — password
+resets, calendar and share invitations, notifications (MinBZK flags this same
+need in mijn-bureau issue #86). Even if user mailboxes live at a managed provider
+(A) or are deferred, Open Suite still needs a relay for system mail, and a
+per-message EU relay is the right tool for it. Verdict: adopt B′ for outbound
+and system mail in every scenario; pair with A or Stalwart for receiving/storage.
+
+### The pay-per-message model vs per-user
+
+Managed mailbox providers (A) bill per user per month (~€1-3), so cost scales
+with headcount whether or not people send much. A relay (B′) bills per message
+(Scaleway: €0.25/1000, effectively free at demo volume), so cost scales with
+send volume. For a demo — few users, low volume — self-host the mailbox
+(Stalwart) plus a per-message relay is close to free and fully sovereign, at the
+cost of running Stalwart. For a large low-send deployment the per-message model
+is also cheaper; for heavy senders, per-user can win. The two models compose:
+you can always self-host storage and pay per message for sending, which is the
+cheapest sovereign shape when you are willing to run the mailbox.
 
 ### C. Full self-host, no relay (Stalwart or Mailu/Mailcow, own IP)
 Own everything including the sending IP. Verdict: maximum sovereignty on paper,
@@ -141,16 +178,19 @@ of B or D later.
 
 ## Concrete next steps for Open Suite
 
-1. Add a `mail` app: Roundcube webmail chart, OIDC via Keycloak, in the portal
+1. Wire a European transactional relay (Scaleway TEM) for system mail now —
+   password resets, invites, notifications need it regardless of the mailbox
+   choice, it is per-message (free at demo volume), and it is the outbound half
+   of the self-host path. This is the one email piece worth doing immediately.
+2. Add a `mail` app: Roundcube webmail chart, OIDC via Keycloak, in the portal
    nav next to Chat/Meet. Config takes IMAP/SMTP host + credentials so the
    backend provider is swappable.
-2. For the demo: an Infomaniak (or mailbox.org) account + API token; a small
-   provisioning step creating mailboxes for the demo users; DNS SPF/DKIM/DMARC
-   for the demo domain pointed at the provider.
-3. Document option B (Stalwart + EU relay) as the self-host path for operators
-   who want the mailbox in-house, including the SPF-include + DKIM-alignment
-   relay setup.
-4. Track MinBZK PR #621 and `suitenumerique/messages`; revisit adopting La Suite
+3. For the demo user mailboxes: an Infomaniak (or mailbox.org) account + API
+   token; a small provisioning step creating mailboxes for the demo users; DNS
+   SPF/DKIM/DMARC for the demo domain pointed at the provider (+ the relay).
+4. Document option B (Stalwart + EU relay) as the self-host path for operators
+   who want the mailbox in-house, reusing the step-1 relay for outbound.
+5. Track MinBZK PR #621 and `suitenumerique/messages`; revisit adopting La Suite
    Messages as the native mail app once it reaches 1.0 and/or adds IMAP.
 
 ## Sources
@@ -167,7 +207,7 @@ Self-host engines / deliverability:
 - Mailu: https://mailu.io/ ; Mailcow: https://mailcow.email/
 - Roundcube + Keycloak OIDC: https://github.com/roundcube/roundcubemail-docker/issues/158
 - Bulk-sender auth rules (2025): https://powerdmarc.com/bulk-email-sender-requirements/
-- EU outbound relays: https://www.scaleway.com/en/transactional-email-tem/ , https://www.mailjet.com/products/email-api/smtp-relay/
+- EU outbound relays (pay-per-message SES-alternatives): https://www.scaleway.com/en/transactional-email-tem/ (€0.25/1000, 300/mo free), https://www.sweego.io/pricing , https://www.mailjet.com/pricing/
 
 Managed EU providers:
 - Infomaniak: https://www.infomaniak.com/en/ksuite/service-mail , API https://developer.infomaniak.com/docs/api
