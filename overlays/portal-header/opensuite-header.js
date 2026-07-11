@@ -65,6 +65,20 @@
   var MAIL_ENABLED = false;
   if (MAIL_ENABLED) NAV.splice(1, 0, { label: "Mail", sub: "messages" });
 
+  // Mail: never show the app's logged-out landing page — bounce through the
+  // silent OIDC flow straight to the inbox (everyone here already has a
+  // Keycloak session via the auth gate). Rate-limited via sessionStorage so
+  // a failing login can't redirect-loop.
+  if (MAIL_ENABLED && window.location.hostname.indexOf("messages.") === 0) {
+    fetch("/api/v1.0/users/me/", { credentials: "same-origin" }).then(function (r) {
+      if (r.status !== 401) return;
+      var last = +sessionStorage.getItem("osMailAutoLogin") || 0;
+      if (Date.now() - last < 60000) return;
+      sessionStorage.setItem("osMailAutoLogin", String(Date.now()));
+      window.location.replace("/api/v1.0/authenticate/");
+    });
+  }
+
   function injectStyles() {
     if (document.getElementById(HEADER_ID + "-styles")) return;
     var s = document.createElement("style");
