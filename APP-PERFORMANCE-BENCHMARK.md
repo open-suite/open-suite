@@ -20,10 +20,10 @@ suite containers now have measured resource requests without CPU limits
 
 | Application | Profile | Ready p50 | Ready p75 | Ready p95 |  FCP p75 |  LCP p75 | Spinner p75 | Transfer p75 |
 | ----------- | ------- | --------: | --------: | --------: | -------: | -------: | ----------: | -----------: |
-| Nextcloud   | Cold    |  2,601 ms |  2,696 ms |  3,138 ms | 1,560 ms | 2,444 ms |        0 ms |    2,203 KiB |
-| Nextcloud   | Warm    |    715 ms |    716 ms |    744 ms |   188 ms |   748 ms |        0 ms |       21 KiB |
-| Element     | Cold    |  2,455 ms |  2,910 ms |  2,916 ms |   520 ms | 2,476 ms |      619 ms |    4,714 KiB |
-| Element     | Warm    |    930 ms |    932 ms |    943 ms |   132 ms |   772 ms |      209 ms |        3 KiB |
+| Nextcloud   | Cold    |  2,624 ms |  2,808 ms |  3,898 ms | 1,548 ms | 2,524 ms |        0 ms |    2,203 KiB |
+| Nextcloud   | Warm    |    703 ms |    780 ms |  1,318 ms |   184 ms |   736 ms |        0 ms |       21 KiB |
+| Element     | Cold    |  2,886 ms |  2,894 ms |  2,914 ms | 1,300 ms | 2,688 ms |      590 ms |    4,719 KiB |
+| Element     | Warm    |    939 ms |    941 ms |    959 ms |   132 ms |   804 ms |      212 ms |        3 KiB |
 
 Cold means an empty HTTP cache with an already established application session.
 The app origin is unloaded between samples. Warm means a same-context reload.
@@ -33,7 +33,7 @@ The app origin is unloaded between samples. Warm means a same-context reload.
 | Application | Cold requests p75 | Script count p75 | Script encoded p75 | Style encoded p75 |
 | ----------- | ----------------: | ---------------: | -----------------: | ----------------: |
 | Nextcloud   |                54 |               26 |          2,076 KiB |            33 KiB |
-| Element     |                63 |               10 |          1,622 KiB |           130 KiB |
+| Element     |                63 |               10 |          1,628 KiB |           130 KiB |
 
 The accepted sidecar change recompresses eligible responses after shared-header
 injection. Nextcloud's cold transfer fell from 9,015 to 2,203 KiB p75 (-76%):
@@ -48,14 +48,16 @@ exposure improved 47% without changing payload size.
 
 ### Session bootstrap
 
-The one-time SSO bootstrap took 3,714 ms for Nextcloud and 6,814 ms for Element.
+The final one-time SSO bootstrap took 3,814 ms for Nextcloud and 5,264 ms for
+Element.
 Repeated Element bootstrap attempts before the declared run exposed HTTP 429
 responses from Synapse's `rc_login.address` limiter. The listener trusts
 forwarded addresses, but an office or government network still legitimately
 groups many users behind one public NAT address. The default bucket allowed the
 first five logins and falsely rejected the next four measured attempts. With a
 30-login address burst, all 10 candidate attempts succeeded and no Matrix 429
-was observed. Per-account and failed-attempt buckets remain at five.
+was observed. The final merged-state check also passed 10/10 with zero 429s.
+Per-account and failed-attempt buckets remain at five.
 
 ### Cluster state
 
