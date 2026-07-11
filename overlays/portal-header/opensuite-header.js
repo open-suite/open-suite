@@ -65,6 +65,23 @@
   var MAIL_ENABLED = false;
   if (MAIL_ENABLED) NAV.splice(1, 0, { label: "Mail", sub: "messages" });
 
+  // Nextcloud: never show its own login form or OIDC error screens
+  // ("Access forbidden — the received state has expired" after following a
+  // stale login URL). Both get a clean silent OIDC retry instead.
+  // Rate-limited via sessionStorage so a failing login can't redirect-loop.
+  if (window.location.hostname.indexOf("nextcloud.") === 0) {
+    var ncPath = window.location.pathname;
+    var ncStale = document.body && /received state has expired|Access forbidden/i.test(document.body.innerText || "");
+    if (ncPath === "/login" || ncPath.indexOf("/login/") === 0 || ncStale) {
+      var ncLast = +sessionStorage.getItem("osNcAutoLogin") || 0;
+      if (Date.now() - ncLast > 60000) {
+        sessionStorage.setItem("osNcAutoLogin", String(Date.now()));
+        window.location.replace("/apps/user_oidc/login/1?redirectUrl=" +
+          encodeURIComponent(window.location.origin + "/apps/files/files"));
+      }
+    }
+  }
+
   // Mail: never show the app's logged-out landing page — bounce through the
   // silent OIDC flow straight to the inbox (everyone here already has a
   // Keycloak session via the auth gate). Rate-limited via sessionStorage so
