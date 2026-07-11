@@ -62,9 +62,12 @@ cat >/tmp/opensuite-auth-gate-client.json <<EOF
   "secret": "$CLIENT_SECRET",
   "redirectUris": ["https://$AUTH_HOST/callback"],
   "webOrigins": ["https://$AUTH_HOST"],
+  "frontchannelLogout": true,
   "attributes": {
     "pkce.code.challenge.method": "S256",
-    "post.logout.redirect.uris": "+"
+    "post.logout.redirect.uris": "+",
+    "frontchannel.logout.url": "https://$AUTH_HOST/frontchannel-logout",
+    "frontchannel.logout.session.required": "true"
   }
 }
 EOF
@@ -144,6 +147,10 @@ spec:
               value: "${CLIENT_ID}"
             - name: OIDC_TLS_INSECURE
               value: "${GATE_TLS_INSECURE}"
+            - name: SESSION_TTL_SECONDS
+              value: "604800"
+            - name: OIDC_VALIDATION_INTERVAL_SECONDS
+              value: "15"
             - name: OIDC_CLIENT_SECRET
               valueFrom:
                 secretKeyRef:
