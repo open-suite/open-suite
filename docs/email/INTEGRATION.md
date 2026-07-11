@@ -1,8 +1,8 @@
 # Email integration — La Suite Messages + European relay
 
 Design and plan for adding email to Open Suite. Decision rationale lives in
-`EMAIL-OPTIONS.md`; this is the how. Status: in progress (this PR lays the
-groundwork; the deployment chart is the next build step — see "What's left").
+`EMAIL-OPTIONS.md`; this is the how. Status: built and verified by local
+rendering; ships disabled until the deploy-time steps below run.
 
 ## What we are building
 
@@ -97,23 +97,51 @@ gated so it only appears when `application.messages.enabled` is true (a nav link
 to an undeployed host is a broken-link regression, so it ships with the backend,
 not before).
 
-## What's left (the deployment build, next)
+## How it is built (in this repo's patch model)
 
-1. Author a helmfile `messages` app in our model from the upstream compose:
-   backend + worker + frontend + mta-in + mta-out (published images), wired to
-   Postgres/Redis/OpenSearch/object-store and to Keycloak, behind
-   `application.messages.enabled` (default off). Verify with `helmfile template`.
-2. Realm patch: `messages` + `rest-api` clients.
-3. mta-out relay secret + env (Brevo), from the example here.
-4. Portal "Mail" nav entry (gated on the feature flag).
-5. Deploy-time, on the demo (coordinate — a benchmark is currently running):
-   OpenSearch capacity check, open inbound :25, MX + SPF/DKIM/DMARC + PTR, a
-   Brevo account + SMTP key, then verify send to Gmail/Outlook lands in inbox
-   and inbound receive works. Add a smoke assertion for the mail app.
+Everything survives a bare `helmfile apply`; nothing is kubectl-patched.
 
-Blocked on, for a live demo: OpenSearch fits the box; inbound port 25 + MX;
-a Brevo (or chosen relay) account; a maintenance window that does not collide
-with in-flight benchmarking.
+- `patches/local/messages-app.patch` — adds a complete `helmfile/apps/messages`
+  app to the vendored MinBZK infra: our `charts/messages` chart (backend,
+  worker, migrate job, frontend + Open Suite header sidecar, mta-in on
+  hostPort 25, mta-out :587, single-node OpenSearch statefulset), slim
+  override values for the shared Bitnami postgresql/redis/minio charts, and
+  `messages` entries in every environment-default map (application,
+  authentication clients, cache, container images pinned to the published
+  0.8.0 tags, database, hostname, objectstore, pvc, tls). All releases are
+  gated on `application.messages.enabled` (default false).
+- `patches/local/keycloak-realm-messages-clients.patch` — realm import gains
+  the `messages` OIDC client, the `rest-api` service-account client, and the
+  `service-account-rest-api` user with the realm-management roles the backend
+  needs for mailbox provisioning. All gated on the same flag.
+- `helmfile/demo-values.yaml.tmpl` — `messages: { namespace: mb-messages,
+  enabled: false }`; flipping this single flag deploys the app.
+- `scripts/single-vps-deploy/02-networking.sh` — mb-messages in the egress
+  netpol list (skipped while the namespace does not exist).
+- `overlays/portal-header/opensuite-header.js` + `09-portal-header.sh` — a
+  "Mail" nav item next to Meet, enabled by 09 only when the messages app is
+  actually deployed; 09 also uploads the header JS the chart's sidecar serves.
+- `overlays/messages/brevo-relay-secret.example.yaml` — template for the
+  out-of-band `messages-mta-out-relay` secret (Brevo SMTP credentials); the
+  mta-out deployment consumes it via an optional envFrom.
+
+Ingress is a single route to the frontend: its Caddy fans out `/api`,
+`/admin` and `/static` to the backend service itself. Inbound mail bypasses
+Traefik entirely (hostPort 25 on the node).
+
+## Turning it on (deploy-time, needs the demo + user coordination)
+
+1. Confirm no benchmark run is using the box.
+2. Create the Brevo account + SMTP key; create the relay secret in
+   mb-messages from the example file. DNS at the registrar: MX
+   `mail.<domain>` → the box IP, SPF include Brevo, Brevo's DKIM records,
+   DMARC, PTR on the box IP; open inbound :25 (Hetzner firewall + ufw).
+3. Flip `enabled: true` in the demo values and run `deploy.sh` (or
+   `01-deploy.sh` + `02` + `09`).
+4. Verify: portal SSO login into Mail; send to an external Gmail (inbox, not
+   spam; DKIM/SPF pass and aligned); reply arrives back in Messages.
+5. Add a smoke assertion for the mail app (ci/smoke/authenticated.mjs
+   pattern).
 
 ## Sources
 - La Suite Messages: https://github.com/suitenumerique/messages (compose.yaml, env.d/)

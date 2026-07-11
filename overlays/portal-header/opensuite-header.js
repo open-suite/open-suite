@@ -60,6 +60,11 @@
     { label: "Calendar", sub: "nextcloud", path: "/apps/calendar" },
   ];
 
+  // Mail (La Suite Messages) is an optional app: 09-portal-header.sh flips
+  // this to true when it is deployed, so no dead link ships by default.
+  var MAIL_ENABLED = false;
+  if (MAIL_ENABLED) NAV.splice(5, 0, { label: "Mail", sub: "messages" });
+
   function injectStyles() {
     if (document.getElementById(HEADER_ID + "-styles")) return;
     var s = document.createElement("style");

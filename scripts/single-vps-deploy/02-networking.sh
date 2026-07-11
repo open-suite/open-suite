@@ -38,7 +38,9 @@ echo "==> [5b] Egress NetworkPolicies allowing Traefik on 8443"
 NODE_CIDR="$(kubectl get node -o jsonpath='{.items[0].status.addresses[?(@.type=="InternalIP")].address}' \
   | tr ' ' '\n' | grep -E '^[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+$' | head -1)/32"
 for ns in mb-keycloak mb-grist mb-element mb-collabora mb-nextcloud \
-          mb-livekit mb-meet mb-docs mb-bureaublad; do
+          mb-livekit mb-meet mb-docs mb-messages mb-bureaublad; do
+# Namespaces of disabled apps (e.g. messages) don't exist — skip them.
+kubectl get ns "${ns}" >/dev/null 2>&1 || continue
 kubectl apply -f - <<YAML
 apiVersion: networking.k8s.io/v1
 kind: NetworkPolicy
