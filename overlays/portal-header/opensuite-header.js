@@ -35,6 +35,20 @@
     var target = nc + (path || "");
     return nc + "/apps/user_oidc/login/1?redirectUrl=" + encodeURIComponent(target);
   };
+  var preconnect = function (sub) {
+    var id = "ko-preconnect-" + sub;
+    if (document.getElementById(id)) return;
+    var link = document.createElement("link");
+    link.id = id;
+    link.rel = "preconnect";
+    link.href = origin(sub);
+    link.setAttribute("data-opensuite-preconnect", sub);
+    document.head.appendChild(link);
+  };
+  var preconnectOnIntent = function (element, sub) {
+    element.addEventListener("pointerenter", function () { preconnect(sub); }, { once: true });
+    element.addEventListener("focus", function () { preconnect(sub); }, { once: true });
+  };
 
   // Office dropdown deep-links into the Nextcloud Office overview sections.
   // The header sidecar rewrites these clean URLs to the stock Office app while
@@ -136,6 +150,7 @@
       btn.setAttribute("role", "button");
       btn.setAttribute("tabindex", "0");
       btn.innerHTML = item.label + ' <span class="ko-caret">▾</span>';
+      preconnectOnIntent(btn, item.sub);
       btn.addEventListener("click", function (e) {
         e.stopPropagation();
         wrap.classList.toggle("ko-open");
@@ -148,6 +163,7 @@
         var a = document.createElement("a");
         a.href = item.sub === "nextcloud" ? nextcloudHref(child.path) : origin(item.sub) + child.path;
         a.textContent = child.label;
+        preconnectOnIntent(a, item.sub);
         menu.appendChild(a);
       });
       wrap.appendChild(menu);
@@ -156,6 +172,7 @@
       link.className = "ko-link" + (isActive(item) ? " ko-active" : "");
       link.href = item.sub === "nextcloud" ? nextcloudHref(item.path) : origin(item.sub) + (item.path || "");
       link.textContent = item.label;
+      preconnectOnIntent(link, item.sub);
       wrap.appendChild(link);
     }
     return wrap;
