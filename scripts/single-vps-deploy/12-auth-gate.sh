@@ -126,6 +126,10 @@ spec:
         - name: auth-gate
           image: ${IMAGE}
           imagePullPolicy: Always
+          resources:
+            requests:
+              cpu: 25m
+              memory: 32Mi
           ports:
             - name: http
               containerPort: 8080

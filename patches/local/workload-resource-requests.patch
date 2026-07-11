@@ -1,0 +1,39 @@
+diff --git a/helmfile/apps/docs/values-minio.yaml.gotmpl b/helmfile/apps/docs/values-minio.yaml.gotmpl
+index 2ab2302..2bb97cc 100644
+--- a/helmfile/apps/docs/values-minio.yaml.gotmpl
++++ b/helmfile/apps/docs/values-minio.yaml.gotmpl
+@@ -1075,7 +1075,7 @@ console:
+   ##     cpu: 3
+   ##     memory: 1024Mi
+   ##
+-  resources: {}
++  resources: {{ .Values.resource.docs.minioConsole | default dict | toYaml | nindent 4 }}
+   ## Configure Pods Security Context
+   ## ref: https://kubernetes.io/docs/tasks/configure-pod-container/security-context/#set-the-security-context-for-a-pod
+   ## @param console.podSecurityContext.enabled Enable MinIO&reg; Console pods' Security Context
+diff --git a/helmfile/apps/grist/values-minio.yaml.gotmpl b/helmfile/apps/grist/values-minio.yaml.gotmpl
+index fcf0251..5e581bb 100644
+--- a/helmfile/apps/grist/values-minio.yaml.gotmpl
++++ b/helmfile/apps/grist/values-minio.yaml.gotmpl
+@@ -1071,7 +1071,7 @@ console:
+   ##     cpu: 3
+   ##     memory: 1024Mi
+   ##
+-  resources: {}
++  resources: {{ .Values.resource.grist.minioConsole | default dict | toYaml | nindent 4 }}
+   ## Configure Pods Security Context
+   ## ref: https://kubernetes.io/docs/tasks/configure-pod-container/security-context/#set-the-security-context-for-a-pod
+   ## @param console.podSecurityContext.enabled Enable MinIO&reg; Console pods' Security Context
+diff --git a/helmfile/apps/nextcloud/values-minio.yaml.gotmpl b/helmfile/apps/nextcloud/values-minio.yaml.gotmpl
+index eaa6f49..aa4e096 100644
+--- a/helmfile/apps/nextcloud/values-minio.yaml.gotmpl
++++ b/helmfile/apps/nextcloud/values-minio.yaml.gotmpl
+@@ -1059,7 +1059,7 @@ console:
+   ##     cpu: 3
+   ##     memory: 1024Mi
+   ##
+-  resources: {}
++  resources: {{ .Values.resource.nextcloud.minioConsole | default dict | toYaml | nindent 4 }}
+   ## Configure Pods Security Context
+   ## ref: https://kubernetes.io/docs/tasks/configure-pod-container/security-context/#set-the-security-context-for-a-pod
+   ## @param console.podSecurityContext.enabled Enable MinIO&reg; Console pods' Security Context
