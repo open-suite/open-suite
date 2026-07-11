@@ -27,6 +27,8 @@ npm run benchmark:element-login
 ```
 
 Limit a run with `BENCHMARK_APPS=nextcloud` or `BENCHMARK_APPS=element`.
+Set `BENCHMARK_TRACE_RESOURCES=true` to include per-resource waterfall entries
+in the raw JSON when diagnosing a startup path.
 
 Capture the Kubernetes resource state on the target server with:
 

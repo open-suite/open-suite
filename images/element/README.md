@@ -6,6 +6,12 @@ static bundle at build time. Its nginx configuration also gzip-compresses
 textual responses, including Element's JavaScript, CSS, JSON, SVG and WebAssembly
 assets.
 
+The image also inserts an HTML preload for Element's hashed Rust E2EE
+WebAssembly module. Element otherwise discovers the 1.8 MiB module only after
+its main bundle has executed, leaving its transfer directly on the room-list
+startup path. The build locates the pinned image's exact hashed filename and
+fails if that assumption drifts.
+
 ## Why
 
 Open Suite runs chat without default room encryption (a Slack-like experience,
