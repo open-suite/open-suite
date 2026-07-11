@@ -13,7 +13,9 @@ FROM ${ELEMENT_BASE} AS upstream
 FROM perl:5-slim AS patcher
 COPY --from=upstream /app /app
 COPY patch-verification-reminders.sh /tmp/patch-verification-reminders.sh
-RUN sh /tmp/patch-verification-reminders.sh /app
+COPY patch-startup-preload.sh /tmp/patch-startup-preload.sh
+RUN sh /tmp/patch-verification-reminders.sh /app \
+    && sh /tmp/patch-startup-preload.sh /app
 
 FROM ${ELEMENT_BASE}
 COPY --from=patcher /app /app

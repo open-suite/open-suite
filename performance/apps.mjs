@@ -9,6 +9,7 @@ const username = process.env.BENCHMARK_USER;
 const password = process.env.BENCHMARK_PASS;
 const samples = Number(process.env.BENCHMARK_SAMPLES || 5);
 const pacingMs = Number(process.env.BENCHMARK_PACING_MS || 1000);
+const traceResources = process.env.BENCHMARK_TRACE_RESOURCES === "true";
 const output = process.env.BENCHMARK_OUTPUT || "app-benchmark-result.json";
 const label = process.env.BENCHMARK_LABEL || "unlabelled";
 const selectedApps = new Set(
@@ -161,7 +162,7 @@ const installObservers = async (context) => {
 };
 
 const collectMetrics = async (page, journeyMs) =>
-  page.evaluate((measuredJourneyMs) => {
+  page.evaluate(({ measuredJourneyMs, includeResources }) => {
     const state = window.__openSuiteAppBenchmark;
     const now = performance.now();
     const navigation = performance.getEntriesByType("navigation")[0];
@@ -179,7 +180,7 @@ const collectMetrics = async (page, journeyMs) =>
     const fcp = performance
       .getEntriesByType("paint")
       .find((entry) => entry.name === "first-contentful-paint");
-    return {
+    const metrics = {
       journey_ready_ms: measuredJourneyMs,
       ttfb_ms: navigation?.responseStart,
       dom_interactive_ms: navigation?.domInteractive,
@@ -211,7 +212,19 @@ const collectMetrics = async (page, journeyMs) =>
       style_count: styles.length,
       style_encoded_kib: sum(styles, "encodedBodySize") / 1024,
     };
-  }, journeyMs);
+    if (includeResources) {
+      metrics.resources = resources.map((resource) => ({
+        url: resource.name,
+        initiator: resource.initiatorType,
+        start_ms: resource.startTime,
+        duration_ms: resource.duration,
+        response_end_ms: resource.responseEnd,
+        encoded_kib: resource.encodedBodySize / 1024,
+        decoded_kib: resource.decodedBodySize / 1024,
+      }));
+    }
+    return metrics;
+  }, { measuredJourneyMs: journeyMs, includeResources: traceResources });
 
 const results = {};
 const sessionBootstrapMs = {};

@@ -6,8 +6,8 @@ open and render the real Nextcloud and Element applications.
 
 ## Latest summary
 
-**Release:** Nextcloud sidecar compression `f576296`, Element compression
-`sha-5660a2d`, Synapse SSO login limits candidate
+**Release:** Nextcloud sidecar compression `f576296`, Element startup image
+`sha-a6bbc34`, Synapse SSO login limits
 
 **Target:** `https://bridge.demo.opensuite.online`
 
@@ -22,8 +22,8 @@ suite containers now have measured resource requests without CPU limits
 | ----------- | ------- | --------: | --------: | --------: | -------: | -------: | ----------: | -----------: |
 | Nextcloud   | Cold    |  2,601 ms |  2,696 ms |  3,138 ms | 1,560 ms | 2,444 ms |        0 ms |    2,203 KiB |
 | Nextcloud   | Warm    |    715 ms |    716 ms |    744 ms |   188 ms |   748 ms |        0 ms |       21 KiB |
-| Element     | Cold    |  2,899 ms |  3,392 ms |  3,409 ms | 1,316 ms | 2,880 ms |      943 ms |    4,719 KiB |
-| Element     | Warm    |    930 ms |    937 ms |    943 ms |   128 ms |   780 ms |      212 ms |        3 KiB |
+| Element     | Cold    |  2,455 ms |  2,910 ms |  2,916 ms |   520 ms | 2,476 ms |      619 ms |    4,714 KiB |
+| Element     | Warm    |    930 ms |    932 ms |    943 ms |   132 ms |   772 ms |      209 ms |        3 KiB |
 
 Cold means an empty HTTP cache with an already established application session.
 The app origin is unloaded between samples. Warm means a same-context reload.
@@ -33,7 +33,7 @@ The app origin is unloaded between samples. Warm means a same-context reload.
 | Application | Cold requests p75 | Script count p75 | Script encoded p75 | Style encoded p75 |
 | ----------- | ----------------: | ---------------: | -----------------: | ----------------: |
 | Nextcloud   |                54 |               26 |          2,076 KiB |            33 KiB |
-| Element     |                63 |               10 |          1,628 KiB |           130 KiB |
+| Element     |                63 |               10 |          1,622 KiB |           130 KiB |
 
 The accepted sidecar change recompresses eligible responses after shared-header
 injection. Nextcloud's cold transfer fell from 9,015 to 2,203 KiB p75 (-76%):
@@ -42,7 +42,9 @@ moved from 2,584 to 2,696 ms p75 inside observed run variance, so this is an
 accepted network-efficiency improvement, not a claimed latency improvement.
 Element's owned image now materializes an nginx performance template into the
 chart's writable configuration volume. Its cold transfer fell from 15,315 to
-4,719 KiB p75 (-69%); LCP improved 14% and spinner exposure improved 22%.
+4,719 KiB p75 (-69%). The current image also preloads the late-discovered crypto
+WebAssembly gate; against its immediate baseline, LCP improved 25% and spinner
+exposure improved 47% without changing payload size.
 
 ### Session bootstrap
 
@@ -123,6 +125,24 @@ Protocol:
 | Login rate-limit false fail |              0% |
 
 ## History
+
+### 5. Accepted: preload Element's crypto WebAssembly gate - `sha-a6bbc34` - 2026-07-11
+
+| Element KPI | Baseline p75 | Candidate p75 | Change |
+| ----------- | -----------: | ------------: | -----: |
+| Cold ready  |     3,429 ms |      2,910 ms |   -15% |
+| FCP         |     1,268 ms |        520 ms |   -59% |
+| LCP         |     3,292 ms |      2,476 ms |   -25% |
+| Spinner     |     1,171 ms |        619 ms |   -47% |
+| Transfer    |    4,714 KiB |     4,714 KiB |     0% |
+| Warm ready  |       932 ms |        932 ms |     0% |
+
+Accepted. The resource waterfall showed Element discovering its 1.8 MiB Rust
+E2EE WebAssembly module around 2.6 seconds, then blocking Matrix initialization
+on the transfer. The owned image now discovers the exact hashed module at build
+time and adds one HTML preload. In the candidate waterfall it started at 71 ms,
+finished at 619 ms, appeared exactly once, and was reused by Element. Encryption
+functionality and total payload are unchanged.
 
 ### 4. Accepted: size every suite workload from a load sample - 2026-07-11
 
