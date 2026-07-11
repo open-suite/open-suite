@@ -1,0 +1,75 @@
+diff --git a/helmfile/apps/element/charts/synapse/templates/configMap.yaml b/helmfile/apps/element/charts/synapse/templates/configMap.yaml
+index 0685820..56c6389 100644
+--- a/helmfile/apps/element/charts/synapse/templates/configMap.yaml
++++ b/helmfile/apps/element/charts/synapse/templates/configMap.yaml
+@@ -142,6 +142,17 @@ data:
+       per_second: {{ .Values.synapse.rateLimiting.messaging.perSecond }}
+       burst_count: {{ .Values.synapse.rateLimiting.messaging.burstCount }}
+ 
++    rc_login:
++      address:
++        per_second: {{ .Values.synapse.rateLimiting.login.address.perSecond }}
++        burst_count: {{ .Values.synapse.rateLimiting.login.address.burstCount }}
++      account:
++        per_second: {{ .Values.synapse.rateLimiting.login.account.perSecond }}
++        burst_count: {{ .Values.synapse.rateLimiting.login.account.burstCount }}
++      failed_attempts:
++        per_second: {{ .Values.synapse.rateLimiting.login.failedAttempts.perSecond }}
++        burst_count: {{ .Values.synapse.rateLimiting.login.failedAttempts.burstCount }}
++
+     # The maximum allowed duration by which sent events can be delayed, as
+     # per MSC4140. Must be a positive value if set.  Defaults to no
+     # duration (null), which disallows sending delayed events.
+diff --git a/helmfile/apps/element/charts/synapse/values.yaml b/helmfile/apps/element/charts/synapse/values.yaml
+index 42861e3..da87546 100644
+--- a/helmfile/apps/element/charts/synapse/values.yaml
++++ b/helmfile/apps/element/charts/synapse/values.yaml
+@@ -1696,6 +1696,22 @@ synapse:
+     messaging:
+       perSecond: 0.2
+       burstCount: 10.0
++    ## @param synapse.rateLimiting.login.address.perSecond Login requests allowed per second for one client address.
++    ## @param synapse.rateLimiting.login.address.burstCount Login requests one client address may burst before throttling.
++    ## @param synapse.rateLimiting.login.account.perSecond Login requests allowed per second for one account.
++    ## @param synapse.rateLimiting.login.account.burstCount Login requests one account may burst before throttling.
++    ## @param synapse.rateLimiting.login.failedAttempts.perSecond Failed login requests allowed per second for one account and address.
++    ## @param synapse.rateLimiting.login.failedAttempts.burstCount Failed login requests one account and address may burst before throttling.
++    login:
++      address:
++        perSecond: 0.003
++        burstCount: 5.0
++      account:
++        perSecond: 0.003
++        burstCount: 5.0
++      failedAttempts:
++        perSecond: 0.003
++        burstCount: 5.0
+   ## @param synapse.maxEventDelayDuration The maximum allowed duration by which sent events can be delayed, as per MSC4140. Must be a positive value if set. If `null` or unset, sending of delayed events is disallowed.
+   ## ref: https://github.com/matrix-org/matrix-spec-proposals/pull/4140
+   maxEventDelayDuration: null
+diff --git a/helmfile/apps/element/values-synapse.yaml.gotmpl b/helmfile/apps/element/values-synapse.yaml.gotmpl
+index 5c71890..575afae 100644
+--- a/helmfile/apps/element/values-synapse.yaml.gotmpl
++++ b/helmfile/apps/element/values-synapse.yaml.gotmpl
+@@ -246,8 +246,20 @@ synapse:
+   rateLimiting:
+     # This is a ratelimiting option for messages that ratelimits sending based on the account the client is using.
+     messaging:
+-      perSeconde: 0.5
++      perSecond: 0.5
+       burstCount: 30.0
++    # OIDC is the only login mechanism. Keycloak protects credentials, while
++    # this address bucket must allow an office behind one public NAT to sign in.
++    login:
++      address:
++        perSecond: 1.0
++        burstCount: 30.0
++      account:
++        perSecond: 0.1
++        burstCount: 5.0
++      failedAttempts:
++        perSecond: 0.1
++        burstCount: 5.0
+   # The maximum allowed duration by which sent events can be delayed, as per MSC4140.
+   maxEventDelayDuration: "24h"
+   # Redirect traffic to port 443 when server_name and hostname are identical and tls is enabled.

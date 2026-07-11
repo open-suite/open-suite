@@ -44,7 +44,7 @@ diff --git a/helmfile/apps/bureaublad/values.yaml.gotmpl b/helmfile/apps/bureaub
 index d78c692..f83339e 100644
 --- a/helmfile/apps/bureaublad/values.yaml.gotmpl
 +++ b/helmfile/apps/bureaublad/values.yaml.gotmpl
-@@ -112,7 +112,35 @@ backend:
+@@ -112,7 +112,37 @@ backend:
      TRUSTED_HOSTS: '[{{ $hostname | quote }}]'
      REDIS_URL: {{ $redisUrl | quote }}
  
@@ -57,6 +57,8 @@ index d78c692..f83339e 100644
 +  sidecars:
 +    - name: opensuite-header
 +      image: nginxinc/nginx-unprivileged:1.27-alpine
++      resources:
++        requests: { cpu: 10m, memory: 16Mi }
 +      volumeMounts:
 +        - name: opensuite-header-conf
 +          mountPath: /etc/nginx/nginx.conf
@@ -80,7 +82,7 @@ index d78c692..f83339e 100644
    image:
      registry: {{ (coalesce .Values.container.bureaublad.registry .Values.container.default.registry) | quote }}
      repository: {{ .Values.container.bureaublad.frontend.repository | quote }}
-@@ -172,3 +200,64 @@ networkPolicy:
+@@ -172,3 +200,72 @@ networkPolicy:
                app.kubernetes.io/name: redis
                app.kubernetes.io/component: master
        {{- end }}
@@ -101,6 +103,14 @@ index d78c692..f83339e 100644
 +        events { worker_connections 1024; }
 +        http {
 +          include /etc/nginx/mime.types;
++          # Upstream compression is disabled so sub_filter can inspect HTML.
++          # Recompress eligible responses here before sending them to clients.
++          gzip on;
++          gzip_vary on;
++          gzip_proxied any;
++          gzip_min_length 1024;
++          gzip_comp_level 5;
++          gzip_types text/plain text/css text/javascript text/xml application/javascript application/json application/xml image/svg+xml application/wasm;
 +          client_body_temp_path /tmp/client_temp;
 +          proxy_temp_path /tmp/proxy_temp;
 +          fastcgi_temp_path /tmp/fastcgi_temp;
@@ -177,7 +187,7 @@ diff --git a/helmfile/apps/docs/values.yaml.gotmpl b/helmfile/apps/docs/values.y
 index ce4df2c..3f3bea0 100644
 --- a/helmfile/apps/docs/values.yaml.gotmpl
 +++ b/helmfile/apps/docs/values.yaml.gotmpl
-@@ -399,7 +399,35 @@ backend:
+@@ -399,7 +399,37 @@ backend:
          min: 3
          max: 9
  
@@ -190,6 +200,8 @@ index ce4df2c..3f3bea0 100644
 +  sidecars:
 +    - name: opensuite-header
 +      image: nginxinc/nginx-unprivileged:1.27-alpine
++      resources:
++        requests: { cpu: 10m, memory: 16Mi }
 +      volumeMounts:
 +        - name: opensuite-header-conf
 +          mountPath: /etc/nginx/nginx.conf
@@ -213,7 +225,7 @@ index ce4df2c..3f3bea0 100644
    image:
      registry: {{(coalesce .Values.container.docs.registry .Values.container.default.registry) | quote }}
      repository: {{ .Values.container.docs.frontend.repository | quote }}
-@@ -649,3 +677,64 @@ ingressMedia:
+@@ -649,3 +677,72 @@ ingressMedia:
    tls: {{ .Values.global.tls.enabled | default true }}
    selfSigned: {{ and .Values.global.tls.enabled .Values.global.tls.selfSigned | default false }}
    extraTls: {{ .Values.tls.docs | toYaml | nindent 4 }}
@@ -234,6 +246,14 @@ index ce4df2c..3f3bea0 100644
 +        events { worker_connections 1024; }
 +        http {
 +          include /etc/nginx/mime.types;
++          # Upstream compression is disabled so sub_filter can inspect HTML.
++          # Recompress eligible responses here before sending them to clients.
++          gzip on;
++          gzip_vary on;
++          gzip_proxied any;
++          gzip_min_length 1024;
++          gzip_comp_level 5;
++          gzip_types text/plain text/css text/javascript text/xml application/javascript application/json application/xml image/svg+xml application/wasm;
 +          client_body_temp_path /tmp/client_temp;
 +          proxy_temp_path /tmp/proxy_temp;
 +          fastcgi_temp_path /tmp/fastcgi_temp;
@@ -309,7 +329,7 @@ index 0d489aa..aeee611 100644
     {{- if .Values.metric.enabled }}
     # Allow Prometheus to scrape metrics. Port is pinned to the chart's
     # containerPorts.metrics (charts/grist/values.yaml); change both together.
-@@ -364,3 +369,92 @@ metrics:
+@@ -364,3 +369,102 @@ metrics:
  # no access to the chart's default).
  containerPorts:
    metrics: {{ $metricsPort }}
@@ -322,6 +342,8 @@ index 0d489aa..aeee611 100644
 +sidecars:
 +  - name: opensuite-header
 +    image: nginxinc/nginx-unprivileged:1.27-alpine
++    resources:
++      requests: { cpu: 10m, memory: 16Mi }
 +    volumeMounts:
 +      - name: opensuite-header-conf
 +        mountPath: /etc/nginx/nginx.conf
@@ -358,6 +380,14 @@ index 0d489aa..aeee611 100644
 +        events { worker_connections 1024; }
 +        http {
 +          include /etc/nginx/mime.types;
++          # Upstream compression is disabled so sub_filter can inspect HTML.
++          # Recompress eligible responses here before sending them to clients.
++          gzip on;
++          gzip_vary on;
++          gzip_proxied any;
++          gzip_min_length 1024;
++          gzip_comp_level 5;
++          gzip_types text/plain text/css text/javascript text/xml application/javascript application/json application/xml image/svg+xml application/wasm;
 +          client_body_temp_path /tmp/client_temp;
 +          proxy_temp_path /tmp/proxy_temp;
 +          fastcgi_temp_path /tmp/fastcgi_temp;
@@ -433,7 +463,7 @@ index 706e9e2..e2e5fd1 100644
     {{- if .Values.metric.enabled }}
     # Allow the in-namespace metrics exporter pod to reach Nextcloud's
     # serverinfo endpoint. Prometheus itself scrapes the exporter pod, not
-@@ -241,10 +246,38 @@ metrics:
+@@ -241,10 +246,40 @@ metrics:
    serviceMonitor:
      enabled: {{ .Values.metric.serviceMonitor.enabled | default false }}
  
@@ -445,6 +475,8 @@ index 706e9e2..e2e5fd1 100644
 +sidecars:
 +  - name: opensuite-header
 +    image: nginxinc/nginx-unprivileged:1.27-alpine
++    resources:
++      requests: { cpu: 10m, memory: 16Mi }
 +    volumeMounts:
 +      - name: opensuite-header-conf
 +        mountPath: /etc/nginx/nginx.conf
@@ -472,7 +504,7 @@ index 706e9e2..e2e5fd1 100644
    - name: bureaublad-button-app
      configMap:
        name: nextcloud-bureaublad-button-app
-@@ -265,6 +298,65 @@ extraVolumeMounts:
+@@ -265,6 +298,73 @@ extraVolumeMounts:
      readOnly: true
  
  extraDeploy:
@@ -491,6 +523,14 @@ index 706e9e2..e2e5fd1 100644
 +        events { worker_connections 1024; }
 +        http {
 +          include /etc/nginx/mime.types;
++          # Upstream compression is disabled so sub_filter can inspect HTML.
++          # Recompress eligible responses here before sending them to clients.
++          gzip on;
++          gzip_vary on;
++          gzip_proxied any;
++          gzip_min_length 1024;
++          gzip_comp_level 5;
++          gzip_types text/plain text/css text/javascript text/xml application/javascript application/json application/xml image/svg+xml application/wasm;
 +          client_body_temp_path /tmp/client_temp;
 +          proxy_temp_path /tmp/proxy_temp;
 +          fastcgi_temp_path /tmp/fastcgi_temp;
