@@ -16,9 +16,9 @@ CLIENT_ID="opensuite-auth-gate"
 NAMESPACE="mb-bureaublad"
 # Prebuilt in CI and pulled from GHCR (ticket 3.1). Pinned to a specific build
 # (not floating :main) so a redeploy is reproducible; bump this when the gate
-# changes. sha-ca2c678 = the #163 build with Keycloak-backed session lifecycle.
+# changes. sha-67bf956 = the #165 build with coherent gate and app logout.
 # Override AUTH_GATE_IMAGE to test another tag.
-IMAGE="${AUTH_GATE_IMAGE:-ghcr.io/open-suite/auth-gate:sha-ca2c678}"
+IMAGE="${AUTH_GATE_IMAGE:-ghcr.io/open-suite/auth-gate:sha-67bf956}"
 OPEN_SUITE_TLS_MODE="${OPEN_SUITE_TLS_MODE:-letsencrypt}"
 
 echo "==> [1/5] Ensuring auth-gate secrets"
