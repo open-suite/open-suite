@@ -6,20 +6,21 @@ open and render the real Nextcloud and Element applications.
 
 ## Latest summary
 
-**Release:** distribution `dc1cd8e`, Nextcloud `sha-03c989f`, Element `v1.12.21`
+**Release:** header-sidecar compression candidate `f576296`, Nextcloud
+`sha-03c989f`, Element `v1.12.21`
 
 **Target:** `https://bridge.demo.opensuite.online`
 
 **Captured:** 2026-07-11
 
-**Result:** Initial application and cluster baseline
+**Result:** Sidecar compression accepted; Element KPIs remain at baseline
 
 ### Browser KPIs
 
 | Application | Profile | Ready p50 | Ready p75 | Ready p95 |  FCP p75 |  LCP p75 | Spinner p75 | Transfer p75 |
 | ----------- | ------- | --------: | --------: | --------: | -------: | -------: | ----------: | -----------: |
-| Nextcloud   | Cold    |  2,138 ms |  2,584 ms |  3,121 ms | 1,596 ms | 2,528 ms |        0 ms |    9,015 KiB |
-| Nextcloud   | Warm    |    711 ms |    730 ms |    805 ms |   180 ms |   724 ms |        0 ms |       49 KiB |
+| Nextcloud   | Cold    |  2,601 ms |  2,696 ms |  3,138 ms | 1,560 ms | 2,444 ms |        0 ms |    2,203 KiB |
+| Nextcloud   | Warm    |    715 ms |    716 ms |    744 ms |   188 ms |   748 ms |        0 ms |       21 KiB |
 | Element     | Cold    |  3,401 ms |  3,409 ms |  3,432 ms | 1,364 ms | 3,336 ms |    1,213 ms |   15,315 KiB |
 | Element     | Warm    |    926 ms |    934 ms |    948 ms |   136 ms |   808 ms |      210 ms |        3 KiB |
 
@@ -30,14 +31,15 @@ The app origin is unloaded between samples. Warm means a same-context reload.
 
 | Application | Cold requests p75 | Script count p75 | Script encoded p75 | Style encoded p75 |
 | ----------- | ----------------: | ---------------: | -----------------: | ----------------: |
-| Nextcloud   |                54 |               26 |          8,415 KiB |           162 KiB |
+| Nextcloud   |                54 |               26 |          2,076 KiB |            33 KiB |
 | Element     |                63 |               10 |          6,262 KiB |           945 KiB |
 
-For both applications, encoded and decoded bytes were identical in every cold
-sample. The live delivery path is not compressing these assets. Nextcloud's
-shared-header sidecar clears upstream `Accept-Encoding` so nginx can inject the
-header script, but does not recompress the client response. Element's upstream
-nginx image also delivers its bundles uncompressed.
+The accepted sidecar change recompresses eligible responses after shared-header
+injection. Nextcloud's cold transfer fell from 9,015 to 2,203 KiB p75 (-76%):
+JavaScript fell from 8,415 to 2,076 KiB and CSS from 162 to 33 KiB. Readiness
+moved from 2,584 to 2,696 ms p75 inside observed run variance, so this is an
+accepted network-efficiency improvement, not a claimed latency improvement.
+Element's upstream nginx image still delivers its bundles uncompressed.
 
 ### Session bootstrap
 
@@ -104,6 +106,23 @@ Protocol:
 | Login rate-limit false fail |              0% |
 
 ## History
+
+### 1. Accepted: recompress shared-header sidecar responses - `f576296` - 2026-07-11
+
+| Nextcloud cold KPI | Baseline p75 | Candidate p75 | Change |
+| ------------------ | -----------: | ------------: | -----: |
+| Ready              |     2,584 ms |      2,696 ms |    +4% |
+| FCP                |     1,596 ms |      1,560 ms |    -2% |
+| LCP                |     2,528 ms |      2,444 ms |    -3% |
+| Total transfer     |    9,015 KiB |     2,203 KiB |   -76% |
+| Script encoded     |    8,415 KiB |     2,076 KiB |   -75% |
+| Style encoded      |      162 KiB |        33 KiB |   -80% |
+
+Accepted. The shared-header proxy must request uncompressed upstream HTML for
+`sub_filter`, but now gzip-compresses eligible output for the browser. Cache
+headers, WebSocket/SSE behavior and already-compressed formats are unchanged.
+The sidecar remained below one reported millicore after the benchmark; node CPU
+remained 4%.
 
 ### 0. Baseline - 2026-07-11
 
