@@ -7,13 +7,14 @@ open and render the real Nextcloud and Element applications.
 ## Latest summary
 
 **Release:** Nextcloud sidecar compression `f576296`, Element compression
-candidate `sha-5660a2d`
+`sha-5660a2d`, Synapse SSO login limits candidate
 
 **Target:** `https://bridge.demo.opensuite.online`
 
 **Captured:** 2026-07-11
 
-**Result:** Nextcloud and Element compression accepted
+**Result:** Nextcloud and Element compression accepted; Element burst login
+false failures eliminated
 
 ### Browser KPIs
 
@@ -47,11 +48,12 @@ chart's writable configuration volume. Its cold transfer fell from 15,315 to
 
 The one-time SSO bootstrap took 3,714 ms for Nextcloud and 6,814 ms for Element.
 Repeated Element bootstrap attempts before the declared run exposed HTTP 429
-responses from Synapse's `rc_login.address` limiter. Synapse logs every caller
-as the same cluster address (`10.42.0.1`), so the address limiter is effectively
-global across users behind Traefik. The Synapse pod was restarted once to clear
-the in-memory baseline bucket; the measured run then established one session
-and reused it.
+responses from Synapse's `rc_login.address` limiter. The listener trusts
+forwarded addresses, but an office or government network still legitimately
+groups many users behind one public NAT address. The default bucket allowed the
+first five logins and falsely rejected the next four measured attempts. With a
+30-login address burst, all 10 candidate attempts succeeded and no Matrix 429
+was observed. Per-account and failed-attempt buckets remain at five.
 
 ### Cluster baseline
 
@@ -66,7 +68,8 @@ and reused it.
 
 ## Method
 
-The browser harness is `performance/apps.mjs` and the cluster collector is
+The browser harnesses are `performance/apps.mjs` and
+`performance/element-login.mjs`; the cluster collector is
 `performance/cluster-snapshot.sh`.
 
 ```bash
@@ -79,6 +82,16 @@ BENCHMARK_SAMPLES=5 \
 BENCHMARK_LABEL='<release-or-candidate>' \
 BENCHMARK_OUTPUT=/tmp/open-suite-apps.json \
 npm run benchmark:apps
+```
+
+The Element login benchmark creates isolated browser contexts so every attempt
+must complete the full SSO and Matrix login flow:
+
+```bash
+BENCHMARK_USER=johndoe \
+BENCHMARK_PASS='<demo password>' \
+BENCHMARK_ATTEMPTS=10 \
+npm run benchmark:element-login
 ```
 
 Protocol:
@@ -108,6 +121,20 @@ Protocol:
 | Login rate-limit false fail |              0% |
 
 ## History
+
+### 3. Accepted: make Element SSO login bursts reliable - 2026-07-11
+
+| Element login KPI       | Baseline | Candidate |
+| ----------------------- | -------: | --------: |
+| Successful fresh logins |     5/10 |     10/10 |
+| Matrix 429 attempts     |     4/10 |      0/10 |
+| Candidate elapsed range |        - | 7.7-8.6 s |
+
+Accepted. The Synapse chart now renders explicit address, account and failed
+attempt login buckets. Because Keycloak is the only authentication mechanism,
+the address-wide bucket allows a 30-login office burst while account and failed
+attempt protection remain at five. This also fixes the existing `perSeconde`
+typo so the declared message rate is actually rendered.
 
 ### 2. Accepted: compress Element static assets - `sha-5660a2d` - 2026-07-11
 
