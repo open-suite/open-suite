@@ -453,10 +453,10 @@ index 0000000..10f5b1a
 +  {{- end }}
 diff --git a/helmfile/apps/messages/charts/messages/templates/mta-out-deployment.yaml b/helmfile/apps/messages/charts/messages/templates/mta-out-deployment.yaml
 new file mode 100644
-index 0000000..5b11cff
+index 0000000..5d2f114
 --- /dev/null
 +++ b/helmfile/apps/messages/charts/messages/templates/mta-out-deployment.yaml
-@@ -0,0 +1,55 @@
+@@ -0,0 +1,58 @@
 +apiVersion: apps/v1
 +kind: Deployment
 +metadata:
@@ -476,10 +476,12 @@ index 0000000..5b11cff
 +      containers:
 +        - name: mta-out
 +          image: {{ include "messages.image" (dict "component" "mtaOut" "context" $) }}
-+          # The published 0.8.0 image is missing /var/spool/postfix/etc (the
-+          # entrypoint needs it for the SASL db) and ships private/public with
-+          # root ownership, which kills postfix master at startup. Repair both
-+          # before handing over to the stock entrypoint.
++          # Repairs for the published 0.8.0 image (all fixed upstream on main):
++          # /var/spool/postfix/etc is missing (the entrypoint needs it for the
++          # SASL db); private/public ship root-owned, which kills postfix
++          # master; and main.cf.j2 indents the relay-auth lines, which postfix
++          # folds into the relayhost value as continuation lines, silently
++          # disabling SASL auth to the smarthost.
 +          command:
 +            - bash
 +            - -c
@@ -487,6 +489,7 @@ index 0000000..5b11cff
 +              mkdir -p /var/spool/postfix/etc &&
 +              chown -R postfix /var/spool/postfix/private /var/spool/postfix/public &&
 +              chgrp -R postdrop /var/spool/postfix/public &&
++              sed -i 's/^ //' /app/etc/main.cf.j2 &&
 +              exec /usr/local/bin/entrypoint.sh
 +          ports:
 +            - name: submission
@@ -512,6 +515,28 @@ index 0000000..5b11cff
 +            initialDelaySeconds: 15
 +            periodSeconds: 20
 +          resources: {{ .Values.mtaOut.resources | toYaml | nindent 12 }}
+diff --git a/helmfile/apps/messages/charts/messages/templates/mta-out-networkpolicy.yaml b/helmfile/apps/messages/charts/messages/templates/mta-out-networkpolicy.yaml
+new file mode 100644
+index 0000000..25d0ac4
+--- /dev/null
++++ b/helmfile/apps/messages/charts/messages/templates/mta-out-networkpolicy.yaml
+@@ -0,0 +1,16 @@
++# The namespace-wide egress whitelist (02-networking.sh) has no rule for
++# external SMTP submission; grant mta-out egress to the smarthost relay port.
++apiVersion: networking.k8s.io/v1
++kind: NetworkPolicy
++metadata:
++  name: {{ .Release.Name }}-mta-out-relay-egress
++  namespace: {{ .Release.Namespace | quote }}
++  labels: {{- include "messages.labels" (dict "component" "mta-out" "context" $) | nindent 4 }}
++spec:
++  podSelector:
++    matchLabels: {{- include "messages.selectorLabels" (dict "component" "mta-out" "context" $) | nindent 6 }}
++  policyTypes: [Egress]
++  egress:
++    - ports:
++        - port: 587
++          protocol: TCP
 diff --git a/helmfile/apps/messages/charts/messages/templates/mta-out-secret.yaml b/helmfile/apps/messages/charts/messages/templates/mta-out-secret.yaml
 new file mode 100644
 index 0000000..8d2a552
@@ -978,10 +1003,10 @@ index 0000000..33ce096
 +    size: {{ coalesce .Values.pvc.messages.redis.size .Values.pvc.default.size "1Gi" }}
 diff --git a/helmfile/apps/messages/values.yaml.gotmpl b/helmfile/apps/messages/values.yaml.gotmpl
 new file mode 100644
-index 0000000..a1d7e92
+index 0000000..136a8d8
 --- /dev/null
 +++ b/helmfile/apps/messages/values.yaml.gotmpl
-@@ -0,0 +1,142 @@
+@@ -0,0 +1,148 @@
 +{{- $releaseId := now | unixEpoch }}
 +{{- $hostname := printf "%s.%s" .Values.global.hostname.messages .Values.global.domain }}
 +{{- $sslPostfix := ternary "s" "" (.Values.global.tls.enabled | default true) }}
@@ -1027,7 +1052,8 @@ index 0000000..a1d7e92
 +    DJANGO_CONFIGURATION: "Production"
 +    DJANGO_SETTINGS_MODULE: "messages.settings"
 +    DJANGO_SECRET_KEY: {{ .Values.application.messages.backend.django.secretKey | quote }}
-+    DJANGO_ALLOWED_HOSTS: {{ $hostname | quote }}
++    # Public hostname plus the in-cluster service name mta-in's MDA calls use.
++    DJANGO_ALLOWED_HOSTS: "{{ $hostname }},messages-backend"
 +    DJANGO_CSRF_TRUSTED_ORIGINS: {{ $baseUrl | quote }}
 +    SALT_KEY: {{ .Values.application.messages.saltKey | quote }}
 +    LANGUAGE_CODE: "en-us"
@@ -1081,6 +1107,11 @@ index 0000000..a1d7e92
 +    KEYCLOAK_CLIENT_ID: {{ .Values.authentication.client.messagesRestApi.client_id | quote }}
 +    KEYCLOAK_CLIENT_SECRET: {{ .Values.authentication.client.messagesRestApi.client_secret | quote }}
 +    KEYCLOAK_GROUP_PATH_PREFIX: "/maildomain-"
++    {{- with .Values.application.messages.autojoinBaseDomain }}
++    # Auto-provision mailboxes for OIDC users at this base domain.
++    MESSAGES_TESTDOMAIN: {{ $.Values.global.domain | quote }}
++    MESSAGES_TESTDOMAIN_MAPPING_BASEDOMAIN: {{ . | quote }}
++    {{- end }}
 +    # Mail pipeline
 +    MDA_API_SECRET: {{ .Values.application.messages.mda.apiSecret | quote }}
 +    MTA_OUT_MODE: "relay"
@@ -1125,10 +1156,10 @@ index 0000000..a1d7e92
 +    {{- end }}
 +  tls: {{ .Values.global.tls.enabled | default true }}
 diff --git a/helmfile/environments/default/application.yaml.gotmpl b/helmfile/environments/default/application.yaml.gotmpl
-index 66df91a..30970be 100644
+index 66df91a..88b04bb 100644
 --- a/helmfile/environments/default/application.yaml.gotmpl
 +++ b/helmfile/environments/default/application.yaml.gotmpl
-@@ -97,6 +97,27 @@ application:
+@@ -97,6 +97,32 @@ application:
      yProvider:
        key: {{ derivePassword 1 "long" (requiredEnv "MIJNBUREAU_MASTER_PASSWORD") "docs" "yProviderKey" | sha1sum | quote }}
  
@@ -1149,6 +1180,11 @@ index 66df91a..30970be 100644
 +    # Credentials the backend uses to authenticate TO mta-out (its submission
 +    # smarthost). The relay mta-out itself forwards through (e.g. Brevo) is
 +    # configured out-of-band via the messages-mta-out-relay secret.
++    # When set, OIDC users whose email is at this base domain get an
++    # auto-provisioned mailbox <local>@<global.domain> on first login
++    # (upstream MESSAGES_TESTDOMAIN mechanism). Unset: mailboxes are
++    # provisioned by a maildomain admin.
++    autojoinBaseDomain: ~
 +    mtaOut:
 +      smtpUsername: "messages"
 +      smtpPassword: {{ derivePassword 1 "long" (requiredEnv "MIJNBUREAU_MASTER_PASSWORD") "messages" "mtaOutSmtpPassword" | sha1sum | quote }}

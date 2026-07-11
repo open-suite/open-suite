@@ -130,7 +130,7 @@ application:
   # Mail (La Suite Messages). Needs DNS (MX/SPF/DKIM/DMARC/PTR), inbound :25
   # and the out-of-band messages-mta-out-relay secret (Brevo) — all in place
   # for the demo since 2026-07-11; see docs/email/INTEGRATION.md.
-  messages:    { namespace: mb-messages, enabled: true }
+  messages:    { namespace: mb-messages, enabled: true, autojoinBaseDomain: "example.com" }
   bureaublad:  { namespace: mb-bureaublad }
 
 # Open Suite images (CI-built; see .github/workflows and the portal repo's
