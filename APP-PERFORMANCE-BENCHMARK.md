@@ -6,14 +6,14 @@ open and render the real Nextcloud and Element applications.
 
 ## Latest summary
 
-**Release:** header-sidecar compression candidate `f576296`, Nextcloud
-`sha-03c989f`, Element `v1.12.21`
+**Release:** Nextcloud sidecar compression `f576296`, Element compression
+candidate `sha-5660a2d`
 
 **Target:** `https://bridge.demo.opensuite.online`
 
 **Captured:** 2026-07-11
 
-**Result:** Sidecar compression accepted; Element KPIs remain at baseline
+**Result:** Nextcloud and Element compression accepted
 
 ### Browser KPIs
 
@@ -21,8 +21,8 @@ open and render the real Nextcloud and Element applications.
 | ----------- | ------- | --------: | --------: | --------: | -------: | -------: | ----------: | -----------: |
 | Nextcloud   | Cold    |  2,601 ms |  2,696 ms |  3,138 ms | 1,560 ms | 2,444 ms |        0 ms |    2,203 KiB |
 | Nextcloud   | Warm    |    715 ms |    716 ms |    744 ms |   188 ms |   748 ms |        0 ms |       21 KiB |
-| Element     | Cold    |  3,401 ms |  3,409 ms |  3,432 ms | 1,364 ms | 3,336 ms |    1,213 ms |   15,315 KiB |
-| Element     | Warm    |    926 ms |    934 ms |    948 ms |   136 ms |   808 ms |      210 ms |        3 KiB |
+| Element     | Cold    |  2,899 ms |  3,392 ms |  3,409 ms | 1,316 ms | 2,880 ms |      943 ms |    4,719 KiB |
+| Element     | Warm    |    930 ms |    937 ms |    943 ms |   128 ms |   780 ms |      212 ms |        3 KiB |
 
 Cold means an empty HTTP cache with an already established application session.
 The app origin is unloaded between samples. Warm means a same-context reload.
@@ -32,14 +32,16 @@ The app origin is unloaded between samples. Warm means a same-context reload.
 | Application | Cold requests p75 | Script count p75 | Script encoded p75 | Style encoded p75 |
 | ----------- | ----------------: | ---------------: | -----------------: | ----------------: |
 | Nextcloud   |                54 |               26 |          2,076 KiB |            33 KiB |
-| Element     |                63 |               10 |          6,262 KiB |           945 KiB |
+| Element     |                63 |               10 |          1,628 KiB |           130 KiB |
 
 The accepted sidecar change recompresses eligible responses after shared-header
 injection. Nextcloud's cold transfer fell from 9,015 to 2,203 KiB p75 (-76%):
 JavaScript fell from 8,415 to 2,076 KiB and CSS from 162 to 33 KiB. Readiness
 moved from 2,584 to 2,696 ms p75 inside observed run variance, so this is an
 accepted network-efficiency improvement, not a claimed latency improvement.
-Element's upstream nginx image still delivers its bundles uncompressed.
+Element's owned image now materializes an nginx performance template into the
+chart's writable configuration volume. Its cold transfer fell from 15,315 to
+4,719 KiB p75 (-69%); LCP improved 14% and spinner exposure improved 22%.
 
 ### Session bootstrap
 
@@ -106,6 +108,24 @@ Protocol:
 | Login rate-limit false fail |              0% |
 
 ## History
+
+### 2. Accepted: compress Element static assets - `sha-5660a2d` - 2026-07-11
+
+| Element cold KPI | Baseline p75 | Candidate p75 | Change |
+| ---------------- | -----------: | ------------: | -----: |
+| Ready            |     3,409 ms |      3,392 ms |    -1% |
+| FCP              |     1,364 ms |      1,316 ms |    -4% |
+| LCP              |     3,336 ms |      2,880 ms |   -14% |
+| Spinner          |     1,213 ms |        943 ms |   -22% |
+| Total transfer   |   15,315 KiB |     4,719 KiB |   -69% |
+| Script encoded   |    6,262 KiB |     1,628 KiB |   -74% |
+| Style encoded    |      945 KiB |       130 KiB |   -86% |
+
+Accepted. Element's nginx entrypoint writes configuration from templates into
+the chart's mounted `conf.d` volume, so the owned image installs compression as
+a template rather than a masked final config file. The deployment pin now uses
+the immutable candidate SHA tag. Remaining cold readiness is dominated by
+Element/Matrix initialization rather than asset transfer.
 
 ### 1. Accepted: recompress shared-header sidecar responses - `f576296` - 2026-07-11
 
