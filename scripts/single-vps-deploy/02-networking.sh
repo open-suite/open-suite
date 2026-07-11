@@ -52,6 +52,11 @@ spec:
     - to: [{ podSelector: {} }]
     - to: [{ namespaceSelector: { matchLabels: { kubernetes.io/metadata.name: kube-system } } }]
       ports: [{ port: 8443, protocol: TCP }]
+    # DNS. The Bitnami charts' own NetworkPolicies already allow this for
+    # their pods, but chart-native pods (e.g. messages) have no other egress
+    # policy — without this, this policy's whitelist blocks CoreDNS.
+    - to: [{ namespaceSelector: { matchLabels: { kubernetes.io/metadata.name: kube-system } } }]
+      ports: [{ port: 53, protocol: UDP }, { port: 53, protocol: TCP }]
     # Chart helper jobs (e.g. synapse-keygen) talk to the API server, which on
     # k3s is the node itself on 6443 (post-DNAT destination of 10.43.0.1:443).
     # Without this they only ever succeed on a fresh deploy, where the job

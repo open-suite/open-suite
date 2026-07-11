@@ -453,10 +453,10 @@ index 0000000..10f5b1a
 +  {{- end }}
 diff --git a/helmfile/apps/messages/charts/messages/templates/mta-out-deployment.yaml b/helmfile/apps/messages/charts/messages/templates/mta-out-deployment.yaml
 new file mode 100644
-index 0000000..b9c6305
+index 0000000..bace214
 --- /dev/null
 +++ b/helmfile/apps/messages/charts/messages/templates/mta-out-deployment.yaml
-@@ -0,0 +1,43 @@
+@@ -0,0 +1,46 @@
 +apiVersion: apps/v1
 +kind: Deployment
 +metadata:
@@ -476,6 +476,9 @@ index 0000000..b9c6305
 +      containers:
 +        - name: mta-out
 +          image: {{ include "messages.image" (dict "component" "mtaOut" "context" $) }}
++          # The published 0.8.0 image is missing /var/spool/postfix/etc, which
++          # its own entrypoint needs for the SASL db; create it first.
++          command: ["bash", "-c", "mkdir -p /var/spool/postfix/etc && exec /usr/local/bin/entrypoint.sh"]
 +          ports:
 +            - name: submission
 +              containerPort: 587
@@ -831,10 +834,10 @@ index 0000000..56a2eb6
 +      - "values.yaml.gotmpl"
 diff --git a/helmfile/apps/messages/values-minio.yaml.gotmpl b/helmfile/apps/messages/values-minio.yaml.gotmpl
 new file mode 100644
-index 0000000..59aed14
+index 0000000..f9cf01e
 --- /dev/null
 +++ b/helmfile/apps/messages/values-minio.yaml.gotmpl
-@@ -0,0 +1,33 @@
+@@ -0,0 +1,38 @@
 +# Overrides for the shared Bitnami MinIO chart (../common/charts/minio).
 +# Minimal override file; chart defaults cover the rest.
 +global:
@@ -868,6 +871,11 @@ index 0000000..59aed14
 +  storageClass: {{ (coalesce .Values.pvc.messages.minio.storageClass .Values.pvc.default.storageClass) | quote }}
 +  accessModes: {{ coalesce .Values.pvc.messages.minio.accessModes .Values.pvc.default.accessModes (list "ReadWriteOnce") | toYaml | nindent 4 }}
 +  size: {{ coalesce .Values.pvc.messages.minio.size .Values.pvc.default.size "8Gi" }}
++
++# The chart's bundled object-browser console image tag does not exist on
++# Docker Hub; the console is unused here anyway (docs disables it too).
++console:
++  enabled: false
 diff --git a/helmfile/apps/messages/values-postgresql.yaml.gotmpl b/helmfile/apps/messages/values-postgresql.yaml.gotmpl
 new file mode 100644
 index 0000000..5513846
