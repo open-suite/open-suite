@@ -21,10 +21,9 @@ PORTAL_REF="${PORTAL_REF:-bf7b1bd551d5f4f10f1aaa77eb7ba83d1aced332}"
 MEET_TAG="${MEET_TAG:-sha-03c989f}"
 # Pinned Open Suite Nextcloud build (upstream base + meetcal + patched user_oidc).
 NEXTCLOUD_TAG="${NEXTCLOUD_TAG:-sha-03c989f}"
-# Open Suite Element Web image tag (element-image workflow: pinned upstream with
-# the verification-reminder toasts patched out of the bundle). This remaining
-# version tag is tracked for conversion to a digest in the release manifest.
-ELEMENT_TAG="${ELEMENT_TAG:-v1.12.21}"
+# Open Suite Element Web image tag: pinned immutable build with verification
+# reminders removed and textual assets compressed.
+ELEMENT_TAG="${ELEMENT_TAG:-sha-5660a2d}"
 # TLS mode: letsencrypt (default; needs public DNS + ports) or selfsigned
 # (local VMs: every chart generates its own cert, no cert-manager, no ACME).
 OPEN_SUITE_TLS_MODE="${OPEN_SUITE_TLS_MODE:-letsencrypt}"
