@@ -27,6 +27,16 @@ export KUBECONFIG=/etc/rancher/k3s/k3s.yaml
 
 [ -f "${HEADER_JS}" ] || { echo "missing ${HEADER_JS}"; exit 1; }
 
+# Gate the Mail nav item on the messages app actually being deployed: flip the
+# MAIL_ENABLED flag in a temp copy so the shipped asset stays link-dead-free
+# when application.messages is off.
+if kubectl get deploy -n mb-messages messages-frontend >/dev/null 2>&1; then
+  TMP_HEADER="$(mktemp)"
+  sed 's/var MAIL_ENABLED = false;/var MAIL_ENABLED = true;/' "${HEADER_JS}" > "${TMP_HEADER}"
+  HEADER_JS="${TMP_HEADER}"
+  echo "==> messages app detected — enabling the Mail nav item"
+fi
+
 # --- Static SPAs: overwrite the already-injected button file -----------------
 # patch_static <ns> <cm> <deploy...> — restarts exactly the deployments that
 # mount the configmap and waits for each.
@@ -75,5 +85,10 @@ upload_header_js mb-nextcloud
 upload_header_js mb-grist
 upload_header_js mb-docs
 upload_header_js mb-bureaublad
+# Optional app: only when the messages namespace exists (its own chart carries
+# the header sidecar; this uploads the JS it serves).
+if kubectl get ns mb-messages >/dev/null 2>&1; then
+  upload_header_js mb-messages
+fi
 
 echo "==> Done — header published (sidecars pick up configmap changes within ~1 min)"

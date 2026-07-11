@@ -1,0 +1,122 @@
+diff --git a/helmfile/apps/keycloak/keycloak.yaml.gotmpl b/helmfile/apps/keycloak/keycloak.yaml.gotmpl
+index 5e284cb..6ce73a7 100644
+--- a/helmfile/apps/keycloak/keycloak.yaml.gotmpl
++++ b/helmfile/apps/keycloak/keycloak.yaml.gotmpl
+@@ -52,6 +52,10 @@ extraDeploy:
+       MB_CLIENT_SECRET_NEXTCLOUD: {{ .Values.authentication.client.nextcloud.client_secret | quote }}
+       MB_CLIENT_SECRET_OPENPROJECT: {{ .Values.authentication.client.openproject.client_secret | quote }}
+       MB_CLIENT_SECRET_DOCS: {{ .Values.authentication.client.docs.client_secret | quote }}
++      {{- if .Values.application.messages.enabled }}
++      MB_CLIENT_SECRET_MESSAGES: {{ .Values.authentication.client.messages.client_secret | quote }}
++      MB_CLIENT_SECRET_MESSAGES_REST_API: {{ .Values.authentication.client.messagesRestApi.client_secret | quote }}
++      {{- end }}
+       MB_CLIENT_SECRET_BUREAUBLAD: {{ .Values.authentication.client.bureaublad.client_secret | quote }}
+       {{- if eq .Environment.Name "demo" }}
+       {{- range $user := .Values.user }}
+@@ -532,6 +536,77 @@ keycloakConfigCli:
+               "backchannel.logout.revoke.offline.tokens": "false"
+             }
+           },
++          {{- if .Values.application.messages.enabled }}
++          {
++            "clientId": "{{ .Values.authentication.client.messages.client_id }}",
++            "name": "Mail",
++            "description": "La Suite Messages webmail",
++            "rootUrl": "https://{{ .Values.global.hostname.messages }}.{{ .Values.global.domain }}",
++            "adminUrl": "https://{{ .Values.global.hostname.messages }}.{{ .Values.global.domain }}",
++            "baseUrl": "https://{{ .Values.global.hostname.messages }}.{{ .Values.global.domain }}",
++            "enabled": true,
++            "alwaysDisplayInConsole": true,
++            "clientAuthenticatorType": "client-secret",
++            "secret": "$(env:MB_CLIENT_SECRET_MESSAGES)",
++            "redirectUris": [
++              "/*"
++            ],
++            "webOrigins": [
++              "https://{{ .Values.global.hostname.messages }}.{{ .Values.global.domain }}"
++            ],
++            "notBefore": 0,
++            "bearerOnly": false,
++            "consentRequired": false,
++            "standardFlowEnabled": true,
++            "implicitFlowEnabled": false,
++            "directAccessGrantsEnabled": false,
++            "serviceAccountsEnabled": false,
++            "publicClient": false,
++            "frontchannelLogout": true,
++            "protocol": "openid-connect",
++            "attributes": {
++              "realm_client": "false",
++              "oidc.ciba.grant.enabled": "false",
++              "backchannel.logout.session.required": "true",
++              "backchannel.logout.url": "https://{{ .Values.global.hostname.messages }}.{{ .Values.global.domain }}/api/v1.0/logout/",
++              "standard.token.exchange.enabled": "false",
++              "frontchannel.logout.url": "https://{{ .Values.global.hostname.messages }}.{{ .Values.global.domain }}/api/v1.0/logout/",
++              "post.logout.redirect.uris": "https://{{ .Values.global.hostname.messages }}.{{ .Values.global.domain }}/*",
++              "frontchannel.logout.session.required": "false",
++              "oauth2.device.authorization.grant.enabled": "false",
++              "display.on.consent.screen": "false",
++              "backchannel.logout.revoke.offline.tokens": "false"
++            }
++          },
++          {
++            "clientId": "{{ .Values.authentication.client.messagesRestApi.client_id }}",
++            "name": "Messages provisioning",
++            "description": "Service account the Messages backend uses for mailbox/group provisioning",
++            "enabled": true,
++            "alwaysDisplayInConsole": false,
++            "clientAuthenticatorType": "client-secret",
++            "secret": "$(env:MB_CLIENT_SECRET_MESSAGES_REST_API)",
++            "redirectUris": [],
++            "webOrigins": [],
++            "notBefore": 0,
++            "bearerOnly": false,
++            "consentRequired": false,
++            "standardFlowEnabled": false,
++            "implicitFlowEnabled": false,
++            "directAccessGrantsEnabled": false,
++            "serviceAccountsEnabled": true,
++            "publicClient": false,
++            "frontchannelLogout": false,
++            "protocol": "openid-connect",
++            "attributes": {
++              "realm_client": "false",
++              "oidc.ciba.grant.enabled": "false",
++              "standard.token.exchange.enabled": "false",
++              "oauth2.device.authorization.grant.enabled": "false",
++              "display.on.consent.screen": "false"
++            }
++          },
++          {{- end }}
+           {
+             "clientId": "{{ .Values.authentication.client.bureaublad.client_id }}",
+             "name": "bureaublad",
+@@ -674,8 +749,19 @@ keycloakConfigCli:
+             ]
+           }
+         },
+-        {{- if eq .Environment.Name "demo" }}
++        {{- if or (eq .Environment.Name "demo") .Values.application.messages.enabled }}
+         "users" : [
++          {{- if .Values.application.messages.enabled }}
++          {
++            "username" : "service-account-{{ .Values.authentication.client.messagesRestApi.client_id }}",
++            "enabled" : true,
++            "serviceAccountClientId" : "{{ .Values.authentication.client.messagesRestApi.client_id }}",
++            "clientRoles" : {
++              "realm-management" : [ "query-users", "manage-users", "view-users" ]
++            }
++          }{{- if eq .Environment.Name "demo" }},{{- end }}
++          {{- end }}
++          {{- if eq .Environment.Name "demo" }}
+           {{- $users := .Values.user }}
+           {{- range $index, $user := $users }}
+           {
+@@ -692,6 +778,7 @@ keycloakConfigCli:
+             "enabled" : true
+           }{{- if lt $index (sub (len $users) 1) }},{{- end }}
+           {{- end }}
++          {{- end }}
+         ],
+         {{- end }}
+         "internationalizationEnabled": true,

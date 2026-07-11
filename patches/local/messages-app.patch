@@ -1,0 +1,1354 @@
+diff --git a/helmfile.yaml.gotmpl b/helmfile.yaml.gotmpl
+index 8f861c4..265d717 100644
+--- a/helmfile.yaml.gotmpl
++++ b/helmfile.yaml.gotmpl
+@@ -47,6 +47,8 @@ helmfiles:
+     values: *appvalues
+   - path: "helmfile/apps/docs/helmfile-child.yaml.gotmpl"
+     values: *appvalues
++  - path: "helmfile/apps/messages/helmfile-child.yaml.gotmpl"
++    values: *appvalues
+   - path: "helmfile/apps/drive/helmfile-child.yaml.gotmpl"
+     values: *appvalues
+   - path: "helmfile/apps/bureaublad/helmfile-child.yaml.gotmpl"
+diff --git a/helmfile/apps/messages/charts/messages/Chart.yaml b/helmfile/apps/messages/charts/messages/Chart.yaml
+new file mode 100644
+index 0000000..12e9506
+--- /dev/null
++++ b/helmfile/apps/messages/charts/messages/Chart.yaml
+@@ -0,0 +1,15 @@
++apiVersion: v2
++name: messages
++description: "La Suite Messages: JMAP-inspired webmail (backend, worker, frontend, inbound/outbound Postfix MTAs, single-node OpenSearch)."
++icon: https://github.com/suitenumerique/messages/raw/main/src/frontend/public/favicon.ico
++keywords:
++  - email
++  - webmail
++  - jmap
++maintainers:
++  - name: open-suite
++    url: "https://github.com/open-suite/open-suite"
++sources:
++  - https://github.com/suitenumerique/messages
++version: 0.1.0
++appVersion: "0.8.0"
+diff --git a/helmfile/apps/messages/charts/messages/templates/_helpers.tpl b/helmfile/apps/messages/charts/messages/templates/_helpers.tpl
+new file mode 100644
+index 0000000..b997a8d
+--- /dev/null
++++ b/helmfile/apps/messages/charts/messages/templates/_helpers.tpl
+@@ -0,0 +1,25 @@
++{{/* Standard labels for a component. Usage:
++     {{ include "messages.labels" (dict "component" "backend" "context" $) }} */}}
++{{- define "messages.labels" -}}
++app.kubernetes.io/name: messages
++app.kubernetes.io/instance: {{ .context.Release.Name }}
++app.kubernetes.io/component: {{ .component }}
++app.kubernetes.io/managed-by: Helm
++{{- with .context.Values.commonLabels }}
++{{ toYaml . }}
++{{- end }}
++{{- end -}}
++
++{{/* Selector labels (stable subset). */}}
++{{- define "messages.selectorLabels" -}}
++app.kubernetes.io/name: messages
++app.kubernetes.io/instance: {{ .context.Release.Name }}
++app.kubernetes.io/component: {{ .component }}
++{{- end -}}
++
++{{/* Image reference for a component under .Values.image. */}}
++{{- define "messages.image" -}}
++{{- $img := index .context.Values.image .component -}}
++{{- $registry := $img.registry | default .context.Values.image.registry -}}
++{{- printf "%s/%s:%s" $registry $img.repository $img.tag -}}
++{{- end -}}
+diff --git a/helmfile/apps/messages/charts/messages/templates/backend-deployment.yaml b/helmfile/apps/messages/charts/messages/templates/backend-deployment.yaml
+new file mode 100644
+index 0000000..492e65c
+--- /dev/null
++++ b/helmfile/apps/messages/charts/messages/templates/backend-deployment.yaml
+@@ -0,0 +1,42 @@
++apiVersion: apps/v1
++kind: Deployment
++metadata:
++  name: {{ .Release.Name }}-backend
++  namespace: {{ .Release.Namespace | quote }}
++  labels: {{- include "messages.labels" (dict "component" "backend" "context" $) | nindent 4 }}
++spec:
++  replicas: {{ .Values.backend.replicaCount }}
++  selector:
++    matchLabels: {{- include "messages.selectorLabels" (dict "component" "backend" "context" $) | nindent 6 }}
++  template:
++    metadata:
++      labels: {{- include "messages.labels" (dict "component" "backend" "context" $) | nindent 8 }}
++      annotations:
++        checksum/env: {{ .Values.backend.envVars | toYaml | sha256sum }}
++    spec:
++      containers:
++        - name: backend
++          image: {{ include "messages.image" (dict "component" "backend" "context" $) }}
++          ports:
++            - name: http
++              containerPort: 8000
++              protocol: TCP
++          envFrom:
++            - secretRef:
++                name: {{ .Release.Name }}-backend-env
++          # /__heartbeat__/ checks the DB connection; it is SSL-redirect exempt
++          # and the pod IP is in ALLOWED_HOSTS (Production adds
++          # gethostbyname(hostname)), so a plain httpGet works.
++          livenessProbe:
++            httpGet:
++              path: /__heartbeat__/
++              port: http
++            initialDelaySeconds: 30
++            periodSeconds: 15
++          readinessProbe:
++            httpGet:
++              path: /__heartbeat__/
++              port: http
++            initialDelaySeconds: 10
++            periodSeconds: 10
++          resources: {{ .Values.backend.resources | toYaml | nindent 12 }}
+diff --git a/helmfile/apps/messages/charts/messages/templates/backend-secret.yaml b/helmfile/apps/messages/charts/messages/templates/backend-secret.yaml
+new file mode 100644
+index 0000000..23accc7
+--- /dev/null
++++ b/helmfile/apps/messages/charts/messages/templates/backend-secret.yaml
+@@ -0,0 +1,11 @@
++apiVersion: v1
++kind: Secret
++metadata:
++  name: {{ .Release.Name }}-backend-env
++  namespace: {{ .Release.Namespace | quote }}
++  labels: {{- include "messages.labels" (dict "component" "backend" "context" $) | nindent 4 }}
++type: Opaque
++stringData:
++  {{- range $k, $v := .Values.backend.envVars }}
++  {{ $k }}: {{ $v | quote }}
++  {{- end }}
+diff --git a/helmfile/apps/messages/charts/messages/templates/backend-service.yaml b/helmfile/apps/messages/charts/messages/templates/backend-service.yaml
+new file mode 100644
+index 0000000..0aeca65
+--- /dev/null
++++ b/helmfile/apps/messages/charts/messages/templates/backend-service.yaml
+@@ -0,0 +1,14 @@
++apiVersion: v1
++kind: Service
++metadata:
++  name: {{ .Release.Name }}-backend
++  namespace: {{ .Release.Namespace | quote }}
++  labels: {{- include "messages.labels" (dict "component" "backend" "context" $) | nindent 4 }}
++spec:
++  type: ClusterIP
++  selector: {{- include "messages.selectorLabels" (dict "component" "backend" "context" $) | nindent 4 }}
++  ports:
++    - name: http
++      port: 8000
++      targetPort: http
++      protocol: TCP
+diff --git a/helmfile/apps/messages/charts/messages/templates/frontend-deployment.yaml b/helmfile/apps/messages/charts/messages/templates/frontend-deployment.yaml
+new file mode 100644
+index 0000000..6516f54
+--- /dev/null
++++ b/helmfile/apps/messages/charts/messages/templates/frontend-deployment.yaml
+@@ -0,0 +1,64 @@
++apiVersion: apps/v1
++kind: Deployment
++metadata:
++  name: {{ .Release.Name }}-frontend
++  namespace: {{ .Release.Namespace | quote }}
++  labels: {{- include "messages.labels" (dict "component" "frontend" "context" $) | nindent 4 }}
++spec:
++  replicas: {{ .Values.frontend.replicaCount }}
++  selector:
++    matchLabels: {{- include "messages.selectorLabels" (dict "component" "frontend" "context" $) | nindent 6 }}
++  template:
++    metadata:
++      labels: {{- include "messages.labels" (dict "component" "frontend" "context" $) | nindent 8 }}
++    spec:
++      containers:
++        - name: frontend
++          image: {{ include "messages.image" (dict "component" "frontend" "context" $) }}
++          env:
++            # Caddy inside the image proxies /api, /admin, /static and
++            # /__heartbeat__ to this address; everything else is the SPA.
++            - name: MESSAGES_FRONTEND_BACKEND_SERVER
++              value: "{{ .Release.Name }}-backend:8000"
++          ports:
++            - name: http
++              containerPort: 8080
++              protocol: TCP
++          livenessProbe:
++            httpGet:
++              path: /__lbheartbeat__
++              port: http
++            initialDelaySeconds: 5
++            periodSeconds: 15
++          readinessProbe:
++            httpGet:
++              path: /__lbheartbeat__
++              port: http
++            initialDelaySeconds: 3
++            periodSeconds: 10
++          resources: {{ .Values.frontend.resources | toYaml | nindent 12 }}
++        # Same-origin Open Suite header: nginx proxies the SPA and sub_filters
++        # a <script> tag into every HTML page — the same pattern the other
++        # apps get via patches/local/opensuite-header-sidecar.patch. The
++        # header JS configmap is uploaded by 09-portal-header.sh (optional:
++        # pages render headerless until it exists).
++        - name: opensuite-header
++          image: {{ .Values.frontend.headerSidecar.image | quote }}
++          ports:
++            - name: hdr
++              containerPort: 8091
++              protocol: TCP
++          volumeMounts:
++            - name: opensuite-header-conf
++              mountPath: /etc/nginx/nginx.conf
++              subPath: nginx.conf
++            - name: opensuite-header-js
++              mountPath: /usr/share/opensuite
++      volumes:
++        - name: opensuite-header-conf
++          configMap:
++            name: opensuite-header-conf
++        - name: opensuite-header-js
++          configMap:
++            name: opensuite-header-js
++            optional: true
+diff --git a/helmfile/apps/messages/charts/messages/templates/frontend-service.yaml b/helmfile/apps/messages/charts/messages/templates/frontend-service.yaml
+new file mode 100644
+index 0000000..dee9aec
+--- /dev/null
++++ b/helmfile/apps/messages/charts/messages/templates/frontend-service.yaml
+@@ -0,0 +1,15 @@
++apiVersion: v1
++kind: Service
++metadata:
++  name: {{ .Release.Name }}-frontend
++  namespace: {{ .Release.Namespace | quote }}
++  labels: {{- include "messages.labels" (dict "component" "frontend" "context" $) | nindent 4 }}
++spec:
++  type: ClusterIP
++  selector: {{- include "messages.selectorLabels" (dict "component" "frontend" "context" $) | nindent 4 }}
++  ports:
++    - name: http
++      port: 8080
++      # The header sidecar fronts the app container (see frontend-deployment).
++      targetPort: hdr
++      protocol: TCP
+diff --git a/helmfile/apps/messages/charts/messages/templates/header-configmap.yaml b/helmfile/apps/messages/charts/messages/templates/header-configmap.yaml
+new file mode 100644
+index 0000000..0eae212
+--- /dev/null
++++ b/helmfile/apps/messages/charts/messages/templates/header-configmap.yaml
+@@ -0,0 +1,70 @@
++# nginx config for the Open Suite header sidecar — identical to the
++# opensuite-header-conf the other apps get via
++# patches/local/opensuite-header-sidecar.patch, with the upstream port set to
++# this app's Caddy (8080).
++apiVersion: v1
++kind: ConfigMap
++metadata:
++  name: opensuite-header-conf
++  namespace: {{ .Release.Namespace | quote }}
++  labels:
++    app.kubernetes.io/part-of: open-suite
++    app.kubernetes.io/component: opensuite-header
++data:
++  nginx.conf: |
++    worker_processes 1;
++    pid /tmp/nginx.pid;            # nginx-unprivileged runs as uid 101
++    events { worker_connections 1024; }
++    http {
++      include /etc/nginx/mime.types;
++      # Upstream compression is disabled so sub_filter can inspect HTML.
++      # Recompress eligible responses here before sending them to clients.
++      gzip on;
++      gzip_vary on;
++      gzip_proxied any;
++      gzip_min_length 1024;
++      gzip_comp_level 5;
++      gzip_types text/plain text/css text/javascript text/xml application/javascript application/json application/xml image/svg+xml application/wasm;
++      client_body_temp_path /tmp/client_temp;
++      proxy_temp_path /tmp/proxy_temp;
++      fastcgi_temp_path /tmp/fastcgi_temp;
++      uwsgi_temp_path /tmp/uwsgi_temp;
++      scgi_temp_path /tmp/scgi_temp;
++      # Carry over the upstream CSP nonce so the injected script runs under
++      # 'strict-dynamic'; empty/harmless when there's no CSP.
++      map $upstream_http_content_security_policy $ko_nonce {
++        default "";
++        "~nonce-(?<n>[A-Za-z0-9+/=_-]+)" $n;
++      }
++      map $http_upgrade $connection_upgrade {
++        default upgrade;
++        "" close;
++      }
++      server {
++        listen 8091;
++        client_max_body_size 0;
++        location = /opensuite-header.js {
++          default_type application/javascript;
++          # no-cache = revalidate per page view (cheap 304). The JS configmap is
++          # updated in place by 09-portal-header.sh; there is no versioned URL.
++          add_header Cache-Control "no-cache";
++          alias /usr/share/opensuite/opensuite-header.js;
++        }
++        location / {
++          proxy_pass http://127.0.0.1:8080;
++          proxy_http_version 1.1;
++          proxy_set_header Upgrade $http_upgrade;
++          proxy_set_header Connection $connection_upgrade;
++          proxy_buffering off;
++          proxy_set_header Host $host;
++          proxy_set_header X-Real-IP $remote_addr;
++          proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
++          proxy_set_header X-Forwarded-Proto $scheme;
++          proxy_set_header Accept-Encoding "";   # so sub_filter can rewrite the body
++          proxy_read_timeout 300s;
++          proxy_redirect off;
++          sub_filter '</body>' '<script nonce="$ko_nonce" src="/opensuite-header.js"></script></body>';
++          sub_filter_once on;
++        }
++      }
++    }
+diff --git a/helmfile/apps/messages/charts/messages/templates/ingress.yaml b/helmfile/apps/messages/charts/messages/templates/ingress.yaml
+new file mode 100644
+index 0000000..7bfb47f
+--- /dev/null
++++ b/helmfile/apps/messages/charts/messages/templates/ingress.yaml
+@@ -0,0 +1,34 @@
++{{- if .Values.ingress.enabled }}
++apiVersion: networking.k8s.io/v1
++kind: Ingress
++metadata:
++  name: {{ .Release.Name }}
++  namespace: {{ .Release.Namespace | quote }}
++  labels: {{- include "messages.labels" (dict "component" "frontend" "context" $) | nindent 4 }}
++  {{- with .Values.ingress.annotations }}
++  annotations: {{ . | toYaml | nindent 4 }}
++  {{- end }}
++spec:
++  {{- with .Values.ingress.ingressClassName }}
++  ingressClassName: {{ . | quote }}
++  {{- end }}
++  rules:
++    - host: {{ .Values.ingress.hostname | quote }}
++      http:
++        paths:
++          # The frontend's Caddy fans out /api, /admin and /static to the
++          # backend itself, so one route covers the whole app.
++          - path: /
++            pathType: Prefix
++            backend:
++              service:
++                name: {{ .Release.Name }}-frontend
++                port:
++                  name: http
++  {{- if .Values.ingress.tls }}
++  tls:
++    - hosts:
++        - {{ .Values.ingress.hostname | quote }}
++      secretName: {{ printf "%s-tls" .Values.ingress.hostname | quote }}
++  {{- end }}
++{{- end }}
+diff --git a/helmfile/apps/messages/charts/messages/templates/migrate-job.yaml b/helmfile/apps/messages/charts/messages/templates/migrate-job.yaml
+new file mode 100644
+index 0000000..be1424f
+--- /dev/null
++++ b/helmfile/apps/messages/charts/messages/templates/migrate-job.yaml
+@@ -0,0 +1,24 @@
++# Django migrations, re-run on every helmfile apply (releaseSuffix changes per
++# release render). Runs as a plain Job rather than a helm hook so a bare
++# `helmfile apply` owns it and a failed migration surfaces in the release.
++apiVersion: batch/v1
++kind: Job
++metadata:
++  name: {{ .Release.Name }}-migrate-{{ .Values.jobs.releaseSuffix }}
++  namespace: {{ .Release.Namespace | quote }}
++  labels: {{- include "messages.labels" (dict "component" "migrate" "context" $) | nindent 4 }}
++spec:
++  backoffLimit: 3
++  ttlSecondsAfterFinished: 3600
++  template:
++    metadata:
++      labels: {{- include "messages.labels" (dict "component" "migrate" "context" $) | nindent 8 }}
++    spec:
++      restartPolicy: Never
++      containers:
++        - name: migrate
++          image: {{ include "messages.image" (dict "component" "backend" "context" $) }}
++          command: ["python", "manage.py", "migrate", "--no-input"]
++          envFrom:
++            - secretRef:
++                name: {{ .Release.Name }}-backend-env
+diff --git a/helmfile/apps/messages/charts/messages/templates/mta-in-deployment.yaml b/helmfile/apps/messages/charts/messages/templates/mta-in-deployment.yaml
+new file mode 100644
+index 0000000..137c369
+--- /dev/null
++++ b/helmfile/apps/messages/charts/messages/templates/mta-in-deployment.yaml
+@@ -0,0 +1,43 @@
++apiVersion: apps/v1
++kind: Deployment
++metadata:
++  name: {{ .Release.Name }}-mta-in
++  namespace: {{ .Release.Namespace | quote }}
++  labels: {{- include "messages.labels" (dict "component" "mta-in" "context" $) | nindent 4 }}
++spec:
++  replicas: {{ .Values.mtaIn.replicaCount }}
++  strategy:
++    # hostPort 25 can only be bound by one pod per node.
++    type: Recreate
++  selector:
++    matchLabels: {{- include "messages.selectorLabels" (dict "component" "mta-in" "context" $) | nindent 6 }}
++  template:
++    metadata:
++      labels: {{- include "messages.labels" (dict "component" "mta-in" "context" $) | nindent 8 }}
++      annotations:
++        checksum/env: {{ .Values.mtaIn.envVars | toYaml | sha256sum }}
++    spec:
++      containers:
++        - name: mta-in
++          image: {{ include "messages.image" (dict "component" "mtaIn" "context" $) }}
++          ports:
++            - name: smtp
++              containerPort: 25
++              # Inbound mail lands on the node's public IP directly (single-node
++              # deploy; Traefik carries no raw-TCP entrypoint for SMTP).
++              hostPort: {{ .Values.mtaIn.hostPort }}
++              protocol: TCP
++          envFrom:
++            - secretRef:
++                name: {{ .Release.Name }}-mta-in-env
++          readinessProbe:
++            tcpSocket:
++              port: smtp
++            initialDelaySeconds: 5
++            periodSeconds: 10
++          livenessProbe:
++            tcpSocket:
++              port: smtp
++            initialDelaySeconds: 15
++            periodSeconds: 20
++          resources: {{ .Values.mtaIn.resources | toYaml | nindent 12 }}
+diff --git a/helmfile/apps/messages/charts/messages/templates/mta-in-secret.yaml b/helmfile/apps/messages/charts/messages/templates/mta-in-secret.yaml
+new file mode 100644
+index 0000000..10f5b1a
+--- /dev/null
++++ b/helmfile/apps/messages/charts/messages/templates/mta-in-secret.yaml
+@@ -0,0 +1,11 @@
++apiVersion: v1
++kind: Secret
++metadata:
++  name: {{ .Release.Name }}-mta-in-env
++  namespace: {{ .Release.Namespace | quote }}
++  labels: {{- include "messages.labels" (dict "component" "mta-in" "context" $) | nindent 4 }}
++type: Opaque
++stringData:
++  {{- range $k, $v := .Values.mtaIn.envVars }}
++  {{ $k }}: {{ $v | quote }}
++  {{- end }}
+diff --git a/helmfile/apps/messages/charts/messages/templates/mta-out-deployment.yaml b/helmfile/apps/messages/charts/messages/templates/mta-out-deployment.yaml
+new file mode 100644
+index 0000000..5d2f114
+--- /dev/null
++++ b/helmfile/apps/messages/charts/messages/templates/mta-out-deployment.yaml
+@@ -0,0 +1,58 @@
++apiVersion: apps/v1
++kind: Deployment
++metadata:
++  name: {{ .Release.Name }}-mta-out
++  namespace: {{ .Release.Namespace | quote }}
++  labels: {{- include "messages.labels" (dict "component" "mta-out" "context" $) | nindent 4 }}
++spec:
++  replicas: {{ .Values.mtaOut.replicaCount }}
++  selector:
++    matchLabels: {{- include "messages.selectorLabels" (dict "component" "mta-out" "context" $) | nindent 6 }}
++  template:
++    metadata:
++      labels: {{- include "messages.labels" (dict "component" "mta-out" "context" $) | nindent 8 }}
++      annotations:
++        checksum/env: {{ .Values.mtaOut.envVars | toYaml | sha256sum }}
++    spec:
++      containers:
++        - name: mta-out
++          image: {{ include "messages.image" (dict "component" "mtaOut" "context" $) }}
++          # Repairs for the published 0.8.0 image (all fixed upstream on main):
++          # /var/spool/postfix/etc is missing (the entrypoint needs it for the
++          # SASL db); private/public ship root-owned, which kills postfix
++          # master; and main.cf.j2 indents the relay-auth lines, which postfix
++          # folds into the relayhost value as continuation lines, silently
++          # disabling SASL auth to the smarthost.
++          command:
++            - bash
++            - -c
++            - >-
++              mkdir -p /var/spool/postfix/etc &&
++              chown -R postfix /var/spool/postfix/private /var/spool/postfix/public &&
++              chgrp -R postdrop /var/spool/postfix/public &&
++              sed -i 's/^ //' /app/etc/main.cf.j2 &&
++              exec /usr/local/bin/entrypoint.sh
++          ports:
++            - name: submission
++              containerPort: 587
++              protocol: TCP
++          envFrom:
++            - secretRef:
++                name: {{ .Release.Name }}-mta-out-env
++            # Smarthost relay credentials (SMTP_RELAY_HOST/_USERNAME/_PASSWORD),
++            # created out-of-band — see overlays/messages/ in the open-suite
++            # repo. Optional: without it mta-out attempts direct MX delivery.
++            - secretRef:
++                name: {{ .Values.mtaOut.relaySecretName }}
++                optional: true
++          readinessProbe:
++            tcpSocket:
++              port: submission
++            initialDelaySeconds: 5
++            periodSeconds: 10
++          livenessProbe:
++            tcpSocket:
++              port: submission
++            initialDelaySeconds: 15
++            periodSeconds: 20
++          resources: {{ .Values.mtaOut.resources | toYaml | nindent 12 }}
+diff --git a/helmfile/apps/messages/charts/messages/templates/mta-out-networkpolicy.yaml b/helmfile/apps/messages/charts/messages/templates/mta-out-networkpolicy.yaml
+new file mode 100644
+index 0000000..25d0ac4
+--- /dev/null
++++ b/helmfile/apps/messages/charts/messages/templates/mta-out-networkpolicy.yaml
+@@ -0,0 +1,16 @@
++# The namespace-wide egress whitelist (02-networking.sh) has no rule for
++# external SMTP submission; grant mta-out egress to the smarthost relay port.
++apiVersion: networking.k8s.io/v1
++kind: NetworkPolicy
++metadata:
++  name: {{ .Release.Name }}-mta-out-relay-egress
++  namespace: {{ .Release.Namespace | quote }}
++  labels: {{- include "messages.labels" (dict "component" "mta-out" "context" $) | nindent 4 }}
++spec:
++  podSelector:
++    matchLabels: {{- include "messages.selectorLabels" (dict "component" "mta-out" "context" $) | nindent 6 }}
++  policyTypes: [Egress]
++  egress:
++    - ports:
++        - port: 587
++          protocol: TCP
+diff --git a/helmfile/apps/messages/charts/messages/templates/mta-out-secret.yaml b/helmfile/apps/messages/charts/messages/templates/mta-out-secret.yaml
+new file mode 100644
+index 0000000..8d2a552
+--- /dev/null
++++ b/helmfile/apps/messages/charts/messages/templates/mta-out-secret.yaml
+@@ -0,0 +1,11 @@
++apiVersion: v1
++kind: Secret
++metadata:
++  name: {{ .Release.Name }}-mta-out-env
++  namespace: {{ .Release.Namespace | quote }}
++  labels: {{- include "messages.labels" (dict "component" "mta-out" "context" $) | nindent 4 }}
++type: Opaque
++stringData:
++  {{- range $k, $v := .Values.mtaOut.envVars }}
++  {{ $k }}: {{ $v | quote }}
++  {{- end }}
+diff --git a/helmfile/apps/messages/charts/messages/templates/mta-out-service.yaml b/helmfile/apps/messages/charts/messages/templates/mta-out-service.yaml
+new file mode 100644
+index 0000000..6c04c47
+--- /dev/null
++++ b/helmfile/apps/messages/charts/messages/templates/mta-out-service.yaml
+@@ -0,0 +1,14 @@
++apiVersion: v1
++kind: Service
++metadata:
++  name: {{ .Release.Name }}-mta-out
++  namespace: {{ .Release.Namespace | quote }}
++  labels: {{- include "messages.labels" (dict "component" "mta-out" "context" $) | nindent 4 }}
++spec:
++  type: ClusterIP
++  selector: {{- include "messages.selectorLabels" (dict "component" "mta-out" "context" $) | nindent 4 }}
++  ports:
++    - name: submission
++      port: 587
++      targetPort: submission
++      protocol: TCP
+diff --git a/helmfile/apps/messages/charts/messages/templates/opensearch-service.yaml b/helmfile/apps/messages/charts/messages/templates/opensearch-service.yaml
+new file mode 100644
+index 0000000..69043be
+--- /dev/null
++++ b/helmfile/apps/messages/charts/messages/templates/opensearch-service.yaml
+@@ -0,0 +1,14 @@
++apiVersion: v1
++kind: Service
++metadata:
++  name: {{ .Release.Name }}-opensearch
++  namespace: {{ .Release.Namespace | quote }}
++  labels: {{- include "messages.labels" (dict "component" "opensearch" "context" $) | nindent 4 }}
++spec:
++  type: ClusterIP
++  selector: {{- include "messages.selectorLabels" (dict "component" "opensearch" "context" $) | nindent 4 }}
++  ports:
++    - name: http
++      port: 9200
++      targetPort: http
++      protocol: TCP
+diff --git a/helmfile/apps/messages/charts/messages/templates/opensearch-statefulset.yaml b/helmfile/apps/messages/charts/messages/templates/opensearch-statefulset.yaml
+new file mode 100644
+index 0000000..54c02d9
+--- /dev/null
++++ b/helmfile/apps/messages/charts/messages/templates/opensearch-statefulset.yaml
+@@ -0,0 +1,68 @@
++# Single-node OpenSearch for message search. The vendored infra carries no
++# OpenSearch chart, and at single-VPS scale one node with the security plugin
++# disabled (cluster-internal traffic only) is the honest deployment.
++apiVersion: apps/v1
++kind: StatefulSet
++metadata:
++  name: {{ .Release.Name }}-opensearch
++  namespace: {{ .Release.Namespace | quote }}
++  labels: {{- include "messages.labels" (dict "component" "opensearch" "context" $) | nindent 4 }}
++spec:
++  serviceName: {{ .Release.Name }}-opensearch
++  replicas: 1
++  selector:
++    matchLabels: {{- include "messages.selectorLabels" (dict "component" "opensearch" "context" $) | nindent 6 }}
++  template:
++    metadata:
++      labels: {{- include "messages.labels" (dict "component" "opensearch" "context" $) | nindent 8 }}
++    spec:
++      initContainers:
++        # OpenSearch refuses to start below vm.max_map_count=262144; stock
++        # Ubuntu ships 65530. Node-level sysctl, hence the privileged init.
++        - name: sysctl
++          image: busybox:1.36
++          command: ["sysctl", "-w", "vm.max_map_count=262144"]
++          securityContext:
++            privileged: true
++      containers:
++        - name: opensearch
++          image: {{ include "messages.image" (dict "component" "opensearch" "context" $) }}
++          env:
++            - name: discovery.type
++              value: "single-node"
++            - name: DISABLE_INSTALL_DEMO_CONFIG
++              value: "true"
++            - name: DISABLE_SECURITY_PLUGIN
++              value: "true"
++            - name: OPENSEARCH_JAVA_OPTS
++              value: {{ .Values.opensearch.javaOpts | quote }}
++          ports:
++            - name: http
++              containerPort: 9200
++              protocol: TCP
++          volumeMounts:
++            - name: data
++              mountPath: /usr/share/opensearch/data
++          readinessProbe:
++            httpGet:
++              path: /_cluster/health
++              port: http
++            initialDelaySeconds: 20
++            periodSeconds: 10
++          livenessProbe:
++            tcpSocket:
++              port: http
++            initialDelaySeconds: 60
++            periodSeconds: 20
++          resources: {{ .Values.opensearch.resources | toYaml | nindent 12 }}
++  volumeClaimTemplates:
++    - metadata:
++        name: data
++      spec:
++        accessModes: ["ReadWriteOnce"]
++        {{- with .Values.opensearch.persistence.storageClass }}
++        storageClassName: {{ . | quote }}
++        {{- end }}
++        resources:
++          requests:
++            storage: {{ .Values.opensearch.persistence.size | quote }}
+diff --git a/helmfile/apps/messages/charts/messages/templates/traefik-middleware.yaml b/helmfile/apps/messages/charts/messages/templates/traefik-middleware.yaml
+new file mode 100644
+index 0000000..acfb124
+--- /dev/null
++++ b/helmfile/apps/messages/charts/messages/templates/traefik-middleware.yaml
+@@ -0,0 +1,13 @@
++{{- if eq .Values.cluster.ingress.type "traefik" }}
++apiVersion: traefik.io/v1alpha1
++kind: Middleware
++metadata:
++  name: hsts-header
++  namespace: {{ .Release.Namespace | quote }}
++  labels: {{- include "messages.labels" (dict "component" "messages" "context" $) | nindent 4 }}
++spec:
++  headers:
++    stsSeconds: 31536000
++    stsPreload: true
++    stsIncludeSubdomains: true
++{{- end }}
+diff --git a/helmfile/apps/messages/charts/messages/templates/worker-deployment.yaml b/helmfile/apps/messages/charts/messages/templates/worker-deployment.yaml
+new file mode 100644
+index 0000000..280a606
+--- /dev/null
++++ b/helmfile/apps/messages/charts/messages/templates/worker-deployment.yaml
+@@ -0,0 +1,25 @@
++apiVersion: apps/v1
++kind: Deployment
++metadata:
++  name: {{ .Release.Name }}-worker
++  namespace: {{ .Release.Namespace | quote }}
++  labels: {{- include "messages.labels" (dict "component" "worker" "context" $) | nindent 4 }}
++spec:
++  replicas: {{ .Values.worker.replicaCount }}
++  selector:
++    matchLabels: {{- include "messages.selectorLabels" (dict "component" "worker" "context" $) | nindent 6 }}
++  template:
++    metadata:
++      labels: {{- include "messages.labels" (dict "component" "worker" "context" $) | nindent 8 }}
++      annotations:
++        checksum/env: {{ .Values.backend.envVars | toYaml | sha256sum }}
++    spec:
++      containers:
++        - name: worker
++          image: {{ include "messages.image" (dict "component" "backend" "context" $) }}
++          # Upstream's Celery wrapper (all queues + beat scheduler in one process).
++          command: ["python", "worker.py"]
++          envFrom:
++            - secretRef:
++                name: {{ .Release.Name }}-backend-env
++          resources: {{ .Values.worker.resources | toYaml | nindent 12 }}
+diff --git a/helmfile/apps/messages/charts/messages/values.yaml b/helmfile/apps/messages/charts/messages/values.yaml
+new file mode 100644
+index 0000000..11ac44c
+--- /dev/null
++++ b/helmfile/apps/messages/charts/messages/values.yaml
+@@ -0,0 +1,82 @@
++# Default values for the messages chart. The deploy-time source of truth is
++# ../../values.yaml.gotmpl (rendered by helmfile); these defaults only make
++# `helm lint`/`helm template` work standalone and document the shape.
++
++image:
++  registry: "ghcr.io"
++  backend:
++    repository: "suitenumerique/messages-backend"
++    tag: "0.8.0"
++  frontend:
++    repository: "suitenumerique/messages-frontend"
++    tag: "0.8.0"
++  mtaIn:
++    repository: "suitenumerique/messages-mta-in"
++    tag: "0.8.0"
++  mtaOut:
++    repository: "suitenumerique/messages-mta-out"
++    tag: "0.8.0"
++  opensearch:
++    registry: "docker.io"
++    repository: "opensearchproject/opensearch"
++    tag: "2.19.2"
++
++commonLabels: {}
++
++jobs:
++  # Changed every release so the migrate job re-runs on upgrade.
++  releaseSuffix: "0"
++
++backend:
++  replicaCount: 1
++  # Full Django environment (secrets included) — stored in one Secret that the
++  # backend, worker and migrate job all envFrom.
++  envVars: {}
++  resources: {}
++
++worker:
++  replicaCount: 1
++  resources: {}
++
++frontend:
++  replicaCount: 1
++  resources: {}
++  # Same-origin Open Suite header sidecar (nginx sub_filter), matching the
++  # pattern the other apps get via patches. The header JS configmap is
++  # uploaded by 09-portal-header.sh and optional.
++  headerSidecar:
++    image: "nginxinc/nginx-unprivileged:1.27-alpine"
++
++mtaIn:
++  replicaCount: 1
++  envVars: {}
++  resources: {}
++  # Inbound SMTP: exposed on the node's port 25 (single-node deploy; Traefik
++  # does not carry raw TCP without extra entrypoints).
++  hostPort: 25
++
++mtaOut:
++  replicaCount: 1
++  envVars: {}
++  resources: {}
++  # Optional out-of-band Secret carrying SMTP_RELAY_HOST/_USERNAME/_PASSWORD
++  # for the upstream smarthost (e.g. Brevo).
++  relaySecretName: "messages-mta-out-relay"
++
++opensearch:
++  javaOpts: "-Xms512m -Xmx1g"
++  persistence:
++    size: "8Gi"
++    storageClass: ""
++  resources: {}
++
++ingress:
++  enabled: true
++  hostname: "messages.example.com"
++  ingressClassName: ""
++  annotations: {}
++  tls: true
++
++cluster:
++  ingress:
++    type: "traefik"
+diff --git a/helmfile/apps/messages/helmfile-child.yaml.gotmpl b/helmfile/apps/messages/helmfile-child.yaml.gotmpl
+new file mode 100644
+index 0000000..56a2eb6
+--- /dev/null
++++ b/helmfile/apps/messages/helmfile-child.yaml.gotmpl
+@@ -0,0 +1,54 @@
++bases:
++  - "../../bases/default.yaml.gotmpl"
++
++# La Suite Messages (webmail). Open Suite addition, authored from the upstream
++# suitenumerique/messages compose.yaml/env contract; consumes the published
++# ghcr.io/suitenumerique/messages-* images. Heavy dependency is OpenSearch
++# (runs single-node inside the messages chart at demo scale).
++releases:
++  - name: messages-postgresql
++    chart: ../common/charts/postgresql
++    version: "16.7.18"
++    {{- if .Values.application.messages.namespace }}
++    namespace: {{ .Values.application.messages.namespace }}
++    {{- end }}
++    installed: {{ and (eq .Environment.Name "demo") (.Values.application.messages.enabled) | toYaml }}
++    values:
++      - "values-postgresql.yaml.gotmpl"
++
++  - name: messages-redis
++    chart: ../common/charts/redis
++    version: "21.2.6"
++    {{- if .Values.application.messages.namespace }}
++    namespace: {{ .Values.application.messages.namespace }}
++    {{- end }}
++    installed: {{ and (eq .Environment.Name "demo") (.Values.application.messages.enabled) | toYaml }}
++    values:
++      - "values-redis.yaml.gotmpl"
++
++  - name: messages-minio
++    chart: ../common/charts/minio
++    version: "17.0.11"
++    {{- if .Values.application.messages.namespace }}
++    namespace: {{ .Values.application.messages.namespace }}
++    {{- end }}
++    installed: {{ and (eq .Environment.Name "demo") (.Values.application.messages.enabled) | toYaml }}
++    values:
++      - "../common/values-cluster-ingress.yaml.gotmpl"
++      - "values-minio.yaml.gotmpl"
++
++  - name: messages
++    chart: charts/messages
++    condition: application.messages.enabled
++    {{- if .Values.application.messages.namespace }}
++    namespace: {{ .Values.application.messages.namespace }}
++    {{- end }}
++    {{- if and (eq .Environment.Name "demo") (.Values.application.messages.enabled) }}
++    needs:
++      - {{ if .Values.application.messages.namespace }}{{ .Values.application.messages.namespace }}/{{ end }}messages-postgresql
++      - {{ if .Values.application.messages.namespace }}{{ .Values.application.messages.namespace }}/{{ end }}messages-redis
++      - {{ if .Values.application.messages.namespace }}{{ .Values.application.messages.namespace }}/{{ end }}messages-minio
++    {{- end }}
++    values:
++      - "../common/values-cluster-ingress.yaml.gotmpl"
++      - "values.yaml.gotmpl"
+diff --git a/helmfile/apps/messages/values-minio.yaml.gotmpl b/helmfile/apps/messages/values-minio.yaml.gotmpl
+new file mode 100644
+index 0000000..f9cf01e
+--- /dev/null
++++ b/helmfile/apps/messages/values-minio.yaml.gotmpl
+@@ -0,0 +1,38 @@
++# Overrides for the shared Bitnami MinIO chart (../common/charts/minio).
++# Minimal override file; chart defaults cover the rest.
++global:
++  imageRegistry: {{ (coalesce .Values.container.minio.registry .Values.container.default.registry) | quote }}
++  {{- with (coalesce .Values.container.minio.imagePullSecret .Values.container.default.imagePullSecret) }}
++  imagePullSecrets:
++    - {{ . | quote }}
++  {{- end }}
++  defaultStorageClass: {{ (coalesce .Values.pvc.messages.minio.storageClass .Values.pvc.default.storageClass) | quote }}
++  security:
++    allowInsecureImages: true
++
++clusterDomain: {{ .Values.cluster.networking.domain | default "cluster.local" | quote }}
++
++image:
++  registry: {{ (coalesce .Values.container.minio.registry .Values.container.default.registry) | quote }}
++  repository: {{ .Values.container.minio.repository | default "bitnami/minio" | quote }}
++  tag: {{ .Values.container.minio.tag | default "2025.7.18-debian-12-r0" | quote }}
++
++auth:
++  rootUser: {{ .Values.objectstore.messages.username | quote }}
++  rootPassword: {{ .Values.objectstore.messages.rootPassword | quote }}
++
++defaultBuckets: {{ printf "%s,%s,%s" .Values.objectstore.messages.bucket .Values.objectstore.messages.bucketImports .Values.objectstore.messages.bucketBlobs | quote }}
++
++resourcesPreset: {{ .Values.global.resourcesPreset | quote }}
++podSecurityContext: {{ .Values.security.default.podSecurityContext | toYaml | nindent 2 }}
++containerSecurityContext: {{ .Values.security.default.containerSecurityContext | toYaml | nindent 2 }}
++
++persistence:
++  storageClass: {{ (coalesce .Values.pvc.messages.minio.storageClass .Values.pvc.default.storageClass) | quote }}
++  accessModes: {{ coalesce .Values.pvc.messages.minio.accessModes .Values.pvc.default.accessModes (list "ReadWriteOnce") | toYaml | nindent 4 }}
++  size: {{ coalesce .Values.pvc.messages.minio.size .Values.pvc.default.size "8Gi" }}
++
++# The chart's bundled object-browser console image tag does not exist on
++# Docker Hub; the console is unused here anyway (docs disables it too).
++console:
++  enabled: false
+diff --git a/helmfile/apps/messages/values-postgresql.yaml.gotmpl b/helmfile/apps/messages/values-postgresql.yaml.gotmpl
+new file mode 100644
+index 0000000..5513846
+--- /dev/null
++++ b/helmfile/apps/messages/values-postgresql.yaml.gotmpl
+@@ -0,0 +1,46 @@
++# Overrides for the shared Bitnami PostgreSQL chart (../common/charts/postgresql).
++# Unlike the older apps this is a minimal override file, not a full copy of the
++# chart's values.yaml — the chart's own defaults cover everything else.
++global:
++  imageRegistry: ""
++  {{- with (coalesce .Values.container.postgres.imagePullSecret .Values.container.default.imagePullSecret) }}
++  imagePullSecrets:
++    - {{ . | quote }}
++  {{- end }}
++  defaultStorageClass: {{ coalesce .Values.pvc.messages.postgresql.storageClass .Values.pvc.default.storageClass | quote }}
++  storageClass: {{ coalesce .Values.pvc.messages.postgresql.storageClass .Values.pvc.default.storageClass | quote }}
++  security:
++    allowInsecureImages: true
++
++# Same host name convention as the cnpg-based apps (…-cluster-rw) so
++# database.messages.host works regardless of provider.
++fullnameOverride: "messages-cluster-rw"
++
++clusterDomain: {{ .Values.cluster.networking.domain | default "cluster.local" | quote }}
++
++image:
++  registry: {{ coalesce .Values.container.postgres.registry .Values.container.default.registry | default "docker.io" | quote }}
++  repository: {{ .Values.container.postgres.repository | default "bitnami/postgresql" | quote }}
++  tag: {{ .Values.container.postgres.tag | default "17.5.0-debian-12-r18" | quote }}
++  pullPolicy: Always
++  {{- with (coalesce .Values.container.postgres.imagePullSecret .Values.container.default.imagePullSecret) }}
++  pullSecrets:
++    - {{ . | quote }}
++  {{- end }}
++
++auth:
++  postgresPassword: {{ .Values.database.messages.adminpassword | quote }}
++  username: {{ .Values.database.messages.user | quote }}
++  password: {{ .Values.database.messages.password | quote }}
++  database: {{ .Values.database.messages.name | quote }}
++
++architecture: standalone
++
++primary:
++  resourcesPreset: {{ .Values.global.resourcesPreset | quote }}
++  podSecurityContext: {{ .Values.security.default.podSecurityContext | toYaml | nindent 4 }}
++  containerSecurityContext: {{ .Values.security.default.containerSecurityContext | toYaml | nindent 4 }}
++  persistence:
++    storageClass: {{ coalesce .Values.pvc.messages.postgresql.storageClass .Values.pvc.default.storageClass | quote }}
++    accessModes: {{ coalesce .Values.pvc.messages.postgresql.accessModes .Values.pvc.default.accessModes (list "ReadWriteOnce") | toYaml | nindent 6 }}
++    size: {{ coalesce .Values.pvc.messages.postgresql.size .Values.pvc.default.size "8Gi" }}
+diff --git a/helmfile/apps/messages/values-redis.yaml.gotmpl b/helmfile/apps/messages/values-redis.yaml.gotmpl
+new file mode 100644
+index 0000000..33ce096
+--- /dev/null
++++ b/helmfile/apps/messages/values-redis.yaml.gotmpl
+@@ -0,0 +1,33 @@
++# Overrides for the shared Bitnami Redis chart (../common/charts/redis).
++# Minimal override file; chart defaults cover the rest.
++global:
++  imageRegistry: {{ (coalesce .Values.container.redis.registry .Values.container.default.registry) | quote }}
++  {{- with (coalesce .Values.container.redis.imagePullSecret .Values.container.default.imagePullSecret) }}
++  imagePullSecrets:
++    - name: {{ . | quote }}
++  {{- end }}
++  defaultStorageClass: {{ coalesce .Values.pvc.messages.redis.storageClass .Values.pvc.default.storageClass | quote }}
++  security:
++    allowInsecureImages: true
++
++clusterDomain: {{ .Values.cluster.networking.domain | default "cluster.local" | quote }}
++
++image:
++  registry: {{ (coalesce .Values.container.redis.registry .Values.container.default.registry) | quote }}
++  repository: {{ .Values.container.redis.repository | default "bitnami/redis" | quote }}
++  tag: {{ .Values.container.redis.tag | default "8.0.3-debian-12-r1" | quote }}
++
++auth:
++  enabled: true
++  password: {{ .Values.cache.messages.password | quote }}
++
++architecture: standalone
++
++master:
++  resourcesPreset: {{ .Values.global.resourcesPreset | quote }}
++  podSecurityContext: {{ .Values.security.default.podSecurityContext | toYaml | nindent 4 }}
++  containerSecurityContext: {{ .Values.security.default.containerSecurityContext | toYaml | nindent 4 }}
++  persistence:
++    storageClass: {{ (coalesce .Values.pvc.messages.redis.storageClass .Values.pvc.default.storageClass) | quote }}
++    accessModes: {{ coalesce .Values.pvc.messages.redis.accessModes .Values.pvc.default.accessModes (list "ReadWriteOnce") | toYaml | nindent 6 }}
++    size: {{ coalesce .Values.pvc.messages.redis.size .Values.pvc.default.size "1Gi" }}
+diff --git a/helmfile/apps/messages/values.yaml.gotmpl b/helmfile/apps/messages/values.yaml.gotmpl
+new file mode 100644
+index 0000000..136a8d8
+--- /dev/null
++++ b/helmfile/apps/messages/values.yaml.gotmpl
+@@ -0,0 +1,148 @@
++{{- $releaseId := now | unixEpoch }}
++{{- $hostname := printf "%s.%s" .Values.global.hostname.messages .Values.global.domain }}
++{{- $sslPostfix := ternary "s" "" (.Values.global.tls.enabled | default true) }}
++{{- $baseUrl := printf "http%s://%s" $sslPostfix $hostname }}
++{{- $redisUrl := printf "redis://default:%s@%s:%d/1" .Values.cache.messages.password .Values.cache.messages.host (.Values.cache.messages.port | int) -}}
++{{- $s3Endpoint := printf "http%s://%s:%d" (ternary "s" "" .Values.objectstore.messages.useSSL) .Values.objectstore.messages.endpoint (.Values.objectstore.messages.port | int) -}}
++{{- /* Server-to-server Keycloak base URL, derived from the backchannel token
++       endpoint so selfsigned installs keep talking plain HTTP in-cluster. */}}
++{{- $keycloakUrl := (splitList "/realms/" .Values.authentication.oidc.token_endpoint) | first }}
++
++commonLabels:
++  app.kubernetes.io/part-of: messages
++
++image:
++  registry: {{ (coalesce .Values.container.messages.registry .Values.container.default.registry) | quote }}
++  backend:
++    repository: {{ .Values.container.messages.backend.repository | quote }}
++    tag: {{ .Values.container.messages.backend.tag | quote }}
++  frontend:
++    repository: {{ .Values.container.messages.frontend.repository | quote }}
++    tag: {{ .Values.container.messages.frontend.tag | quote }}
++  mtaIn:
++    repository: {{ .Values.container.messages.mtaIn.repository | quote }}
++    tag: {{ .Values.container.messages.mtaIn.tag | quote }}
++  mtaOut:
++    repository: {{ .Values.container.messages.mtaOut.repository | quote }}
++    tag: {{ .Values.container.messages.mtaOut.tag | quote }}
++  opensearch:
++    registry: {{ .Values.container.messages.opensearch.registry | quote }}
++    repository: {{ .Values.container.messages.opensearch.repository | quote }}
++    tag: {{ .Values.container.messages.opensearch.tag | quote }}
++
++# No security.default context here: Postfix (mta-in/out) and OpenSearch cannot
++# run under the strict shared context (root master process / writable config);
++# the chart sets per-component contexts instead.
++
++jobs:
++  releaseSuffix: {{ $releaseId | quote }}
++
++backend:
++  envVars:
++    # Django core
++    DJANGO_CONFIGURATION: "Production"
++    DJANGO_SETTINGS_MODULE: "messages.settings"
++    DJANGO_SECRET_KEY: {{ .Values.application.messages.backend.django.secretKey | quote }}
++    # Public hostname plus the in-cluster service name mta-in's MDA calls use.
++    DJANGO_ALLOWED_HOSTS: "{{ $hostname }},messages-backend"
++    DJANGO_CSRF_TRUSTED_ORIGINS: {{ $baseUrl | quote }}
++    SALT_KEY: {{ .Values.application.messages.saltKey | quote }}
++    LANGUAGE_CODE: "en-us"
++    LOGGING_LEVEL_HANDLERS_CONSOLE: "INFO"
++    LOGGING_LEVEL_LOGGERS_APP: "INFO"
++    LOGGING_LEVEL_LOGGERS_ROOT: "INFO"
++    # Database
++    DB_HOST: {{ .Values.database.messages.host | quote }}
++    DB_PORT: {{ .Values.database.messages.port | quote }}
++    DB_NAME: {{ .Values.database.messages.name | quote }}
++    DB_USER: {{ .Values.database.messages.user | quote }}
++    DB_PASSWORD: {{ .Values.database.messages.password | quote }}
++    # Cache + Celery broker
++    REDIS_URL: {{ $redisUrl | quote }}
++    CELERY_BROKER_URL: {{ $redisUrl | quote }}
++    # Search
++    OPENSEARCH_URL: "http://messages-opensearch:9200"
++    # Object storage (Django media + the two message stores)
++    AWS_S3_ENDPOINT_URL: {{ $s3Endpoint | quote }}
++    AWS_S3_ACCESS_KEY_ID: {{ .Values.objectstore.messages.username | quote }}
++    AWS_S3_SECRET_ACCESS_KEY: {{ .Values.objectstore.messages.rootPassword | quote }}
++    AWS_S3_SIGNATURE_VERSION: "s3v4"
++    AWS_STORAGE_BUCKET_NAME: {{ .Values.objectstore.messages.bucket | quote }}
++    STORAGE_MESSAGE_IMPORTS_ENDPOINT_URL: {{ $s3Endpoint | quote }}
++    STORAGE_MESSAGE_IMPORTS_BUCKET_NAME: {{ .Values.objectstore.messages.bucketImports | quote }}
++    STORAGE_MESSAGE_IMPORTS_ACCESS_KEY: {{ .Values.objectstore.messages.username | quote }}
++    STORAGE_MESSAGE_IMPORTS_SECRET_KEY: {{ .Values.objectstore.messages.rootPassword | quote }}
++    STORAGE_MESSAGE_BLOBS_ENDPOINT_URL: {{ $s3Endpoint | quote }}
++    STORAGE_MESSAGE_BLOBS_BUCKET_NAME: {{ .Values.objectstore.messages.bucketBlobs | quote }}
++    STORAGE_MESSAGE_BLOBS_ACCESS_KEY: {{ .Values.objectstore.messages.username | quote }}
++    STORAGE_MESSAGE_BLOBS_SECRET_KEY: {{ .Values.objectstore.messages.rootPassword | quote }}
++    STORAGES_STATICFILES_BACKEND: "django.contrib.staticfiles.storage.StaticFilesStorage"
++    # OIDC login (browser flow through the shared mijnbureau realm)
++    OIDC_OP_JWKS_ENDPOINT: {{ .Values.authentication.oidc.jwks_uri | quote }}
++    OIDC_OP_AUTHORIZATION_ENDPOINT: {{ .Values.authentication.oidc.authorization_endpoint | quote }}
++    OIDC_OP_TOKEN_ENDPOINT: {{ .Values.authentication.oidc.token_endpoint | quote }}
++    OIDC_OP_USER_ENDPOINT: {{ .Values.authentication.oidc.userinfo_endpoint | quote }}
++    OIDC_OP_LOGOUT_ENDPOINT: {{ .Values.authentication.oidc.end_session_endpoint | quote }}
++    OIDC_RP_CLIENT_ID: {{ .Values.authentication.client.messages.client_id | quote }}
++    OIDC_RP_CLIENT_SECRET: {{ .Values.authentication.client.messages.client_secret | quote }}
++    OIDC_RP_SIGN_ALGO: "RS256"
++    OIDC_RP_SCOPES: "openid email"
++    OIDC_REDIRECT_ALLOWED_HOSTS: '["{{ $baseUrl }}"]'
++    LOGIN_REDIRECT_URL: {{ $baseUrl | quote }}
++    LOGIN_REDIRECT_URL_FAILURE: {{ $baseUrl | quote }}
++    LOGOUT_REDIRECT_URL: {{ $baseUrl | quote }}
++    # Keycloak admin API (mailbox/group provisioning via service account)
++    IDENTITY_PROVIDER: "keycloak"
++    KEYCLOAK_URL: {{ $keycloakUrl | quote }}
++    KEYCLOAK_REALM: "mijnbureau"
++    KEYCLOAK_CLIENT_ID: {{ .Values.authentication.client.messagesRestApi.client_id | quote }}
++    KEYCLOAK_CLIENT_SECRET: {{ .Values.authentication.client.messagesRestApi.client_secret | quote }}
++    KEYCLOAK_GROUP_PATH_PREFIX: "/maildomain-"
++    {{- with .Values.application.messages.autojoinBaseDomain }}
++    # Auto-provision mailboxes for OIDC users at this base domain.
++    MESSAGES_TESTDOMAIN: {{ $.Values.global.domain | quote }}
++    MESSAGES_TESTDOMAIN_MAPPING_BASEDOMAIN: {{ . | quote }}
++    {{- end }}
++    # Mail pipeline
++    MDA_API_SECRET: {{ .Values.application.messages.mda.apiSecret | quote }}
++    MTA_OUT_MODE: "relay"
++    MTA_OUT_RELAY_HOST: "messages-mta-out:587"
++    MTA_OUT_RELAY_USERNAME: {{ .Values.application.messages.mtaOut.smtpUsername | quote }}
++    MTA_OUT_RELAY_PASSWORD: {{ .Values.application.messages.mtaOut.smtpPassword | quote }}
++    # System mail from the app itself (password resets etc.) goes out the same way.
++    DJANGO_EMAIL_HOST: "messages-mta-out"
++    DJANGO_EMAIL_PORT: "587"
++    DJANGO_EMAIL_HOST_USER: {{ .Values.application.messages.mtaOut.smtpUsername | quote }}
++    DJANGO_EMAIL_HOST_PASSWORD: {{ .Values.application.messages.mtaOut.smtpPassword | quote }}
++    DJANGO_EMAIL_USE_TLS: "true"
++    DJANGO_EMAIL_FROM: {{ printf "noreply@%s" .Values.global.domain | quote }}
++    DJANGO_EMAIL_BRAND_NAME: "Open Suite"
++
++mtaIn:
++  envVars:
++    MDA_API_BASE_URL: "http://messages-backend:8000/api/v1.0/"
++    MDA_API_SECRET: {{ .Values.application.messages.mda.apiSecret | quote }}
++    MAX_INCOMING_EMAIL_SIZE: "30000000"
++
++mtaOut:
++  envVars:
++    MYHOSTNAME: {{ printf "mail.%s" .Values.global.domain | quote }}
++    SMTP_USERNAME: {{ .Values.application.messages.mtaOut.smtpUsername | quote }}
++    SMTP_PASSWORD: {{ .Values.application.messages.mtaOut.smtpPassword | quote }}
++  # Outbound smarthost (e.g. Brevo) credentials come from this out-of-band
++  # secret when it exists: SMTP_RELAY_HOST/_USERNAME/_PASSWORD. Without it
++  # mta-out delivers directly, which a residential/VPS IP usually cannot.
++  relaySecretName: "messages-mta-out-relay"
++
++ingress:
++  enabled: true
++  hostname: {{ $hostname }}
++  ingressClassName: {{ .Values.cluster.ingress.className | quote }}
++  annotations:
++    {{- if .Values.cluster.ingress.annotations }}
++    {{ .Values.cluster.ingress.annotations | toYaml | nindent 4 }}
++    {{- end }}
++    {{- if eq .Values.cluster.ingress.type "traefik" }}
++    traefik.ingress.kubernetes.io/router.middlewares: '{{ .Release.Namespace }}-hsts-header@kubernetescrd{{ if dig "opensuite" "authGate" "enabled" false .Values }},{{ .Values.application.bureaublad.namespace }}-opensuite-auth-gate@kubernetescrd{{ end }}'
++    {{- end }}
++  tls: {{ .Values.global.tls.enabled | default true }}
+diff --git a/helmfile/environments/default/application.yaml.gotmpl b/helmfile/environments/default/application.yaml.gotmpl
+index 66df91a..88b04bb 100644
+--- a/helmfile/environments/default/application.yaml.gotmpl
++++ b/helmfile/environments/default/application.yaml.gotmpl
+@@ -97,6 +97,32 @@ application:
+     yProvider:
+       key: {{ derivePassword 1 "long" (requiredEnv "MIJNBUREAU_MASTER_PASSWORD") "docs" "yProviderKey" | sha1sum | quote }}
+ 
++  # messages is a JMAP-inspired webmail from LaSuite (Open Suite addition).
++  # Off by default: OpenSearch is the heavy dependency, and outbound mail
++  # needs DNS (MX/SPF/DKIM/DMARC) plus a smarthost relay to be useful.
++  messages:
++    enabled: false
++    namespace: ~
++    backend:
++      django:
++        secretKey: {{ print ( derivePassword 1 "long" (requiredEnv "MIJNBUREAU_MASTER_PASSWORD") "messages" "djangoSecretKey" | sha1sum ) ( derivePassword 1 "long" (requiredEnv "MIJNBUREAU_MASTER_PASSWORD") "messages" "djangoSecretKey2" | sha1sum ) | trunc 63 | quote }}
++    # Symmetric key(s) for encrypting stored data (settings SALT_KEY).
++    saltKey: {{ derivePassword 1 "long" (requiredEnv "MIJNBUREAU_MASTER_PASSWORD") "messages" "saltKey" | sha1sum | quote }}
++    # Shared secret between mta-in (Postfix) and the backend's MDA API.
++    mda:
++      apiSecret: {{ derivePassword 1 "long" (requiredEnv "MIJNBUREAU_MASTER_PASSWORD") "messages" "mdaApiSecret" | sha1sum | quote }}
++    # Credentials the backend uses to authenticate TO mta-out (its submission
++    # smarthost). The relay mta-out itself forwards through (e.g. Brevo) is
++    # configured out-of-band via the messages-mta-out-relay secret.
++    # When set, OIDC users whose email is at this base domain get an
++    # auto-provisioned mailbox <local>@<global.domain> on first login
++    # (upstream MESSAGES_TESTDOMAIN mechanism). Unset: mailboxes are
++    # provisioned by a maildomain admin.
++    autojoinBaseDomain: ~
++    mtaOut:
++      smtpUsername: "messages"
++      smtpPassword: {{ derivePassword 1 "long" (requiredEnv "MIJNBUREAU_MASTER_PASSWORD") "messages" "mtaOutSmtpPassword" | sha1sum | quote }}
++
+   bureaublad:
+     enabled: true
+     namespace: ~
+diff --git a/helmfile/environments/default/authentication.yaml.gotmpl b/helmfile/environments/default/authentication.yaml.gotmpl
+index 5c2646e..a3b15f9 100644
+--- a/helmfile/environments/default/authentication.yaml.gotmpl
++++ b/helmfile/environments/default/authentication.yaml.gotmpl
+@@ -41,6 +41,14 @@ authentication:
+     docs:
+       client_id: "docs"
+       client_secret: {{ derivePassword 1 "long" ( requiredEnv "MIJNBUREAU_MASTER_PASSWORD" ) "keycloak" "docs_client_secret" | sha1sum | quote }}
++    messages:
++      client_id: "messages"
++      client_secret: {{ derivePassword 1 "long" ( requiredEnv "MIJNBUREAU_MASTER_PASSWORD" ) "keycloak" "messages_client_secret" | sha1sum | quote }}
++    # Service-account client the messages backend uses for mailbox/group
++    # provisioning against the Keycloak admin API (upstream name: rest-api).
++    messagesRestApi:
++      client_id: "rest-api"
++      client_secret: {{ derivePassword 1 "long" ( requiredEnv "MIJNBUREAU_MASTER_PASSWORD" ) "keycloak" "messages_rest_api_client_secret" | sha1sum | quote }}
+     bureaublad:
+       client_id: "bureaublad"
+       client_secret: {{ derivePassword 1 "long" ( requiredEnv "MIJNBUREAU_MASTER_PASSWORD" ) "keycloak" "bureaublad_client_secret" | sha1sum | quote }}
+diff --git a/helmfile/environments/default/cache.yaml.gotmpl b/helmfile/environments/default/cache.yaml.gotmpl
+index be0dfca..b60e686 100644
+--- a/helmfile/environments/default/cache.yaml.gotmpl
++++ b/helmfile/environments/default/cache.yaml.gotmpl
+@@ -39,6 +39,11 @@ cache:
+     port: 6379
+     isInternal: true
+     password: {{ derivePassword 1 "long" (env "MIJNBUREAU_MASTER_PASSWORD" | default "mijn-bureau") "docs" "password" | sha1sum | quote }}
++  messages:
++    host: "messages-redis-master"
++    port: 6379
++    isInternal: true
++    password: {{ derivePassword 1 "long" (env "MIJNBUREAU_MASTER_PASSWORD" | default "mijn-bureau") "messages" "password" | sha1sum | quote }}
+   drive:
+     host: "drive-redis-master"
+     port: 6379
+diff --git a/helmfile/environments/default/container.yaml.gotmpl b/helmfile/environments/default/container.yaml.gotmpl
+index 469bd00..3ba14ba 100644
+--- a/helmfile/environments/default/container.yaml.gotmpl
++++ b/helmfile/environments/default/container.yaml.gotmpl
+@@ -152,6 +152,25 @@ container:
+     yProvider:
+       repository: "lasuite/impress-y-provider"
+       tag: "v5.2.1"
++  messages:
++    imagePullSecret: ~
++    registry: "ghcr.io"
++    backend:
++      repository: "suitenumerique/messages-backend"
++      tag: "0.8.0"
++    frontend:
++      repository: "suitenumerique/messages-frontend"
++      tag: "0.8.0"
++    mtaIn:
++      repository: "suitenumerique/messages-mta-in"
++      tag: "0.8.0"
++    mtaOut:
++      repository: "suitenumerique/messages-mta-out"
++      tag: "0.8.0"
++    opensearch:
++      registry: "docker.io"
++      repository: "opensearchproject/opensearch"
++      tag: "2.19.2"
+   bureaublad:
+     imagePullSecret: ~
+     registry: "ghcr.io"
+diff --git a/helmfile/environments/default/database.yaml.gotmpl b/helmfile/environments/default/database.yaml.gotmpl
+index 54290a9..f9ca35d 100644
+--- a/helmfile/environments/default/database.yaml.gotmpl
++++ b/helmfile/environments/default/database.yaml.gotmpl
+@@ -80,6 +80,15 @@ database:
+     password: {{ derivePassword 1 "long" (requiredEnv "MIJNBUREAU_MASTER_PASSWORD" ) "docs" "database" | sha1sum | quote}}
+     adminpassword: {{ derivePassword 1 "long" (requiredEnv "MIJNBUREAU_MASTER_PASSWORD" ) "docs" "database_admin" | sha1sum | quote}}
+ 
++  messages:
++    name: messages
++    host: messages-cluster-rw
++    port: 5432
++    isInternal: true
++    user: messages
++    password: {{ derivePassword 1 "long" (requiredEnv "MIJNBUREAU_MASTER_PASSWORD" ) "messages" "database" | sha1sum | quote}}
++    adminpassword: {{ derivePassword 1 "long" (requiredEnv "MIJNBUREAU_MASTER_PASSWORD" ) "messages" "database_admin" | sha1sum | quote}}
++
+   drive:
+     type: postgresql
+     host: drive-cluster-rw
+diff --git a/helmfile/environments/default/global.yaml.gotmpl b/helmfile/environments/default/global.yaml.gotmpl
+index 0272869..8e18630 100644
+--- a/helmfile/environments/default/global.yaml.gotmpl
++++ b/helmfile/environments/default/global.yaml.gotmpl
+@@ -54,6 +54,7 @@ global:
+     meet: "meet"
+     conversations: "conversations"
+     docs: "docs"
++    messages: "messages"
+     bureaublad: "bureaublad"
+     drive: "drive"
+     # static nginx sidecar hostnames — gateway picks these up automatically
+diff --git a/helmfile/environments/default/objectstore.yaml.gotmpl b/helmfile/environments/default/objectstore.yaml.gotmpl
+index 15a3aac..78f43f0 100644
+--- a/helmfile/environments/default/objectstore.yaml.gotmpl
++++ b/helmfile/environments/default/objectstore.yaml.gotmpl
+@@ -38,6 +38,18 @@ objectstore:
+     isInternal: true
+     rootPassword: {{ derivePassword 1 "long" (env "MIJNBUREAU_MASTER_PASSWORD" | default "mijn-bureau") "minio" "docs" | sha1sum | quote }}
+ 
++  messages:
++    # Django media bucket plus the two message stores (imports, blobs).
++    bucket: "messages-media"
++    bucketImports: "messages-imports"
++    bucketBlobs: "messages-blobs"
++    username: "admin"
++    endpoint: "messages-minio"
++    port: 9000
++    useSSL: false
++    isInternal: true
++    rootPassword: {{ derivePassword 1 "long" (env "MIJNBUREAU_MASTER_PASSWORD" | default "mijn-bureau") "minio" "messages" | sha1sum | quote }}
++
+   drive:
+     bucket: "drive"
+     username: "admin"
+diff --git a/helmfile/environments/default/pvc.yaml.gotmpl b/helmfile/environments/default/pvc.yaml.gotmpl
+index 40ae8a7..d994a81 100644
+--- a/helmfile/environments/default/pvc.yaml.gotmpl
++++ b/helmfile/environments/default/pvc.yaml.gotmpl
+@@ -130,6 +130,24 @@ pvc:
+       size: ~
+       accessModes: []
+ 
++  messages:
++    redis:
++      storageClass: ~
++      size: ~
++      accessModes: []
++    postgresql:
++      storageClass: ~
++      size: ~
++      accessModes: []
++    minio:
++      storageClass: ~
++      size: ~
++      accessModes: []
++    opensearch:
++      storageClass: ~
++      size: ~
++      accessModes: []
++
+   drive:
+     redis:
+       storageClass: ~
+diff --git a/helmfile/environments/default/tls.yaml.gotmpl b/helmfile/environments/default/tls.yaml.gotmpl
+index b39c16f..6e56d6a 100644
+--- a/helmfile/environments/default/tls.yaml.gotmpl
++++ b/helmfile/environments/default/tls.yaml.gotmpl
+@@ -10,5 +10,6 @@ tls:
+   meet:
+   conversations:
+   docs:
++  messages:
+   bureaublad:
+   drive:

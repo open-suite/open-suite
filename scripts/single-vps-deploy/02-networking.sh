@@ -38,7 +38,9 @@ echo "==> [5b] Egress NetworkPolicies allowing Traefik on 8443"
 NODE_CIDR="$(kubectl get node -o jsonpath='{.items[0].status.addresses[?(@.type=="InternalIP")].address}' \
   | tr ' ' '\n' | grep -E '^[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+$' | head -1)/32"
 for ns in mb-keycloak mb-grist mb-element mb-collabora mb-nextcloud \
-          mb-livekit mb-meet mb-docs mb-bureaublad; do
+          mb-livekit mb-meet mb-docs mb-messages mb-bureaublad; do
+# Namespaces of disabled apps (e.g. messages) don't exist — skip them.
+kubectl get ns "${ns}" >/dev/null 2>&1 || continue
 kubectl apply -f - <<YAML
 apiVersion: networking.k8s.io/v1
 kind: NetworkPolicy
@@ -50,6 +52,11 @@ spec:
     - to: [{ podSelector: {} }]
     - to: [{ namespaceSelector: { matchLabels: { kubernetes.io/metadata.name: kube-system } } }]
       ports: [{ port: 8443, protocol: TCP }]
+    # DNS. The Bitnami charts' own NetworkPolicies already allow this for
+    # their pods, but chart-native pods (e.g. messages) have no other egress
+    # policy — without this, this policy's whitelist blocks CoreDNS.
+    - to: [{ namespaceSelector: { matchLabels: { kubernetes.io/metadata.name: kube-system } } }]
+      ports: [{ port: 53, protocol: UDP }, { port: 53, protocol: TCP }]
     # Chart helper jobs (e.g. synapse-keygen) talk to the API server, which on
     # k3s is the node itself on 6443 (post-DNAT destination of 10.43.0.1:443).
     # Without this they only ever succeed on a fresh deploy, where the job
