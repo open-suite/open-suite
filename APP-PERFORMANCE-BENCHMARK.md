@@ -6,8 +6,8 @@ open and render the real Nextcloud and Element applications.
 
 ## Latest summary
 
-**Release:** Nextcloud sidecar compression `f576296`, Element compression
-`sha-5660a2d`, Synapse SSO login limits candidate
+**Release:** Nextcloud sidecar compression `f576296`, Element startup image
+`sha-a6bbc34`, Synapse SSO login limits
 
 **Target:** `https://bridge.demo.opensuite.online`
 
@@ -20,10 +20,10 @@ suite containers now have measured resource requests without CPU limits
 
 | Application | Profile | Ready p50 | Ready p75 | Ready p95 |  FCP p75 |  LCP p75 | Spinner p75 | Transfer p75 |
 | ----------- | ------- | --------: | --------: | --------: | -------: | -------: | ----------: | -----------: |
-| Nextcloud   | Cold    |  2,601 ms |  2,696 ms |  3,138 ms | 1,560 ms | 2,444 ms |        0 ms |    2,203 KiB |
-| Nextcloud   | Warm    |    715 ms |    716 ms |    744 ms |   188 ms |   748 ms |        0 ms |       21 KiB |
-| Element     | Cold    |  2,899 ms |  3,392 ms |  3,409 ms | 1,316 ms | 2,880 ms |      943 ms |    4,719 KiB |
-| Element     | Warm    |    930 ms |    937 ms |    943 ms |   128 ms |   780 ms |      212 ms |        3 KiB |
+| Nextcloud   | Cold    |  2,624 ms |  2,808 ms |  3,898 ms | 1,548 ms | 2,524 ms |        0 ms |    2,203 KiB |
+| Nextcloud   | Warm    |    703 ms |    780 ms |  1,318 ms |   184 ms |   736 ms |        0 ms |       21 KiB |
+| Element     | Cold    |  2,886 ms |  2,894 ms |  2,914 ms | 1,300 ms | 2,688 ms |      590 ms |    4,719 KiB |
+| Element     | Warm    |    939 ms |    941 ms |    959 ms |   132 ms |   804 ms |      212 ms |        3 KiB |
 
 Cold means an empty HTTP cache with an already established application session.
 The app origin is unloaded between samples. Warm means a same-context reload.
@@ -42,18 +42,22 @@ moved from 2,584 to 2,696 ms p75 inside observed run variance, so this is an
 accepted network-efficiency improvement, not a claimed latency improvement.
 Element's owned image now materializes an nginx performance template into the
 chart's writable configuration volume. Its cold transfer fell from 15,315 to
-4,719 KiB p75 (-69%); LCP improved 14% and spinner exposure improved 22%.
+4,719 KiB p75 (-69%). The current image also preloads the late-discovered crypto
+WebAssembly gate; against its immediate baseline, LCP improved 25% and spinner
+exposure improved 47% without changing payload size.
 
 ### Session bootstrap
 
-The one-time SSO bootstrap took 3,714 ms for Nextcloud and 6,814 ms for Element.
+The final one-time SSO bootstrap took 3,814 ms for Nextcloud and 5,264 ms for
+Element.
 Repeated Element bootstrap attempts before the declared run exposed HTTP 429
 responses from Synapse's `rc_login.address` limiter. The listener trusts
 forwarded addresses, but an office or government network still legitimately
 groups many users behind one public NAT address. The default bucket allowed the
 first five logins and falsely rejected the next four measured attempts. With a
 30-login address burst, all 10 candidate attempts succeeded and no Matrix 429
-was observed. Per-account and failed-attempt buckets remain at five.
+was observed. The final merged-state check also passed 10/10 with zero 429s.
+Per-account and failed-attempt buckets remain at five.
 
 ### Cluster state
 
@@ -123,6 +127,24 @@ Protocol:
 | Login rate-limit false fail |              0% |
 
 ## History
+
+### 5. Accepted: preload Element's crypto WebAssembly gate - `sha-a6bbc34` - 2026-07-11
+
+| Element KPI | Baseline p75 | Candidate p75 | Change |
+| ----------- | -----------: | ------------: | -----: |
+| Cold ready  |     3,429 ms |      2,910 ms |   -15% |
+| FCP         |     1,268 ms |        520 ms |   -59% |
+| LCP         |     3,292 ms |      2,476 ms |   -25% |
+| Spinner     |     1,171 ms |        619 ms |   -47% |
+| Transfer    |    4,714 KiB |     4,714 KiB |     0% |
+| Warm ready  |       932 ms |        932 ms |     0% |
+
+Accepted. The resource waterfall showed Element discovering its 1.8 MiB Rust
+E2EE WebAssembly module around 2.6 seconds, then blocking Matrix initialization
+on the transfer. The owned image now discovers the exact hashed module at build
+time and adds one HTML preload. In the candidate waterfall it started at 71 ms,
+finished at 619 ms, appeared exactly once, and was reused by Element. Encryption
+functionality and total payload are unchanged.
 
 ### 4. Accepted: size every suite workload from a load sample - 2026-07-11
 
