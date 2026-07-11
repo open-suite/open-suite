@@ -7,13 +7,14 @@ open and render the real Nextcloud and Element applications.
 ## Latest summary
 
 **Release:** Nextcloud sidecar compression `f576296`, Element compression
-candidate `sha-5660a2d`
+`sha-5660a2d`, Synapse SSO login limits candidate
 
 **Target:** `https://bridge.demo.opensuite.online`
 
 **Captured:** 2026-07-11
 
-**Result:** Nextcloud and Element compression accepted
+**Result:** compression and Element burst login fixes accepted; all long-running
+suite containers now have measured resource requests without CPU limits
 
 ### Browser KPIs
 
@@ -47,26 +48,30 @@ chart's writable configuration volume. Its cold transfer fell from 15,315 to
 
 The one-time SSO bootstrap took 3,714 ms for Nextcloud and 6,814 ms for Element.
 Repeated Element bootstrap attempts before the declared run exposed HTTP 429
-responses from Synapse's `rc_login.address` limiter. Synapse logs every caller
-as the same cluster address (`10.42.0.1`), so the address limiter is effectively
-global across users behind Traefik. The Synapse pod was restarted once to clear
-the in-memory baseline bucket; the measured run then established one session
-and reused it.
+responses from Synapse's `rc_login.address` limiter. The listener trusts
+forwarded addresses, but an office or government network still legitimately
+groups many users behind one public NAT address. The default bucket allowed the
+first five logins and falsely rejected the next four measured attempts. With a
+30-login address burst, all 10 candidate attempts succeeded and no Matrix 429
+was observed. Per-account and failed-attempt buckets remain at five.
 
-### Cluster baseline
+### Cluster state
 
-- Node utilization at capture: 551 millicores (4%), 8,770 MiB memory (13%).
-- All measured application Deployments and StatefulSets have no CPU requests,
-  memory requests, CPU limits or memory limits.
+- Node utilization after resource rollout: 623 millicores (5%), 8,406 MiB
+  memory (13%).
+- All 43 long-running containers in the measured suite namespaces have CPU and
+  memory requests; none has a CPU limit. Total cluster requests, including
+  Kubernetes system workloads, are 2,220 millicores (18%) and 7,868 MiB (12%).
 - Largest idle containers: Docs backend 775 MiB, Collabora 596 MiB, Docs worker
   415 MiB, Nextcloud 395 MiB and Meet backend 385 MiB.
 - Low node utilization means the current browser latency is not explained by
-  sustained node saturation. Resource requests remain necessary for predictable
-  scheduling and eviction behavior, but should be based on peak measurements.
+  sustained node saturation. Requests protect these working sets from
+  contention and eviction; absent CPU limits allow short interactive bursts.
 
 ## Method
 
-The browser harness is `performance/apps.mjs` and the cluster collector is
+The browser harnesses are `performance/apps.mjs` and
+`performance/element-login.mjs`; the cluster collector is
 `performance/cluster-snapshot.sh`.
 
 ```bash
@@ -79,6 +84,16 @@ BENCHMARK_SAMPLES=5 \
 BENCHMARK_LABEL='<release-or-candidate>' \
 BENCHMARK_OUTPUT=/tmp/open-suite-apps.json \
 npm run benchmark:apps
+```
+
+The Element login benchmark creates isolated browser contexts so every attempt
+must complete the full SSO and Matrix login flow:
+
+```bash
+BENCHMARK_USER=johndoe \
+BENCHMARK_PASS='<demo password>' \
+BENCHMARK_ATTEMPTS=10 \
+npm run benchmark:element-login
 ```
 
 Protocol:
@@ -108,6 +123,40 @@ Protocol:
 | Login rate-limit false fail |              0% |
 
 ## History
+
+### 4. Accepted: size every suite workload from a load sample - 2026-07-11
+
+| KPI                              | Before | After |
+| -------------------------------- | -----: | ----: |
+| Containers with resource requests|  0/43  | 43/43 |
+| Containers with CPU limits       |  0/43  |  0/43 |
+| Nextcloud cold ready p75         | 3,085 ms | 3,123 ms |
+| Nextcloud warm ready p75         |   769 ms |   714 ms |
+| Element cold ready p75           | 3,449 ms | 3,419 ms |
+| Element warm ready p75           |   953 ms |   937 ms |
+
+Accepted. A 100-second, two-second-interval load sample captured 1,462
+per-container observations while the browser workload exercised Nextcloud and
+Element. Requests add working-set headroom to all applications, databases,
+caches, object stores, proxies and the auth gate. No CPU limits were introduced.
+The three-sample browser comparison showed no meaningful regression. Enabling
+real resource values also exposed and fixed upstream wiring errors where Meet
+swapped frontend/backend keys and Docs assigned backend resources to its
+frontend and y-provider.
+
+### 3. Accepted: make Element SSO login bursts reliable - 2026-07-11
+
+| Element login KPI       | Baseline | Candidate |
+| ----------------------- | -------: | --------: |
+| Successful fresh logins |     5/10 |     10/10 |
+| Matrix 429 attempts     |     4/10 |      0/10 |
+| Candidate elapsed range |        - | 7.7-8.6 s |
+
+Accepted. The Synapse chart now renders explicit address, account and failed
+attempt login buckets. Because Keycloak is the only authentication mechanism,
+the address-wide bucket allows a 30-login office burst while account and failed
+attempt protection remain at five. This also fixes the existing `perSeconde`
+typo so the declared message rate is actually rendered.
 
 ### 2. Accepted: compress Element static assets - `sha-5660a2d` - 2026-07-11
 

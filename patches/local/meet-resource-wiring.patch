@@ -1,0 +1,22 @@
+diff --git a/helmfile/apps/meet/values.yaml.gotmpl b/helmfile/apps/meet/values.yaml.gotmpl
+index 6542bb9..44df73c 100644
+--- a/helmfile/apps/meet/values.yaml.gotmpl
++++ b/helmfile/apps/meet/values.yaml.gotmpl
+@@ -25,7 +25,7 @@ meet:
+     tag: {{ .Values.container.meet_frontend.tag | quote }}
+ 
+   resourcesPreset: {{ coalesce .Values.global.resourcesPresetPerApp.meet.frontend .Values.global.resourcesPreset | quote }}
+-  resources: {{ .Values.resource.meet.meetBackend | toYaml | nindent 4 }}
++  resources: {{ .Values.resource.meet.meetFrontend | toYaml | nindent 4 }}
+   podSecurityContext: {{ .Values.security.default.podSecurityContext | toYaml | nindent 4 }}
+   containerSecurityContext:  {{ .Values.security.default.containerSecurityContext | toYaml | nindent 4 }}
+   autoscaling:
+@@ -105,7 +105,7 @@ meet_backend:
+     tag: {{ .Values.container.meet_backend.tag | quote }}
+ 
+   resourcesPreset: {{ coalesce .Values.global.resourcesPresetPerApp.meet.backend .Values.global.resourcesPreset | quote }}
+-  resources: {{ .Values.resource.meet.meetFrontend | toYaml | nindent 4 }}
++  resources: {{ .Values.resource.meet.meetBackend | toYaml | nindent 4 }}
+   podSecurityContext: {{ .Values.security.default.podSecurityContext | toYaml | nindent 4 }}
+   containerSecurityContext:  {{ .Values.security.default.containerSecurityContext | toYaml | nindent 4 }}
+   autoscaling:

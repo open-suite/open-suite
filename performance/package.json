@@ -3,7 +3,8 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "benchmark:apps": "node apps.mjs"
+    "benchmark:apps": "node apps.mjs",
+    "benchmark:element-login": "node element-login.mjs"
   },
   "dependencies": {
     "playwright": "1.55.1"
