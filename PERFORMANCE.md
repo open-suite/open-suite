@@ -126,3 +126,29 @@ two search REPORTs against the PHP CalDAV backend (~220ms base each) plus
 per-request bearer signature validation. Reducing it further would mean deeper
 Nextcloud work (or fewer calendars queried) — not pursued; caldav is otherwise
 healthy and the widget loads in ~1.5s.
+
+## 2026-07-11: Shared-header preconnect experiment (rejected)
+
+The visible shared header was tested with a `<link rel="preconnect">` inserted
+only after pointer or keyboard intent toward an app. Ten fresh-context Office
+to Documents journeys used an established portal/Keycloak SSO session and a
+200 ms hover lead.
+
+Baseline:
+
+- Click to Nextcloud Documents DOMContentLoaded: p75 4,066 ms.
+- First Nextcloud connection: p75 116 ms; TLS p75 59 ms.
+
+Candidate:
+
+- Click to target: p75 4,053 ms.
+- First connection: p75 117 ms; TLS p75 61 ms.
+- The hint existed before every click, but Chrome did not reuse its connection
+  for the authenticated navigation. A five-sample `use-credentials` variant
+  also retained roughly 109 ms of connection work.
+
+The runtime change was reverted. It did not move the direct connection metric
+or page p75 beyond normal variance, and speculative authenticated connections
+would add work without demonstrated user benefit. The reproducible journey and
+full result history live in the portal repository's
+`PERFORMANCE-BENCHMARK.md`.

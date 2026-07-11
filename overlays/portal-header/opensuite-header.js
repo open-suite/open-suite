@@ -35,7 +35,6 @@
     var target = nc + (path || "");
     return nc + "/apps/user_oidc/login/1?redirectUrl=" + encodeURIComponent(target);
   };
-
   // Office dropdown deep-links into the Nextcloud Office overview sections.
   // The header sidecar rewrites these clean URLs to the stock Office app while
   // preserving the visible path for reloads, sharing, and switching sections.
