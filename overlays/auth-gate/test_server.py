@@ -47,6 +47,7 @@ class SessionTests(unittest.TestCase):
 
         self.assertNotIn(server.unsign(cookie), server.SESSIONS)
 
+
     def test_session_refreshes_expiring_access_token(self) -> None:
         cookie, session = self.make_session()
         session["token_exp"] = 1_010
@@ -100,6 +101,46 @@ class SessionTests(unittest.TestCase):
         self.assertEqual(response.status, 204)
         self.assertIn("Max-Age=0", response.getheader("Set-Cookie"))
         self.assertNotIn(server.unsign(cookie), server.SESSIONS)
+
+
+class LogoutCallbackTests(unittest.TestCase):
+    def request_auth(self, host: str, uri: str) -> int:
+        httpd = server.http.server.ThreadingHTTPServer(("127.0.0.1", 0), server.Handler)
+        thread = threading.Thread(target=httpd.serve_forever)
+        thread.start()
+        try:
+            connection = http.client.HTTPConnection("127.0.0.1", httpd.server_port)
+            connection.request(
+                "GET",
+                "/auth",
+                headers={"X-Forwarded-Host": host, "X-Forwarded-Uri": uri},
+            )
+            response = connection.getresponse()
+            response.read()
+            return response.status
+        finally:
+            httpd.shutdown()
+            httpd.server_close()
+            thread.join()
+
+    def test_exact_app_logout_callbacks_bypass_gate(self) -> None:
+        callbacks = {
+            "bridge.example.test": "/api/v1/auth/logout",
+            "docs.example.test": "/api/v1.0/logout/",
+            "grist.example.test": "/o/docs/logout?next=/",
+            "meet.example.test": "/api/v1.0/logout/",
+            "nextcloud.example.test": "/index.php/apps/user_oidc/backchannel-logout/keycloak",
+        }
+
+        for host, uri in callbacks.items():
+            with self.subTest(host=host):
+                self.assertEqual(self.request_auth(host, uri), 204)
+
+    def test_logout_path_on_wrong_host_stays_protected(self) -> None:
+        self.assertEqual(self.request_auth("grist.example.test", "/api/v1.0/logout/"), 302)
+
+    def test_nearby_grist_path_stays_protected(self) -> None:
+        self.assertEqual(self.request_auth("grist.example.test", "/o/docs/logout-all"), 302)
 
 
 if __name__ == "__main__":

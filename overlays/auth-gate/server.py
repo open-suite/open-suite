@@ -60,6 +60,18 @@ SESSIONS: dict[str, dict[str, object]] = {}
 # the editor hangs at "Connecting...".
 WOPI_PATH = re.compile(r"^/(index\.php/)?apps/richdocuments/(wopi|settings)/")
 
+# Keycloak must reach each relying party's logout endpoint without an edge
+# session. In particular, back-channel logout is server-to-server and never
+# carries the browser's gate cookie. Keep this allowlist exact: only endpoints
+# whose sole purpose is clearing an application session bypass forwardAuth.
+LOGOUT_CALLBACKS = {
+    f"bridge.{DOMAIN}": {"/api/v1/auth/logout"},
+    f"docs.{DOMAIN}": {"/api/v1.0/logout/"},
+    f"grist.{DOMAIN}": {"/o/docs/logout"},
+    f"meet.{DOMAIN}": {"/api/v1.0/logout/"},
+    f"nextcloud.{DOMAIN}": {"/index.php/apps/user_oidc/backchannel-logout/keycloak"},
+}
+
 # Keys are cached ~10 min so a fresh JWKS fetch is not on every request's path.
 JWKS_CLIENT = PyJWKClient(JWKS_ENDPOINT, cache_keys=True, lifespan=600, timeout=10)
 
@@ -144,6 +156,13 @@ def request_url(handler: http.server.BaseHTTPRequestHandler) -> str:
     host = handler.headers.get("X-Forwarded-Host") or handler.headers.get("Host", "")
     uri = handler.headers.get("X-Forwarded-Uri") or handler.path
     return f"{proto}://{host}{uri}"
+
+
+def is_logout_callback(handler: http.server.BaseHTTPRequestHandler) -> bool:
+    host = (handler.headers.get("X-Forwarded-Host") or "").partition(":")[0].lower()
+    uri = handler.headers.get("X-Forwarded-Uri") or ""
+    path = urllib.parse.urlparse(uri).path
+    return path in LOGOUT_CALLBACKS.get(host, set())
 
 
 def allowed_origin(origin: str | None) -> str | None:
@@ -402,6 +421,10 @@ class Handler(http.server.BaseHTTPRequestHandler):
         # "Unauthorized WOPI host".
         uri = self.headers.get("X-Forwarded-Uri") or self.path or ""
         if WOPI_PATH.match(uri):
+            self.send_empty(HTTPStatus.NO_CONTENT, {})
+            return
+
+        if is_logout_callback(self):
             self.send_empty(HTTPStatus.NO_CONTENT, {})
             return
 
