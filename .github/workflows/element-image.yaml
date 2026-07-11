@@ -41,7 +41,7 @@ jobs:
         with:
           images: ghcr.io/open-suite/element-web
           tags: |
-            type=raw,value=${{ env.ELEMENT_TAG }}
+            type=raw,value=${{ env.ELEMENT_TAG }},enable=${{ github.ref == 'refs/heads/main' }}
             type=sha
       - uses: docker/build-push-action@v6
         with:
