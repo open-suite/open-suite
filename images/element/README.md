@@ -2,7 +2,9 @@
 
 `ghcr.io/open-suite/element-web` — the pinned upstream `vectorim/element-web`
 image with Element's device-verification reminder toasts patched out of the
-static bundle at build time.
+static bundle at build time. Its nginx configuration also gzip-compresses
+textual responses, including Element's JavaScript, CSS, JSON, SVG and WebAssembly
+assets.
 
 ## Why
 
