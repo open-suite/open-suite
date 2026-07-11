@@ -17,4 +17,4 @@ RUN sh /tmp/patch-verification-reminders.sh /app
 
 FROM ${ELEMENT_BASE}
 COPY --from=patcher /app /app
-COPY opensuite-performance.conf /etc/nginx/conf.d/opensuite-performance.conf
+COPY opensuite-performance.conf /etc/nginx/templates/opensuite-performance.conf.template
