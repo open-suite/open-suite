@@ -1,0 +1,11 @@
+{
+  "name": "open-suite-app-performance",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "benchmark:apps": "node apps.mjs"
+  },
+  "dependencies": {
+    "playwright": "1.55.1"
+  }
+}
