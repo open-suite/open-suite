@@ -34,5 +34,14 @@ Capture the Kubernetes resource state on the target server with:
 sudo performance/cluster-snapshot.sh
 ```
 
+For resource sizing, sample every container repeatedly while a browser workload
+is running:
+
+```bash
+SAMPLE_DURATION=120 SAMPLE_INTERVAL=2 \
+SAMPLE_OUTPUT=/tmp/open-suite-cluster.csv \
+sudo performance/sample-cluster.sh
+```
+
 Raw JSON and cluster snapshots are artifacts, not committed data. Summaries and
 interpretation belong in `APP-PERFORMANCE-BENCHMARK.md`.

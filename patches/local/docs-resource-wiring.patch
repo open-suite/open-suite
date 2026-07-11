@@ -1,0 +1,22 @@
+diff --git a/helmfile/apps/docs/values.yaml.gotmpl b/helmfile/apps/docs/values.yaml.gotmpl
+index bf84ae2..0987d1d 100644
+--- a/helmfile/apps/docs/values.yaml.gotmpl
++++ b/helmfile/apps/docs/values.yaml.gotmpl
+@@ -416,7 +416,7 @@ frontend:
+     tag: {{ .Values.container.docs.frontend.tag | quote }}
+   replicaCount: 1
+   resourcesPreset: {{ coalesce .Values.global.resourcesPresetPerApp.docs.frontend .Values.global.resourcesPreset | quote }}
+-  resources: {{ .Values.resource.docs.backend | toYaml | nindent 4 }}
++  resources: {{ .Values.resource.docs.frontend | toYaml | nindent 4 }}
+   podSecurityContext: {{ .Values.security.default.podSecurityContext | toYaml | nindent 4 }}
+   containerSecurityContext: {{ .Values.security.default.containerSecurityContext | toYaml | nindent 4 }}
+   runtimeClassName: {{ .Values.cluster.runtimeClassName | quote }}
+@@ -455,7 +455,7 @@ yProvider:
+     tag: {{ .Values.container.docs.yProvider.tag | quote }}
+   replicaCount: 1
+   resourcesPreset: {{ coalesce .Values.global.resourcesPresetPerApp.docs.yProvider .Values.global.resourcesPreset | quote }}
+-  resources: {{ .Values.resource.docs.backend | toYaml | nindent 4 }}
++  resources: {{ .Values.resource.docs.yProvider | toYaml | nindent 4 }}
+   podSecurityContext: {{ .Values.security.default.podSecurityContext | toYaml | nindent 4 }}
+   containerSecurityContext: {{ .Values.security.default.containerSecurityContext | toYaml | nindent 4 }}
+   runtimeClassName: {{ .Values.cluster.runtimeClassName | quote }}

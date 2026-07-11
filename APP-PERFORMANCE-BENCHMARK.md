@@ -13,8 +13,8 @@ open and render the real Nextcloud and Element applications.
 
 **Captured:** 2026-07-11
 
-**Result:** Nextcloud and Element compression accepted; Element burst login
-false failures eliminated
+**Result:** compression and Element burst login fixes accepted; all long-running
+suite containers now have measured resource requests without CPU limits
 
 ### Browser KPIs
 
@@ -55,16 +55,18 @@ first five logins and falsely rejected the next four measured attempts. With a
 30-login address burst, all 10 candidate attempts succeeded and no Matrix 429
 was observed. Per-account and failed-attempt buckets remain at five.
 
-### Cluster baseline
+### Cluster state
 
-- Node utilization at capture: 551 millicores (4%), 8,770 MiB memory (13%).
-- All measured application Deployments and StatefulSets have no CPU requests,
-  memory requests, CPU limits or memory limits.
+- Node utilization after resource rollout: 623 millicores (5%), 8,406 MiB
+  memory (13%).
+- All 43 long-running containers in the measured suite namespaces have CPU and
+  memory requests; none has a CPU limit. Total cluster requests, including
+  Kubernetes system workloads, are 2,220 millicores (18%) and 7,868 MiB (12%).
 - Largest idle containers: Docs backend 775 MiB, Collabora 596 MiB, Docs worker
   415 MiB, Nextcloud 395 MiB and Meet backend 385 MiB.
 - Low node utilization means the current browser latency is not explained by
-  sustained node saturation. Resource requests remain necessary for predictable
-  scheduling and eviction behavior, but should be based on peak measurements.
+  sustained node saturation. Requests protect these working sets from
+  contention and eviction; absent CPU limits allow short interactive bursts.
 
 ## Method
 
@@ -121,6 +123,26 @@ Protocol:
 | Login rate-limit false fail |              0% |
 
 ## History
+
+### 4. Accepted: size every suite workload from a load sample - 2026-07-11
+
+| KPI                              | Before | After |
+| -------------------------------- | -----: | ----: |
+| Containers with resource requests|  0/43  | 43/43 |
+| Containers with CPU limits       |  0/43  |  0/43 |
+| Nextcloud cold ready p75         | 3,085 ms | 3,123 ms |
+| Nextcloud warm ready p75         |   769 ms |   714 ms |
+| Element cold ready p75           | 3,449 ms | 3,419 ms |
+| Element warm ready p75           |   953 ms |   937 ms |
+
+Accepted. A 100-second, two-second-interval load sample captured 1,462
+per-container observations while the browser workload exercised Nextcloud and
+Element. Requests add working-set headroom to all applications, databases,
+caches, object stores, proxies and the auth gate. No CPU limits were introduced.
+The three-sample browser comparison showed no meaningful regression. Enabling
+real resource values also exposed and fixed upstream wiring errors where Meet
+swapped frontend/backend keys and Docs assigned backend resources to its
+frontend and y-provider.
 
 ### 3. Accepted: make Element SSO login bursts reliable - 2026-07-11
 

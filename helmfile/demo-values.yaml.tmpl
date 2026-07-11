@@ -35,6 +35,60 @@ global:
     enabled: true
     selfSigned: ${TLS_SELF_SIGNED}
 
+# Requests protect interactive workloads from CPU starvation and memory
+# eviction. They are based on the 2026-07-11 load sample plus headroom. Do not
+# add CPU limits: CFS throttling turns short application bursts into latency.
+resource:
+  keycloak:
+    keycloak: { requests: { cpu: 50m, memory: 1Gi } }
+    postgresql: { requests: { cpu: 25m, memory: 96Mi } }
+  bureaublad:
+    backend: { requests: { cpu: 25m, memory: 192Mi } }
+    frontend: { requests: { cpu: 10m, memory: 32Mi } }
+    redis: { requests: { cpu: 25m, memory: 16Mi } }
+  nextcloud:
+    nextcloud: { requests: { cpu: 150m, memory: 384Mi } }
+    postgresql: { requests: { cpu: 75m, memory: 96Mi } }
+    redis: { requests: { cpu: 25m, memory: 16Mi } }
+    minio: { requests: { cpu: 25m, memory: 192Mi } }
+    minioConsole: { requests: { cpu: 10m, memory: 32Mi } }
+  element:
+    elementweb: { requests: { cpu: 100m, memory: 32Mi } }
+    postgresql: { requests: { cpu: 25m, memory: 96Mi } }
+    redis: { requests: { cpu: 25m, memory: 16Mi } }
+  synapse:
+    master: { requests: { cpu: 50m, memory: 192Mi } }
+    worker:
+      default: { requests: { cpu: 50m, memory: 192Mi } }
+  collabora: { requests: { cpu: 25m, memory: 768Mi } }
+  docs:
+    backend: { requests: { cpu: 50m, memory: 1Gi } }
+    celery: { requests: { cpu: 25m, memory: 512Mi } }
+    frontend: { requests: { cpu: 10m, memory: 32Mi } }
+    yProvider: { requests: { cpu: 10m, memory: 192Mi } }
+    docspec: { requests: { cpu: 10m, memory: 192Mi } }
+    postgresql: { requests: { cpu: 25m, memory: 96Mi } }
+    redis: { requests: { cpu: 25m, memory: 16Mi } }
+    minio: { requests: { cpu: 10m, memory: 128Mi } }
+    minioConsole: { requests: { cpu: 10m, memory: 32Mi } }
+    nginx: { requests: { cpu: 10m, memory: 32Mi } }
+  meet:
+    meetFrontend: { requests: { cpu: 10m, memory: 32Mi } }
+    meetBackend: { requests: { cpu: 25m, memory: 512Mi } }
+    postgresql: { requests: { cpu: 25m, memory: 96Mi } }
+    redis: { requests: { cpu: 25m, memory: 16Mi } }
+    nginx: { requests: { cpu: 10m, memory: 32Mi } }
+  grist:
+    grist: { requests: { cpu: 10m, memory: 192Mi } }
+    postgresql: { requests: { cpu: 25m, memory: 64Mi } }
+    redis: { requests: { cpu: 25m, memory: 16Mi } }
+    minio: { requests: { cpu: 10m, memory: 128Mi } }
+    minioConsole: { requests: { cpu: 10m, memory: 32Mi } }
+    nginx: { requests: { cpu: 10m, memory: 32Mi } }
+  livekit:
+    livekit: { requests: { cpu: 25m, memory: 64Mi } }
+    redis: { requests: { cpu: 25m, memory: 16Mi } }
+
 autoscaling:
   horizontal:
     # Grist keeps upload state on the pod and has no session affinity, so a
