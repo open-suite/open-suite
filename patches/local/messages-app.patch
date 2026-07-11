@@ -453,10 +453,10 @@ index 0000000..10f5b1a
 +  {{- end }}
 diff --git a/helmfile/apps/messages/charts/messages/templates/mta-out-deployment.yaml b/helmfile/apps/messages/charts/messages/templates/mta-out-deployment.yaml
 new file mode 100644
-index 0000000..bace214
+index 0000000..5b11cff
 --- /dev/null
 +++ b/helmfile/apps/messages/charts/messages/templates/mta-out-deployment.yaml
-@@ -0,0 +1,46 @@
+@@ -0,0 +1,55 @@
 +apiVersion: apps/v1
 +kind: Deployment
 +metadata:
@@ -476,9 +476,18 @@ index 0000000..bace214
 +      containers:
 +        - name: mta-out
 +          image: {{ include "messages.image" (dict "component" "mtaOut" "context" $) }}
-+          # The published 0.8.0 image is missing /var/spool/postfix/etc, which
-+          # its own entrypoint needs for the SASL db; create it first.
-+          command: ["bash", "-c", "mkdir -p /var/spool/postfix/etc && exec /usr/local/bin/entrypoint.sh"]
++          # The published 0.8.0 image is missing /var/spool/postfix/etc (the
++          # entrypoint needs it for the SASL db) and ships private/public with
++          # root ownership, which kills postfix master at startup. Repair both
++          # before handing over to the stock entrypoint.
++          command:
++            - bash
++            - -c
++            - >-
++              mkdir -p /var/spool/postfix/etc &&
++              chown -R postfix /var/spool/postfix/private /var/spool/postfix/public &&
++              chgrp -R postdrop /var/spool/postfix/public &&
++              exec /usr/local/bin/entrypoint.sh
 +          ports:
 +            - name: submission
 +              containerPort: 587
