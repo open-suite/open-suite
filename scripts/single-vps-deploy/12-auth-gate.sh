@@ -16,9 +16,9 @@ CLIENT_ID="opensuite-auth-gate"
 NAMESPACE="mb-bureaublad"
 # Prebuilt in CI and pulled from GHCR (ticket 3.1). Pinned to a specific build
 # (not floating :main) so a redeploy is reproducible; bump this when the gate
-# changes. sha-309302a = the #114 build with the richdocuments/settings WOPI
-# pass-through. Override AUTH_GATE_IMAGE to test another tag.
-IMAGE="${AUTH_GATE_IMAGE:-ghcr.io/open-suite/auth-gate:sha-309302a}"
+# changes. sha-67bf956 = the #165 build with coherent gate and app logout.
+# Override AUTH_GATE_IMAGE to test another tag.
+IMAGE="${AUTH_GATE_IMAGE:-ghcr.io/open-suite/auth-gate:sha-67bf956}"
 OPEN_SUITE_TLS_MODE="${OPEN_SUITE_TLS_MODE:-letsencrypt}"
 
 echo "==> [1/5] Ensuring auth-gate secrets"
@@ -62,9 +62,12 @@ cat >/tmp/opensuite-auth-gate-client.json <<EOF
   "secret": "$CLIENT_SECRET",
   "redirectUris": ["https://$AUTH_HOST/callback"],
   "webOrigins": ["https://$AUTH_HOST"],
+  "frontchannelLogout": true,
   "attributes": {
     "pkce.code.challenge.method": "S256",
-    "post.logout.redirect.uris": "+"
+    "post.logout.redirect.uris": "+",
+    "frontchannel.logout.url": "https://$AUTH_HOST/frontchannel-logout",
+    "frontchannel.logout.session.required": "true"
   }
 }
 EOF
@@ -144,6 +147,10 @@ spec:
               value: "${CLIENT_ID}"
             - name: OIDC_TLS_INSECURE
               value: "${GATE_TLS_INSECURE}"
+            - name: SESSION_TTL_SECONDS
+              value: "604800"
+            - name: OIDC_VALIDATION_INTERVAL_SECONDS
+              value: "15"
             - name: OIDC_CLIENT_SECRET
               valueFrom:
                 secretKeyRef:

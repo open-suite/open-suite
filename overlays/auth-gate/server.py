@@ -39,12 +39,15 @@ COOKIE_SECRET = os.environ["COOKIE_SECRET"].encode("utf-8")
 COOKIE_NAME = os.environ.get("COOKIE_NAME", "opensuite_auth")
 STATE_COOKIE_NAME = os.environ.get("STATE_COOKIE_NAME", "opensuite_auth_state")
 COOKIE_DOMAIN = os.environ.get("COOKIE_DOMAIN", f".{DOMAIN}")
-SESSION_TTL = int(os.environ.get("SESSION_TTL_SECONDS", "28800"))
+SESSION_TTL = int(os.environ.get("SESSION_TTL_SECONDS", "604800"))
 STATE_TTL = int(os.environ.get("STATE_TTL_SECONDS", "600"))
+VALIDATION_INTERVAL = int(os.environ.get("OIDC_VALIDATION_INTERVAL_SECONDS", "15"))
+REFRESH_SKEW = int(os.environ.get("OIDC_REFRESH_SKEW_SECONDS", "30"))
 
 AUTH_ENDPOINT = f"{ISSUER}/protocol/openid-connect/auth"
 TOKEN_ENDPOINT = f"{ISSUER}/protocol/openid-connect/token"
 USERINFO_ENDPOINT = f"{ISSUER}/protocol/openid-connect/userinfo"
+INTROSPECTION_ENDPOINT = f"{ISSUER}/protocol/openid-connect/token/introspect"
 END_SESSION_ENDPOINT = f"{ISSUER}/protocol/openid-connect/logout"
 JWKS_ENDPOINT = f"{ISSUER}/protocol/openid-connect/certs"
 
@@ -56,6 +59,18 @@ SESSIONS: dict[str, dict[str, object]] = {}
 # WOPI tokens, not a realm session; a gate 302 here makes docbrokers abort and
 # the editor hangs at "Connecting...".
 WOPI_PATH = re.compile(r"^/(index\.php/)?apps/richdocuments/(wopi|settings)/")
+
+# Keycloak must reach each relying party's logout endpoint without an edge
+# session. In particular, back-channel logout is server-to-server and never
+# carries the browser's gate cookie. Keep this allowlist exact: only endpoints
+# whose sole purpose is clearing an application session bypass forwardAuth.
+LOGOUT_CALLBACKS = {
+    f"bridge.{DOMAIN}": {"/api/v1/auth/logout"},
+    f"docs.{DOMAIN}": {"/api/v1.0/logout/"},
+    f"grist.{DOMAIN}": {"/o/docs/logout"},
+    f"meet.{DOMAIN}": {"/api/v1.0/logout/"},
+    f"nextcloud.{DOMAIN}": {"/index.php/apps/user_oidc/backchannel-logout/keycloak"},
+}
 
 # Keys are cached ~10 min so a fresh JWKS fetch is not on every request's path.
 JWKS_CLIENT = PyJWKClient(JWKS_ENDPOINT, cache_keys=True, lifespan=600, timeout=10)
@@ -143,6 +158,13 @@ def request_url(handler: http.server.BaseHTTPRequestHandler) -> str:
     return f"{proto}://{host}{uri}"
 
 
+def is_logout_callback(handler: http.server.BaseHTTPRequestHandler) -> bool:
+    host = (handler.headers.get("X-Forwarded-Host") or "").partition(":")[0].lower()
+    uri = handler.headers.get("X-Forwarded-Uri") or ""
+    path = urllib.parse.urlparse(uri).path
+    return path in LOGOUT_CALLBACKS.get(host, set())
+
+
 def allowed_origin(origin: str | None) -> str | None:
     """Return the Origin if it is https on this domain or a subdomain, else None."""
     if not origin:
@@ -225,16 +247,64 @@ def fetch_userinfo(access_token: str) -> dict[str, object]:
         return json.loads(res.read().decode("utf-8"))
 
 
+def refresh_tokens(refresh_token: str) -> dict[str, object]:
+    body = urllib.parse.urlencode(
+        {
+            "grant_type": "refresh_token",
+            "client_id": CLIENT_ID,
+            "client_secret": CLIENT_SECRET,
+            "refresh_token": refresh_token,
+        }
+    ).encode("utf-8")
+    req = urllib.request.Request(
+        TOKEN_ENDPOINT,
+        data=body,
+        headers={"Content-Type": "application/x-www-form-urlencoded"},
+        method="POST",
+    )
+    with urllib.request.urlopen(req, timeout=10) as res:
+        return json.loads(res.read().decode("utf-8"))
+
+
+def token_is_active(access_token: str) -> bool:
+    body = urllib.parse.urlencode(
+        {
+            "client_id": CLIENT_ID,
+            "client_secret": CLIENT_SECRET,
+            "token": access_token,
+            "token_type_hint": "access_token",
+        }
+    ).encode("utf-8")
+    req = urllib.request.Request(
+        INTROSPECTION_ENDPOINT,
+        data=body,
+        headers={"Content-Type": "application/x-www-form-urlencoded"},
+        method="POST",
+    )
+    with urllib.request.urlopen(req, timeout=10) as res:
+        return bool(json.loads(res.read().decode("utf-8")).get("active"))
+
+
+def update_session_tokens(session: dict[str, object], tokens: dict[str, object], now: int) -> None:
+    session["access_token"] = str(tokens["access_token"])
+    if tokens.get("refresh_token"):
+        session["refresh_token"] = str(tokens["refresh_token"])
+    session["token_exp"] = now + int(tokens.get("expires_in", 0))
+
+
 def make_session(tokens: dict[str, object], user: dict[str, object]) -> str:
     sid = secrets.token_urlsafe(32)
     now = int(time.time())
-    ttl = min(SESSION_TTL, int(tokens.get("expires_in", SESSION_TTL)))
+    refresh_ttl = int(tokens.get("refresh_expires_in", SESSION_TTL))
+    ttl = min(SESSION_TTL, refresh_ttl) if refresh_ttl > 0 else SESSION_TTL
     SESSIONS[sid] = {
         "sub": user.get("sub", ""),
         "email": user.get("email", ""),
         "name": user.get("name") or user.get("preferred_username", ""),
         "exp": now + ttl,
+        "validated_at": now,
     }
+    update_session_tokens(SESSIONS[sid], tokens, now)
     return sign(sid)
 
 
@@ -249,6 +319,22 @@ def valid_session(cookie_value: str | None) -> dict[str, object] | None:
         return None
     if int(session.get("exp", 0)) <= int(time.time()):
         SESSIONS.pop(sid, None)
+        return None
+    now = int(time.time())
+    try:
+        if int(session.get("token_exp", 0)) <= now + REFRESH_SKEW:
+            refresh_token = str(session.get("refresh_token", ""))
+            if not refresh_token:
+                SESSIONS.pop(sid, None)
+                return None
+            update_session_tokens(session, refresh_tokens(refresh_token), now)
+        if now - int(session.get("validated_at", 0)) >= VALIDATION_INTERVAL:
+            if not token_is_active(str(session.get("access_token", ""))):
+                SESSIONS.pop(sid, None)
+                return None
+            session["validated_at"] = now
+    except (KeyError, urllib.error.URLError, TimeoutError, json.JSONDecodeError, ValueError):
+        # Fail closed. Keep the record so a transient IdP outage can recover.
         return None
     return session
 
@@ -305,6 +391,9 @@ class Handler(http.server.BaseHTTPRequestHandler):
         if parsed.path == "/logout":
             self.handle_logout(params)
             return
+        if parsed.path == "/frontchannel-logout":
+            self.handle_frontchannel_logout()
+            return
         self.send_empty(HTTPStatus.NOT_FOUND)
 
     def do_HEAD(self) -> None:  # noqa: N802
@@ -332,6 +421,10 @@ class Handler(http.server.BaseHTTPRequestHandler):
         # "Unauthorized WOPI host".
         uri = self.headers.get("X-Forwarded-Uri") or self.path or ""
         if WOPI_PATH.match(uri):
+            self.send_empty(HTTPStatus.NO_CONTENT, {})
+            return
+
+        if is_logout_callback(self):
             self.send_empty(HTTPStatus.NO_CONTENT, {})
             return
 
@@ -418,6 +511,14 @@ class Handler(http.server.BaseHTTPRequestHandler):
         rd = safe_redirect_target(params.get("rd", [""])[0])
         logout_query = urllib.parse.urlencode({"client_id": CLIENT_ID, "post_logout_redirect_uri": rd})
         self.redirect(f"{END_SESSION_ENDPOINT}?{logout_query}", {"Set-Cookie": clear_cookie_header(COOKIE_NAME)})
+
+    def handle_frontchannel_logout(self) -> None:
+        cookies = parse_cookies(self.headers.get("Cookie"))
+        auth_cookie = cookies.get(COOKIE_NAME).value if cookies.get(COOKIE_NAME) else None
+        sid = unsign(auth_cookie) if auth_cookie else None
+        if sid:
+            SESSIONS.pop(sid, None)
+        self.send_empty(HTTPStatus.NO_CONTENT, {"Set-Cookie": clear_cookie_header(COOKIE_NAME)})
 
 
 if __name__ == "__main__":
