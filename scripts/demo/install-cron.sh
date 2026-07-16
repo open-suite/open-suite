@@ -1,18 +1,37 @@
 #!/usr/bin/env bash
-# Install the daily demo-data refresh as a host cron on the single VPS.
+# Install the daily demo reset as a systemd timer on the single VPS.
 # Run as root on the box. Reads creds from the `demo-seed` secret at runtime.
 set -euo pipefail
 SRC="$(cd "$(dirname "$0")" && pwd)/seed-demo.sh"
 install -D -m 0755 "${SRC}" /opt/opensuite/seed-demo.sh
-cat > /etc/cron.d/opensuite-demo-seed <<'EOF'
-# Open Suite: refresh demo data daily (keeps calendar events upcoming and every
-# portal widget populated). Idempotent — overwrites fixed ids, skips existing.
-# Runs at 06:00 UTC, after the nightly smoke (05:17), so the seed's purge of
-# smoke-test residue leaves the demo clean for the day.
-0 6 * * * root KUBECONFIG=/etc/rancher/k3s/k3s.yaml /opt/opensuite/seed-demo.sh >> /var/log/opensuite-demo-seed.log 2>&1
+cat > /etc/systemd/system/opensuite-demo-reset.service <<'EOF'
+[Unit]
+Description=Reset Open Suite public demo data
+After=k3s.service network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+Environment=KUBECONFIG=/etc/rancher/k3s/k3s.yaml
+ExecStart=/opt/opensuite/seed-demo.sh
+StandardOutput=append:/var/log/opensuite-demo-reset.log
+StandardError=append:/var/log/opensuite-demo-reset.log
 EOF
-cat > /etc/logrotate.d/opensuite-demo-seed <<'EOF'
-/var/log/opensuite-demo-seed.log {
+cat > /etc/systemd/system/opensuite-demo-reset.timer <<'EOF'
+[Unit]
+Description=Reset Open Suite public demo every morning
+
+[Timer]
+OnCalendar=*-*-* 06:00:00 UTC
+Persistent=true
+RandomizedDelaySec=0
+Unit=opensuite-demo-reset.service
+
+[Install]
+WantedBy=timers.target
+EOF
+cat > /etc/logrotate.d/opensuite-demo-reset <<'EOF'
+/var/log/opensuite-demo-reset.log {
     daily
     rotate 14
     size 1M
@@ -22,4 +41,9 @@ cat > /etc/logrotate.d/opensuite-demo-seed <<'EOF'
     copytruncate
 }
 EOF
-echo "Installed /opt/opensuite/seed-demo.sh + /etc/cron.d/opensuite-demo-seed"
+rm -f /etc/cron.d/opensuite-demo-seed /etc/logrotate.d/opensuite-demo-seed
+systemctl daemon-reload
+systemctl enable --now opensuite-demo-reset.timer
+systemctl start opensuite-demo-reset.service
+echo "Installed and ran opensuite-demo-reset.service; next run:"
+systemctl list-timers opensuite-demo-reset.timer --no-pager

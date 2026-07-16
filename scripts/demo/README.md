@@ -5,7 +5,8 @@ Populates the Open Suite demo so every portal widget shows something:
 - **Calendar** — a few upcoming events (CalDAV, dates recomputed to stay future)
 - **Docs** — a few La Suite documents
 - **Files** — a couple of files in Nextcloud (Office → Files)
-- **Chat** — a short Jane ↔ John thread (Matrix)
+- **Mail** — a clean inbox with three unread messages
+- **Chat** — a fresh unread Jane ↔ John thread (Matrix)
 
 ## Setup (once)
 
@@ -23,16 +24,30 @@ kubectl -n mb-bureaublad create secret generic demo-seed \
   --from-literal=NC_PASS=... --from-literal=DEMO_PASS=...
 ```
 
-Matrix needs no extra creds — `seed-demo.sh` registers a `seedadmin` admin user
-via Synapse's registration shared secret (first run; plain login after) and
-uses the admin API to provision John and Jane and seed the room.
+Matrix needs no extra credentials. `seed-demo.sh` mints a short-lived local
+Synapse admin token, provisions John and Jane, purges the old seeded DM, and
+creates a fresh unread room.
 
 ## Run / daily reset
 
 ```bash
-./seed-demo.sh          # one-off, idempotent
-sudo ./install-cron.sh  # daily refresh at 03:00 via /etc/cron.d
+./seed-demo.sh          # one-off reset
+sudo ./install-cron.sh  # install timer and reset immediately
 ```
 
-Re-running is safe: events upsert by fixed UID, files overwrite, docs skip if
-the title exists, and the chat room is only seeded if none exists yet.
+The systemd timer runs at 06:00 UTC and has `Persistent=true`, so a missed run
+is caught up after a reboot. Demo deployments install it automatically when
+`OPEN_SUITE_DEMO_MODE=true`.
+
+Re-running is scoped to the public demo identities: events upsert by fixed UID,
+Docs skip existing titles, Mail deletes only threads visible to the
+`johndoe`/`janedoe` mailboxes, and Chat purges only their registered direct
+message rooms.
+
+Inspect the last run and next schedule with:
+
+```bash
+systemctl status opensuite-demo-reset.service
+systemctl list-timers opensuite-demo-reset.timer
+journalctl -u opensuite-demo-reset.service
+```
