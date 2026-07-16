@@ -74,6 +74,9 @@ bash "${DIR}/10-keycloak-login.sh"
 # into the ghcr.io/open-suite/element-web image (images/element/), pinned in the
 # demo values, so a bare helmfile apply keeps it. See Phase 2.2.
 bash "${DIR}/12-auth-gate.sh"
+if [ "${OPEN_SUITE_DEMO_MODE}" = "true" ]; then
+  bash "${REPO_ROOT}/scripts/demo/install-cron.sh"
+fi
 
 echo ""
 echo "############################################################"

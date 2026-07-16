@@ -1,11 +1,9 @@
 #!/usr/bin/env bash
 # Usage: ./seed-demo.sh
 #
-# Populates the Open Suite demo with light, realistic data so every portal
-# widget shows something: upcoming calendar events, a couple of files, and a
-# short chat thread between Jane and John. Idempotent — safe to run daily as a
-# reset (fixed ids/paths are overwritten; event dates are recomputed to stay
-# upcoming; the chat room is only seeded once).
+# Resets the stateful public-demo fixtures and refreshes the idempotent ones:
+# upcoming calendar events, La Suite Docs, a clean unread Mail inbox, and a
+# fresh unread chat thread between Jane and John.
 #
 # Requires (env or the `demo-seed` secret in mb-bureaublad):
 #   DOMAIN     e.g. suite.example.com
@@ -83,7 +81,7 @@ restore_direct_access() {
   return "$rc"
 }
 
-# The Synapse admin token minted for step 3 lives only for this run.
+# The Synapse admin token minted for the Chat step lives only for this run.
 SEED_ADMIN_TOKEN=""
 synapse_sql() { # SQL on stdin
   local pw
@@ -129,7 +127,7 @@ kubectl -n mb-nextcloud exec nextcloud-cluster-rw-0 -c postgresql -- \
   -c "DELETE FROM oc_activity WHERE file ~ '/Document( \\(\\d+\\))?\\.docx$'" >/dev/null || \
   echo "    !! activity purge failed (non-fatal)"
 
-echo "==> [1/3] Calendar — upcoming events (each with a Meet link)"
+echo "==> [1/4] Calendar — upcoming events (each with a Meet link)"
 # Meet is OIDC-native; mint johndoe a token (direct-access grant on the meet
 # client) so we can create a room per event. Its URL goes in the event location,
 # which the portal surfaces as a "Join" button.
@@ -218,7 +216,7 @@ put_event demo-standup-os 1 09 1 dmo-stnd-upx "Team standup"
 put_event demo-review-os  3 14 1 dmo-rviw-qtr "Q3 deck review with Jane"
 put_event demo-1on1-os    5 11 1 dmo-oneo-one "1:1 John and Jane"
 
-echo "==> [2/3] Docs — La Suite documents"
+echo "==> [2/4] Docs — La Suite documents"
 # La Suite Docs is OIDC-native; mint johndoe a token via Keycloak direct-access
 # grant on the docs client (ensure that grant is enabled first).
 DOCS_CID=$(kubectl -n mb-keycloak get secret keycloak-keycloak-config-cli -o jsonpath="{.data.MB_CLIENT_SECRET_DOCS}" | base64 -d)
@@ -245,7 +243,81 @@ else
   echo "    !! could not obtain a Docs token — skipping"
 fi
 
-echo "==> [3/3] Chat — Jane ↔ John direct message"
+echo "==> [3/4] Mail — reset demo inbox and add unread messages"
+if kubectl -n mb-messages get deploy messages-backend >/dev/null 2>&1; then
+  # Delete only threads visible to the named public-demo mailboxes. This uses
+  # the application's ORM so cascade and blob lifecycle rules stay intact.
+  kubectl -n mb-messages exec deploy/messages-backend -- \
+    python manage.py shell -c "
+from core.models import Thread
+demo_local_parts = ['johndoe', 'janedoe']
+threads = Thread.objects.filter(
+    accesses__mailbox__local_part__in=demo_local_parts,
+    accesses__mailbox__domain__name='${DOMAIN}',
+).distinct()
+count = threads.count()
+threads.delete()
+print(f'    - removed {count} demo mail threads')
+"
+
+  seed_mail() { # sender name, sender address, subject, message id suffix, body
+    local sender_name="$1" sender_address="$2" subject="$3" suffix="$4" body="$5"
+    printf 'From: %s <%s>\r\nTo: John Doe <johndoe@%s>\r\nSubject: %s\r\nDate: %s\r\nMessage-ID: <%s-%s@%s>\r\nMIME-Version: 1.0\r\nContent-Type: text/plain; charset=UTF-8\r\n\r\n%s\r\n' \
+      "${sender_name}" "${sender_address}" "${DOMAIN}" "${subject}" \
+      "$(LC_ALL=C date -R)" "$(date -u +%Y%m%d)" "${suffix}" "${DOMAIN}" "${body}" |
+      curl -fsS --max-time 20 --url smtp://127.0.0.1:25 \
+        --mail-from "${sender_address}" --mail-rcpt "johndoe@${DOMAIN}" \
+        --upload-file - >/dev/null
+    echo "    + ${subject}"
+  }
+
+  seed_mail "Jane Doe" "janedoe@${DOMAIN}" \
+    "Q3 deck review" "q3-review" \
+    "Hi John,
+
+I added my comments to the Q3 deck. Can you review the final two slides before our meeting?
+
+Jane"
+  seed_mail "People Operations" "people@${DOMAIN}" \
+    "Complete your team profile" "team-profile" \
+    "Please add your working hours and emergency contact to your team profile this week."
+  seed_mail "Procurement" "procurement@${DOMAIN}" \
+    "Laptop renewal approved" "laptop-renewal" \
+    "Your laptop renewal request has been approved. We will send the delivery details shortly."
+
+  # The MTA hands messages to the backend asynchronously. Do not report a
+  # successful reset until all three baseline messages are visible and unread.
+  mail_ready=false
+  for _ in $(seq 1 20); do
+    mail_state=$(kubectl -n mb-messages exec deploy/messages-backend -- \
+      python manage.py shell -c "
+from core.models import Message, ThreadAccess
+messages = Message.objects.filter(
+    thread__accesses__mailbox__local_part='johndoe',
+    thread__accesses__mailbox__domain__name='${DOMAIN}',
+).distinct().count()
+unread = ThreadAccess.objects.filter(
+    mailbox__local_part='johndoe',
+    mailbox__domain__name='${DOMAIN}',
+    read_at__isnull=True,
+).count()
+print(f'{messages}:{unread}')
+" | tail -1)
+    if [ "${mail_state}" = "3:3" ]; then
+      mail_ready=true
+      break
+    fi
+    sleep 1
+  done
+  [ "${mail_ready}" = true ] || {
+    echo "!! seed-demo: Mail reset did not converge (expected 3 messages/3 unread, got ${mail_state:-unknown})" >&2
+    exit 1
+  }
+else
+  echo "    messages app is disabled — skipping"
+fi
+
+echo "==> [4/4] Chat — reset Jane ↔ John direct message"
 SYN=$(kubectl -n mb-element get pods -o name | grep -i "synapse-" | grep -iv keygen | head -1)
 # Mint a run-scoped Synapse admin token. Password login is disabled (OIDC-only
 # Synapse), so shared-secret registration is unusable; bootstrap a seedadmin
@@ -273,13 +345,26 @@ AAT="Authorization: Bearer $2"
 curl -s -X PUT "$B/_synapse/admin/v2/users/$JOHN" -H "$AAT" -H "Content-Type: application/json" -d "{\"displayname\":\"John Doe\"}" >/dev/null
 curl -s -X PUT "$B/_synapse/admin/v2/users/$JANE" -H "$AAT" -H "Content-Type: application/json" -d "{\"displayname\":\"Jane Doe\"}" >/dev/null
 AT="Authorization: Bearer $(curl -s -X POST "$B/_synapse/admin/v1/users/$JOHN/login" -H "$AAT" -H "Content-Type: application/json" -d "{}" | python3 -c "import json,sys;print(json.load(sys.stdin)[\"access_token\"])")"
-# Idempotent: skip if John already has a DM with Jane (m.direct account data).
-HAS=$(curl -s "$B/_matrix/client/v3/user/$JOHN/account_data/m.direct" -H "$AT" | python3 -c "import json,sys
+JT=$(curl -s -X POST "$B/_synapse/admin/v1/users/$JANE/login" -H "$AAT" -H "Content-Type: application/json" -d "{}" | python3 -c "import json,sys;print(json.load(sys.stdin)[\"access_token\"])")
+# Purge every room currently registered as this demo DM. The v1 Synapse admin
+# endpoint is synchronous, so room creation below cannot race the old purge.
+ROOMS=$(curl -s "$B/_matrix/client/v3/user/$JOHN/account_data/m.direct" -H "$AT" | python3 -c "import json,sys
 try: d=json.load(sys.stdin)
 except Exception: d={}
-print(\"yes\" if isinstance(d,dict) and d.get(\"$JANE\") else \"no\")")
-if [ "$HAS" = "yes" ]; then echo "    DM already present — skipping"; exit 0; fi
-JT=$(curl -s -X POST "$B/_synapse/admin/v1/users/$JANE/login" -H "$AAT" -H "Content-Type: application/json" -d "{}" | python3 -c "import json,sys;print(json.load(sys.stdin)[\"access_token\"])")
+rooms=d.get(\"$JANE\", []) if isinstance(d,dict) else []
+print(\" \".join(x for x in rooms if isinstance(x,str)))")
+for OLD_RID in $ROOMS; do
+  STATUS=$(curl -s -o /tmp/demo-room-delete.json -w '%{http_code}' \
+    -X DELETE "$B/_synapse/admin/v1/rooms/$OLD_RID" \
+    -H "$AAT" -H "Content-Type: application/json" \
+    -d '{"block":false,"purge":true}')
+  case "$STATUS" in
+    2*) echo "    - purged old DM ${OLD_RID}" ;;
+    *) echo "!! seed-demo: Synapse could not purge ${OLD_RID} (HTTP ${STATUS})" >&2; cat /tmp/demo-room-delete.json >&2; exit 1 ;;
+  esac
+done
+curl -s -X PUT "$B/_matrix/client/v3/user/$JOHN/account_data/m.direct" -H "$AT" -H "Content-Type: application/json" -d '{}' >/dev/null
+curl -s -X PUT "$B/_matrix/client/v3/user/$JANE/account_data/m.direct" -H "Authorization: Bearer $JT" -H "Content-Type: application/json" -d '{}' >/dev/null
 # Create a real DM: no name, is_direct, so clients show it as the other person.
 RID=$(curl -s -X POST "$B/_matrix/client/v3/createRoom" -H "$AT" -H "Content-Type: application/json" -d "{\"is_direct\":true,\"invite\":[\"$JANE\"],\"preset\":\"trusted_private_chat\"}" | python3 -c "import json,sys;print(json.load(sys.stdin)[\"room_id\"])")
 # Mark it as a direct message for both users so it renders as a DM.
@@ -292,7 +377,7 @@ snd "$AT" "Hi Jane, did you get the Q3 deck?"
 snd "Authorization: Bearer $JT" "Hey John, yes reviewing it now."
 snd "$AT" "Great, lets sync after standup."
 snd "Authorization: Bearer $JT" "Works for me, see you at 10."
-echo "    seeded DM thread"
+echo "    + seeded fresh unread DM thread"
 SH
 
-echo "==> Demo data seeded."
+echo "==> Demo reset complete."
