@@ -1,0 +1,104 @@
+name: messages images
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "patches/messages/**"
+      - ".github/workflows/messages-images.yaml"
+  pull_request:
+    branches: [main]
+    paths:
+      - "patches/messages/**"
+      - ".github/workflows/messages-images.yaml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  packages: write
+
+env:
+  MESSAGES_REPO: https://github.com/suitenumerique/messages.git
+  MESSAGES_REF: v0.8.0
+  IMAGE_TAG: v0.8.0-opensuite.1
+
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    env:
+      DOCKER_USER: 1001
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Fetch Messages source and apply patches
+        run: |
+          git clone --depth 1 --branch "$MESSAGES_REF" "$MESSAGES_REPO" messages-src
+          for patch in patches/messages/*.patch; do
+            echo "==> Applying Messages patch: $(basename "$patch")"
+            git -C messages-src apply "../$patch"
+          done
+
+      - name: Verify frontend
+        working-directory: messages-src/src/frontend
+        run: |
+          npm ci
+          npm run lint
+          npm run build
+
+      - name: Verify backend bulk deletion
+        working-directory: messages-src
+        run: |
+          make create-env-files
+          mkdir -p data/static
+          sudo chown -R 1001:1001 data
+          bin/pytest core/tests/api/test_threads_bulk_delete.py
+
+  build:
+    needs: verify
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        include:
+          - component: backend
+            context: messages-src/src/backend
+            image: ghcr.io/open-suite/messages-backend
+          - component: frontend
+            context: messages-src/src/frontend
+            image: ghcr.io/open-suite/messages-frontend
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Fetch Messages source and apply patches
+        run: |
+          git clone --depth 1 --branch "$MESSAGES_REF" "$MESSAGES_REPO" messages-src
+          for patch in patches/messages/*.patch; do
+            echo "==> Applying Messages patch: $(basename "$patch")"
+            git -C messages-src apply "../$patch"
+          done
+
+      - uses: docker/setup-qemu-action@v3
+      - uses: docker/setup-buildx-action@v3
+      - uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - id: meta
+        uses: docker/metadata-action@v5
+        with:
+          images: ${{ matrix.image }}
+          tags: |
+            type=raw,value=${{ env.IMAGE_TAG }}
+            type=sha
+      - uses: docker/build-push-action@v6
+        with:
+          context: ${{ matrix.context }}
+          target: runtime-prod
+          build-args: |
+            DOCKER_USER=1000
+          push: ${{ github.event_name != 'pull_request' }}
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          platforms: linux/amd64,linux/arm64
+          cache-from: type=gha,scope=messages-${{ matrix.component }}
+          cache-to: type=gha,mode=max,scope=messages-${{ matrix.component }}

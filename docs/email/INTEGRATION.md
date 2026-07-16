@@ -30,7 +30,11 @@ correctly, and consume the published images.
 
 ## Architecture (from the upstream compose + env contract)
 
-Published images (GHCR, no building needed): `ghcr.io/suitenumerique/messages-{backend,frontend,mta-in,mta-out}` (0.7.0 at time of writing).
+The MTA images are the published upstream
+`ghcr.io/suitenumerique/messages-{mta-in,mta-out}:0.8.0` images. Backend and
+frontend are reproducibly built from the pinned upstream `v0.8.0` source plus
+`patches/messages/*.patch` as
+`ghcr.io/open-suite/messages-{backend,frontend}:v0.8.0-opensuite.1`.
 
 Services:
 - backend — Django REST API + custom MDA (mail delivery agent). Needs Postgres,
@@ -107,9 +111,14 @@ Everything survives a bare `helmfile apply`; nothing is kubectl-patched.
   hostPort 25, mta-out :587, single-node OpenSearch statefulset), slim
   override values for the shared Bitnami postgresql/redis/minio charts, and
   `messages` entries in every environment-default map (application,
-  authentication clients, cache, container images pinned to the published
-  0.8.0 tags, database, hostname, objectstore, pvc, tls). All releases are
-  gated on `application.messages.enabled` (default false).
+  authentication clients, cache, container images, database, hostname,
+  objectstore, pvc, tls). Backend/frontend are pinned to the Open Suite patch
+  build; MTA images remain pinned to the published upstream 0.8.0 tags. All
+  releases are gated on `application.messages.enabled` (default false).
+- `patches/messages/permanent-trash-delete.patch` — adds mailbox-scoped
+  permanent deletion for trashed messages plus confirmed "Delete forever" and
+  "Empty trash" controls. `.github/workflows/messages-images.yaml` verifies
+  the backend tests and frontend build before publishing the patched images.
 - `patches/local/keycloak-realm-messages-clients.patch` — realm import gains
   the `messages` OIDC client, the `rest-api` service-account client, and the
   `service-account-rest-api` user with the realm-management roles the backend
