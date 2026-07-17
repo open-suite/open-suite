@@ -2,17 +2,46 @@ diff --git a/helmfile/apps/bureaublad/values.yaml.gotmpl b/helmfile/apps/bureaub
 index d78c692..e932c80 100644
 --- a/helmfile/apps/bureaublad/values.yaml.gotmpl
 +++ b/helmfile/apps/bureaublad/values.yaml.gotmpl
-@@ -69,6 +69,18 @@ backend:
+@@ -43,9 +43,23 @@ backend:
+   networkPolicy:
+     extraEgress:
+       # External https access
+       - ports:
+           - port: 443
+             protocol: TCP
++      {{- if .Values.application.messages.enabled }}
++      # Open Suite: direct portal widget access to the in-cluster Mail API.
++      - ports:
++          - port: 8000
++            protocol: TCP
++        to:
++          - namespaceSelector:
++              matchLabels:
++                kubernetes.io/metadata.name: {{ .Values.application.messages.namespace | quote }}
++            podSelector:
++              matchLabels:
++                app.kubernetes.io/name: messages
++                app.kubernetes.io/component: backend
++      {{- end }}
+       {{- if .Values.ai.llm.endpoint.isInternal }}
+       # AI connectivity
+       - ports:
+@@ -69,6 +83,23 @@ backend:
      OIDC_POST_LOGIN_REDIRECT_URI: {{ $baseUrl }}
      OIDC_POST_LOGOUT_REDIRECT_URI: {{ $baseUrl }}
      OIDC_TOKEN_ENDPOINT: {{ .Values.authentication.oidc.token_endpoint | quote }}
 +    OIDC_INTROSPECTION_ENDPOINT: {{ .Values.authentication.oidc.introspection_endpoint | quote }}
-+    # Open Suite: wire the portal calendar/tasks to Nextcloud (CalDAV). The
-+    # fork's backend reads these; upstream ignores unknown env vars.
++    # Open Suite integrations consumed by the portal fork.
 +    CALENDAR_URL: "https://{{ .Values.global.hostname.nextcloud | default "nextcloud" }}.{{ .Values.global.domain }}/apps/calendar"
 +    CALENDAR_CARD: "true"
 +    TASK_URL: "https://{{ .Values.global.hostname.nextcloud | default "nextcloud" }}.{{ .Values.global.domain }}"
 +    TASK_AUDIENCE: "nextcloud"
++    {{- if .Values.application.messages.enabled }}
++    MESSAGES_URL: "https://{{ .Values.global.hostname.messages }}.{{ .Values.global.domain }}"
++    MESSAGES_API_URL: "http://messages-backend.{{ .Values.application.messages.namespace }}.svc.cluster.local:8000"
++    MESSAGES_AUDIENCE: {{ .Values.authentication.client.messages.client_id | quote }}
++    MESSAGES_CARD: "true"
++    {{- end }}
 +    {{- if .Values.global.tls.selfSigned }}
 +    # Local/dev only: every host serves a self-signed cert, so the backend's
 +    # outbound client (OIDC code exchange, CalDAV) cannot verify TLS.

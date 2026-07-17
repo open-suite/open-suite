@@ -119,6 +119,10 @@ Everything survives a bare `helmfile apply`; nothing is kubectl-patched.
   permanent deletion for trashed messages plus confirmed "Delete forever" and
   "Empty trash" controls. `.github/workflows/messages-images.yaml` verifies
   the backend tests and frontend build before publishing the patched images.
+- `patches/local/bureaublad-calendar-env.patch` — exposes Mail in the portal
+  config and gives the portal backend a narrowly scoped in-cluster API path.
+  The portal widget shows the identity mailbox unread count, recent unread
+  messages, and direct Inbox/Compose actions.
 - `patches/local/keycloak-realm-messages-clients.patch` — realm import gains
   the `messages` OIDC client, the `rest-api` service-account client, and the
   `service-account-rest-api` user with the realm-management roles the backend

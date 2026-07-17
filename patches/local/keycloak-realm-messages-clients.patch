@@ -50,7 +50,7 @@ index 5e284cb..6ce73a7 100644
 +              "oidc.ciba.grant.enabled": "false",
 +              "backchannel.logout.session.required": "true",
 +              "backchannel.logout.url": "https://{{ .Values.global.hostname.messages }}.{{ .Values.global.domain }}/api/v1.0/logout/",
-+              "standard.token.exchange.enabled": "false",
++              "standard.token.exchange.enabled": "true",
 +              "frontchannel.logout.url": "https://{{ .Values.global.hostname.messages }}.{{ .Values.global.domain }}/api/v1.0/logout/",
 +              "post.logout.redirect.uris": "https://{{ .Values.global.hostname.messages }}.{{ .Values.global.domain }}/*",
 +              "frontchannel.logout.session.required": "false",
