@@ -85,7 +85,12 @@ try {
   try {
     await logoutLink.waitFor({ state: "visible", timeout: 5000 });
     const logoutHref = await logoutLink.getAttribute("href");
-    if (logoutHref === `https://bridge.${DOMAIN}/api/v1/auth/logout`)
+    const logoutUrl = new URL(logoutHref);
+    if (
+      logoutUrl.hostname === `auth.${DOMAIN}` &&
+      logoutUrl.pathname === "/logout" &&
+      logoutUrl.searchParams.get("rd") === `https://bridge.${DOMAIN}/`
+    )
       ok("suite header exposes the coordinated logout action");
     else fail("portal logout action", `unexpected href: ${logoutHref}`);
   } catch (e) {

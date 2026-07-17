@@ -249,7 +249,7 @@
 
     var logout = document.createElement("a");
     logout.className = "ko-logout";
-    logout.href = origin("bridge") + "/api/v1/auth/logout";
+    logout.href = origin("auth") + "/logout?rd=" + encodeURIComponent(origin("bridge") + "/");
     logout.textContent = "Log out";
     logout.setAttribute("aria-label", "Logout");
     bar.appendChild(logout);

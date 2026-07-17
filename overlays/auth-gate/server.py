@@ -289,6 +289,8 @@ def update_session_tokens(session: dict[str, object], tokens: dict[str, object],
     session["access_token"] = str(tokens["access_token"])
     if tokens.get("refresh_token"):
         session["refresh_token"] = str(tokens["refresh_token"])
+    if tokens.get("id_token"):
+        session["id_token"] = str(tokens["id_token"])
     session["token_exp"] = now + int(tokens.get("expires_in", 0))
 
 
@@ -506,10 +508,12 @@ class Handler(http.server.BaseHTTPRequestHandler):
         cookies = parse_cookies(self.headers.get("Cookie"))
         auth_cookie = cookies.get(COOKIE_NAME).value if cookies.get(COOKIE_NAME) else None
         sid = unsign(auth_cookie) if auth_cookie else None
-        if sid:
-            SESSIONS.pop(sid, None)
+        session = SESSIONS.pop(sid, None) if sid else None
         rd = safe_redirect_target(params.get("rd", [""])[0])
-        logout_query = urllib.parse.urlencode({"client_id": CLIENT_ID, "post_logout_redirect_uri": rd})
+        logout_params = {"client_id": CLIENT_ID, "post_logout_redirect_uri": rd}
+        if session and session.get("id_token"):
+            logout_params["id_token_hint"] = str(session["id_token"])
+        logout_query = urllib.parse.urlencode(logout_params)
         self.redirect(f"{END_SESSION_ENDPOINT}?{logout_query}", {"Set-Cookie": clear_cookie_header(COOKIE_NAME)})
 
     def handle_frontchannel_logout(self) -> None:
