@@ -26,6 +26,7 @@ jobs:
         run: |
           node --check ci/smoke/authenticated.mjs
           node --check overlays/portal-header/opensuite-header.js
+          node ci/test-element-sync-migration.mjs
       - name: Check PHP
         run: find images/nextcloud/meetcal -name '*.php' -print0 | xargs -0 -n1 php -l
       - name: Render environment values

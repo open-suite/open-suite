@@ -1,0 +1,33 @@
+diff --git a/helmfile/apps/element/values-element-web.yaml.gotmpl b/helmfile/apps/element/values-element-web.yaml.gotmpl
+index 55e6c1a..86aba24 100644
+--- a/helmfile/apps/element/values-element-web.yaml.gotmpl
++++ b/helmfile/apps/element/values-element-web.yaml.gotmpl
+@@ -94,9 +94,11 @@ networkPolicy:
+          protocol: TCP
+ 
+ # Bureaublad return button: an initContainer reads the image's index.html,
+-# injects a same-origin `<script src="/bureaublad-button.js">` tag before
+-# `</body>`, and writes the result to an emptyDir that's mounted back over
+-# the original. The JS itself is mounted from a ConfigMap into /app/.
++# injects a same-origin `<script src="/bureaublad-button.js">` tag immediately
++# before Element's main bundle, and writes the result to an emptyDir that's
++# mounted back over the original. Loading first also lets Open Suite run
++# browser-state migrations before Element opens its IndexedDB sync store.
++# The JS itself is mounted from a ConfigMap into /app/.
+ extraDeploy:
+   - apiVersion: v1
+     kind: ConfigMap
+@@ -190,8 +192,11 @@ initContainers:
+       - -c
+       - |
+         set -e
+-        SNIPPET='<script src="/bureaublad-button.js"></script></body>'
+-        sed "s|</body>|${SNIPPET}|" /app/index.html > /modified/index.html
++        BUNDLE_TAG='<script src="bundles/'
++        test "$(grep -c "${BUNDLE_TAG}" /app/index.html)" -eq 1 || {
++          echo "ERROR: expected exactly one Element bundle script in index.html" >&2; exit 1;
++        }
++        sed "s|${BUNDLE_TAG}|<script src=\"/bureaublad-button.js\"></script>${BUNDLE_TAG}|" /app/index.html > /modified/index.html
+     resources:
+       requests:
+         cpu: {{ $cpuReq | quote }}
