@@ -21,6 +21,7 @@ class SessionTests(unittest.TestCase):
         tokens = {
             "access_token": "access-1",
             "refresh_token": "refresh-1",
+            "id_token": "id-1",
             "expires_in": 300,
             "refresh_expires_in": 3_600,
         }
@@ -66,7 +67,35 @@ class SessionTests(unittest.TestCase):
         refresh.assert_called_once_with("refresh-1")
         self.assertEqual(session["access_token"], "access-2")
         self.assertEqual(session["refresh_token"], "refresh-2")
+        self.assertEqual(session["id_token"], "id-1")
         self.assertEqual(session["token_exp"], 1_300)
+
+    def test_logout_clears_session_and_skips_keycloak_confirmation(self) -> None:
+        cookie, _ = self.make_session()
+        sid = server.unsign(cookie)
+        httpd = server.http.server.ThreadingHTTPServer(("127.0.0.1", 0), server.Handler)
+        thread = threading.Thread(target=httpd.serve_forever)
+        thread.start()
+        try:
+            connection = http.client.HTTPConnection("127.0.0.1", httpd.server_port)
+            connection.request(
+                "GET",
+                "/logout?rd=https%3A%2F%2Fbridge.example.test%2F",
+                headers={"Cookie": f"{server.COOKIE_NAME}={cookie}"},
+            )
+            response = connection.getresponse()
+            response.read()
+        finally:
+            httpd.shutdown()
+            httpd.server_close()
+            thread.join()
+
+        query = server.urllib.parse.parse_qs(server.urllib.parse.urlparse(response.getheader("Location")).query)
+        self.assertEqual(response.status, 302)
+        self.assertEqual(query["id_token_hint"], ["id-1"])
+        self.assertEqual(query["post_logout_redirect_uri"], ["https://bridge.example.test/"])
+        self.assertIn("Max-Age=0", response.getheader("Set-Cookie"))
+        self.assertNotIn(sid, server.SESSIONS)
 
     def test_session_fails_closed_during_keycloak_error(self) -> None:
         cookie, _ = self.make_session()
