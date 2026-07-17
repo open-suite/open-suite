@@ -377,38 +377,70 @@ curl -s -X PUT "$B/_synapse/admin/v2/users/$JOHN" -H "$AAT" -H "Content-Type: ap
 curl -s -X PUT "$B/_synapse/admin/v2/users/$JANE" -H "$AAT" -H "Content-Type: application/json" -d "{\"displayname\":\"Jane Doe\"}" >/dev/null
 AT="Authorization: Bearer $(curl -s -X POST "$B/_synapse/admin/v1/users/$JOHN/login" -H "$AAT" -H "Content-Type: application/json" -d "{}" | python3 -c "import json,sys;print(json.load(sys.stdin)[\"access_token\"])")"
 JT=$(curl -s -X POST "$B/_synapse/admin/v1/users/$JANE/login" -H "$AAT" -H "Content-Type: application/json" -d "{}" | python3 -c "import json,sys;print(json.load(sys.stdin)[\"access_token\"])")
-# Purge every room currently registered as this demo DM. The v1 Synapse admin
-# endpoint is synchronous, so room creation below cannot race the old purge.
+# Keep one stable DM room. Recreating it on every reset leaves purged rooms in
+# Element's local cache, where they render as duplicate "Jane Doe" conversations
+# even though Synapse only knows about the newest room.
 ROOMS=$(curl -s "$B/_matrix/client/v3/user/$JOHN/account_data/m.direct" -H "$AT" | python3 -c "import json,sys
 try: d=json.load(sys.stdin)
 except Exception: d={}
 rooms=d.get(\"$JANE\", []) if isinstance(d,dict) else []
 print(\" \".join(x for x in rooms if isinstance(x,str)))")
-for OLD_RID in $ROOMS; do
+RID=""
+for CANDIDATE in $ROOMS; do
+  MEMBERS=$(curl -fsS "$B/_matrix/client/v3/rooms/$CANDIDATE/joined_members" -H "$AT" 2>/dev/null || true)
+  VALID=$(printf '%s' "$MEMBERS" | python3 -c "import json,sys
+try: d=json.load(sys.stdin).get('joined', {})
+except Exception: d={}
+print('yes' if '$JOHN' in d and '$JANE' in d else 'no')")
+  if [ "$VALID" = yes ] && [ -z "$RID" ]; then
+    RID="$CANDIDATE"
+    continue
+  fi
+
+  # A second live DM must be retired through each user's client API before
+  # the admin purge. The leave event removes it from syncing clients; forget
+  # prevents it from returning on a later full sync.
+  if [ "$VALID" = yes ]; then
+    curl -fsS -X POST "$B/_matrix/client/v3/rooms/$CANDIDATE/leave" -H "$AT" -H "Content-Type: application/json" -d '{}' >/dev/null
+    curl -fsS -X POST "$B/_matrix/client/v3/rooms/$CANDIDATE/leave" -H "Authorization: Bearer $JT" -H "Content-Type: application/json" -d '{}' >/dev/null
+    curl -fsS -X DELETE "$B/_matrix/client/v3/rooms/$CANDIDATE/forget" -H "$AT" >/dev/null
+    curl -fsS -X DELETE "$B/_matrix/client/v3/rooms/$CANDIDATE/forget" -H "Authorization: Bearer $JT" >/dev/null
+  fi
   STATUS=$(curl -s -o /tmp/demo-room-delete.json -w '%{http_code}' \
-    -X DELETE "$B/_synapse/admin/v1/rooms/$OLD_RID" \
+    -X DELETE "$B/_synapse/admin/v1/rooms/$CANDIDATE" \
     -H "$AAT" -H "Content-Type: application/json" \
     -d '{"block":false,"purge":true}')
   case "$STATUS" in
-    2*) echo "    - purged old DM ${OLD_RID}" ;;
-    *) echo "!! seed-demo: Synapse could not purge ${OLD_RID} (HTTP ${STATUS})" >&2; cat /tmp/demo-room-delete.json >&2; exit 1 ;;
+    2*|404) echo "    - retired extra DM ${CANDIDATE}" ;;
+    *) echo "!! seed-demo: Synapse could not purge ${CANDIDATE} (HTTP ${STATUS})" >&2; cat /tmp/demo-room-delete.json >&2; exit 1 ;;
   esac
 done
-curl -s -X PUT "$B/_matrix/client/v3/user/$JOHN/account_data/m.direct" -H "$AT" -H "Content-Type: application/json" -d '{}' >/dev/null
-curl -s -X PUT "$B/_matrix/client/v3/user/$JANE/account_data/m.direct" -H "Authorization: Bearer $JT" -H "Content-Type: application/json" -d '{}' >/dev/null
-# Create a real DM: no name, is_direct, so clients show it as the other person.
-RID=$(curl -s -X POST "$B/_matrix/client/v3/createRoom" -H "$AT" -H "Content-Type: application/json" -d "{\"is_direct\":true,\"invite\":[\"$JANE\"],\"preset\":\"trusted_private_chat\"}" | python3 -c "import json,sys;print(json.load(sys.stdin)[\"room_id\"])")
-# Mark it as a direct message for both users so it renders as a DM.
-curl -s -X PUT "$B/_matrix/client/v3/user/$JOHN/account_data/m.direct" -H "$AT" -H "Content-Type: application/json" -d "{\"$JANE\":[\"$RID\"]}" >/dev/null
-curl -s -X POST "$B/_matrix/client/v3/rooms/$RID/join" -H "Authorization: Bearer $JT" >/dev/null
-curl -s -X PUT "$B/_matrix/client/v3/user/$JANE/account_data/m.direct" -H "Authorization: Bearer $JT" -H "Content-Type: application/json" -d "{\"$JOHN\":[\"$RID\"]}" >/dev/null
-i=0
-snd(){ i=$((i+1)); curl -s -X PUT "$B/_matrix/client/v3/rooms/$RID/send/m.room.message/seed$i" -H "$1" -H "Content-Type: application/json" -d "{\"msgtype\":\"m.text\",\"body\":\"$2\"}" >/dev/null; }
-snd "$AT" "Hi Jane, did you get the Q3 deck?"
-snd "Authorization: Bearer $JT" "Hey John, yes reviewing it now."
-snd "$AT" "Great, lets sync after standup."
-snd "Authorization: Bearer $JT" "Works for me, see you at 10."
-echo "    + seeded fresh unread DM thread"
+
+if [ -z "$RID" ]; then
+  # Create a real DM: no name, is_direct, so clients show the other person.
+  RID=$(curl -fsS -X POST "$B/_matrix/client/v3/createRoom" -H "$AT" -H "Content-Type: application/json" \
+    -d "{\"is_direct\":true,\"invite\":[\"$JANE\"],\"preset\":\"trusted_private_chat\"}" \
+    | python3 -c "import json,sys;print(json.load(sys.stdin)[\"room_id\"])")
+  curl -fsS -X POST "$B/_matrix/client/v3/rooms/$RID/join" -H "Authorization: Bearer $JT" >/dev/null
+  i=0
+  snd(){ i=$((i+1)); curl -fsS -X PUT "$B/_matrix/client/v3/rooms/$RID/send/m.room.message/seed$i" -H "$1" -H "Content-Type: application/json" -d "{\"msgtype\":\"m.text\",\"body\":\"$2\"}" >/dev/null; }
+  snd "$AT" "Hi Jane, did you get the Q3 deck?"
+  snd "Authorization: Bearer $JT" "Hey John, yes reviewing it now."
+  snd "$AT" "Great, lets sync after standup."
+  snd "Authorization: Bearer $JT" "Works for me, see you at 10."
+  echo "    + created demo DM thread"
+else
+  TXN="reset-$(date +%s)-$(openssl rand -hex 4)"
+  curl -fsS -X PUT "$B/_matrix/client/v3/rooms/$RID/send/m.room.message/$TXN" \
+    -H "Authorization: Bearer $JT" -H "Content-Type: application/json" \
+    -d '{"msgtype":"m.text","body":"Morning John, I left a new comment on the Q3 deck."}' >/dev/null
+  echo "    + refreshed existing demo DM thread"
+fi
+
+# Keep both users' direct-room metadata canonical even if an old entry was
+# invalid or an extra room was retired above.
+curl -fsS -X PUT "$B/_matrix/client/v3/user/$JOHN/account_data/m.direct" -H "$AT" -H "Content-Type: application/json" -d "{\"$JANE\":[\"$RID\"]}" >/dev/null
+curl -fsS -X PUT "$B/_matrix/client/v3/user/$JANE/account_data/m.direct" -H "Authorization: Bearer $JT" -H "Content-Type: application/json" -d "{\"$JOHN\":[\"$RID\"]}" >/dev/null
 SH
 
 echo "==> Demo reset complete."
