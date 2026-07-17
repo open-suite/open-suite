@@ -136,6 +136,10 @@
       "padding:6px 10px;border-radius:6px;white-space:nowrap;cursor:pointer;background:none;border:0;font:inherit;}",
       "#" + HEADER_ID + " .ko-link:hover{background:rgba(255,255,255,.10);color:#fff;}",
       "#" + HEADER_ID + " .ko-link.ko-active{background:rgba(255,255,255,.16);color:#fff;font-weight:600;}",
+      "#" + HEADER_ID + " .ko-logout{margin-left:auto;display:flex;align-items:center;color:#cdd6e0;text-decoration:none;",
+      "padding:6px 10px;border-radius:6px;white-space:nowrap;flex:0 0 auto;}",
+      "#" + HEADER_ID + " .ko-logout:hover,#" + HEADER_ID + " .ko-logout:focus-visible{",
+      "background:rgba(255,255,255,.10);color:#fff;outline:2px solid #fff;outline-offset:1px;}",
       "#" + HEADER_ID + " .ko-caret{font-size:10px;opacity:.8;}",
       "#" + HEADER_ID + " .ko-menu{position:absolute;top:calc(100% + 4px);left:0;min-width:180px;",
       "background:#10263d;border:1px solid rgba(255,255,255,.12);border-radius:8px;padding:6px;",
@@ -242,6 +246,14 @@
     bar.appendChild(brand);
 
     NAV.forEach(function (item) { bar.appendChild(buildItem(item)); });
+
+    var logout = document.createElement("a");
+    logout.className = "ko-logout";
+    logout.href = origin("bridge") + "/api/v1/auth/logout";
+    logout.textContent = "Log out";
+    logout.setAttribute("aria-label", "Logout");
+    bar.appendChild(logout);
+
     document.body.appendChild(bar);
     syncHeaderHeight(bar);
     if (typeof ResizeObserver !== "undefined") {
