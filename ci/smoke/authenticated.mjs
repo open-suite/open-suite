@@ -79,6 +79,16 @@ try {
   // --- Rendered global navigation on every app surface -----------------------
   await assertGlobalHeader("bridge");
 
+  const logoutLink = page.getByRole("link", { name: "Logout", exact: true });
+  try {
+    await logoutLink.waitFor({ state: "visible", timeout: 5000 });
+    const logoutHref = await logoutLink.getAttribute("href");
+    if (logoutHref === "/api/v1/auth/logout") ok("portal exposes the coordinated logout action");
+    else fail("portal logout action", `unexpected href: ${logoutHref}`);
+  } catch (e) {
+    fail("portal logout action", e.message.slice(0, 120));
+  }
+
   // Visiting nextcloud also establishes its user_oidc session (auto-SSO) and
   // stores the login token the meetcal/caldav token exchange needs.
   for (const host of ["nextcloud", "grist", "docs", "meet", "element"]) {
