@@ -731,11 +731,11 @@ index 0000000..11ac44c
 +image:
 +  registry: "ghcr.io"
 +  backend:
-+    repository: "suitenumerique/messages-backend"
-+    tag: "0.8.0"
++    repository: "open-suite/messages-backend"
++    tag: "v0.8.0-opensuite.1"
 +  frontend:
-+    repository: "suitenumerique/messages-frontend"
-+    tag: "0.8.0"
++    repository: "open-suite/messages-frontend"
++    tag: "v0.8.0-opensuite.1"
 +  mtaIn:
 +    repository: "suitenumerique/messages-mta-in"
 +    tag: "0.8.0"
@@ -1239,11 +1239,11 @@ index 469bd00..3ba14ba 100644
 +    imagePullSecret: ~
 +    registry: "ghcr.io"
 +    backend:
-+      repository: "suitenumerique/messages-backend"
-+      tag: "0.8.0"
++      repository: "open-suite/messages-backend"
++      tag: "v0.8.0-opensuite.1"
 +    frontend:
-+      repository: "suitenumerique/messages-frontend"
-+      tag: "0.8.0"
++      repository: "open-suite/messages-frontend"
++      tag: "v0.8.0-opensuite.1"
 +    mtaIn:
 +      repository: "suitenumerique/messages-mta-in"
 +      tag: "0.8.0"

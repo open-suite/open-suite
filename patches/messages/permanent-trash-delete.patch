@@ -1,0 +1,675 @@
+diff --git a/src/backend/core/api/serializers.py b/src/backend/core/api/serializers.py
+index f00c1ad..ceae4a6 100644
+--- a/src/backend/core/api/serializers.py
++++ b/src/backend/core/api/serializers.py
+@@ -2586,21 +2586,28 @@ class ProvisioningMailDomainSerializer(serializers.Serializer):
+ 
+ 
+ class ThreadBulkDeleteRequestSerializer(serializers.Serializer):
+-    """Payload for the bulk-delete endpoint: a scope and the threads/messages
+-    to permanently delete."""
++    """Payload for permanently deleting scoped messages."""
+ 
+     # Scopes accepted by the bulk-delete endpoint, mapping each to the queryset
+-    # filter selecting the messages whose rows get permanently removed. Only
+-    # "draft" is exposed for now: trashed deletion is intentionally not offered
+-    # until the product behavior for trashed messages is decided.
+-    BULK_DELETE_SCOPE_FILTERS = {"draft": {"is_draft": True}}
++    # filter selecting the messages whose rows get permanently removed.
++    BULK_DELETE_SCOPE_FILTERS = {
++        "draft": {"is_draft": True},
++        "trashed": {"is_trashed": True},
++    }
+     BULK_DELETE_SCOPES = list(BULK_DELETE_SCOPE_FILTERS)
+ 
+     scope = serializers.ChoiceField(
+         choices=BULK_DELETE_SCOPES,
+         help_text=(
+-            "Which messages to permanently delete. Only 'draft' "
+-            "(draft messages) is supported."
++            "Which messages to permanently delete: 'draft' or 'trashed'."
++        ),
++    )
++    mailbox_id = serializers.UUIDField(
++        required=False,
++        allow_null=True,
++        help_text=(
++            "Mailbox used to authorize and scope trash deletion. Required when "
++            "scope is 'trashed'."
+         ),
+     )
+     thread_ids = serializers.ListField(
+@@ -2619,8 +2626,16 @@ class ThreadBulkDeleteRequestSerializer(serializers.Serializer):
+     )
+ 
+     def validate(self, attrs):
+-        """Require at least one target list to be non-empty."""
+-        if not attrs["thread_ids"] and not attrs["message_ids"]:
++        """Require explicit targets, except for mailbox-wide trash deletion."""
++        if attrs["scope"] == "trashed" and not attrs.get("mailbox_id"):
++            raise serializers.ValidationError(
++                "mailbox_id is required when scope is 'trashed'."
++            )
++        if (
++            attrs["scope"] != "trashed"
++            and not attrs["thread_ids"]
++            and not attrs["message_ids"]
++        ):
+             raise serializers.ValidationError(
+                 "Provide at least one of thread_ids or message_ids."
+             )
+diff --git a/src/backend/core/api/viewsets/thread.py b/src/backend/core/api/viewsets/thread.py
+index 9023182..8411653 100644
+--- a/src/backend/core/api/viewsets/thread.py
++++ b/src/backend/core/api/viewsets/thread.py
+@@ -1053,15 +1053,16 @@ class ThreadViewSet(
+             ),
+             403: OpenApiResponse(
+                 description=(
+-                    "You do not have permission to delete drafts in one or more "
++                    "You do not have permission to delete messages in one or more "
+                     "targeted threads."
+                 ),
+             ),
+         },
+         description=(
+-            "Permanently delete (hard-delete) draft messages within the given "
+-            "accessible and editable threads. A thread emptied by the deletion is "
+-            "removed; otherwise its stats are recomputed."
++            "Permanently delete draft or trashed messages within accessible and "
++            "editable threads. Trashed deletion is scoped to a mailbox and may "
++            "omit target ids to empty that mailbox's trash. A thread emptied by "
++            "the deletion is removed; otherwise its stats are recomputed."
+         ),
+     )
+     @drf.decorators.action(
+@@ -1071,15 +1072,16 @@ class ThreadViewSet(
+         url_name="bulk-delete",
+     )
+     def bulk_delete(self, request):
+-        """Permanently delete draft messages in bulk.
++        """Permanently delete draft or trashed messages in bulk.
+ 
+         Unlike the soft-delete flag endpoint, this removes the message rows for
+         good. It targets only the messages matching ``scope`` so reply-draft
+-        threads keep their other messages.
++        and partially trashed threads keep their other messages.
+         """
+         serializer = serializers.ThreadBulkDeleteRequestSerializer(data=request.data)
+         serializer.is_valid(raise_exception=True)
+         scope = serializer.validated_data["scope"]
++        mailbox_id = serializer.validated_data.get("mailbox_id")
+         thread_ids = serializer.validated_data["thread_ids"]
+         message_ids = serializer.validated_data["message_ids"]
+ 
+@@ -1096,7 +1098,7 @@ class ThreadViewSet(
+         # endpoint. The view-level HasThreadEditAccess only gates authentication
+         # for this detail=False action, so the real check is this queryset scope.
+         accessible_thread_ids = models.ThreadAccess.objects.editable_by(
+-            request.user
++            request.user, mailbox_id=mailbox_id
+         ).values_list("thread_id", flat=True)
+ 
+         with transaction.atomic():
+diff --git a/src/backend/core/tests/api/test_threads_bulk_delete.py b/src/backend/core/tests/api/test_threads_bulk_delete.py
+index 40d6ff5..a1125fa 100644
+--- a/src/backend/core/tests/api/test_threads_bulk_delete.py
++++ b/src/backend/core/tests/api/test_threads_bulk_delete.py
+@@ -72,9 +72,8 @@ def test_api_bulk_delete_invalid_scope():
+     assert response.status_code == status.HTTP_400_BAD_REQUEST
+ 
+ 
+-def test_api_bulk_delete_trashed_scope_rejected():
+-    """The 'trashed' scope is intentionally not supported: deleting trashed
+-    messages is never exposed, so the request is rejected and nothing removed."""
++def test_api_bulk_delete_trashed_requires_mailbox():
++    """Trash deletion must always be scoped to a mailbox."""
+     user = factories.UserFactory()
+     thread, _ = _editable_thread(user)
+     trashed = factories.MessageFactory(thread=thread, is_trashed=True)
+@@ -214,3 +213,94 @@ def test_api_bulk_delete_drafts_ignores_non_draft_messages():
+     assert not models.Message.objects.filter(id=draft.id).exists()
+     assert models.Message.objects.filter(id=trashed.id).exists()
+     assert models.Message.objects.filter(id=active.id).exists()
++
++
++def test_api_bulk_delete_trashed_selected_threads():
++    """Selected trash deletion removes only trashed messages."""
++    user = factories.UserFactory()
++    thread, mailbox = _editable_thread(user)
++    trashed = factories.MessageFactory(thread=thread, is_trashed=True)
++    active = factories.MessageFactory(thread=thread, is_trashed=False)
++
++    client = APIClient()
++    client.force_authenticate(user=user)
++    response = client.post(
++        BULK_DELETE_URL,
++        {
++            "scope": "trashed",
++            "mailbox_id": str(mailbox.id),
++            "thread_ids": [str(thread.id)],
++        },
++        format="json",
++    )
++
++    assert response.status_code == status.HTTP_200_OK
++    assert response.json()["deleted_count"] == 1
++    assert not models.Message.objects.filter(id=trashed.id).exists()
++    assert models.Message.objects.filter(id=active.id).exists()
++
++    thread.refresh_from_db()
++    assert thread.has_trashed is False
++    assert thread.has_messages is True
++
++
++def test_api_bulk_delete_trashed_empty_mailbox_trash():
++    """Mailbox-only trash deletion empties all editable trash in that mailbox."""
++    user = factories.UserFactory()
++    mailbox = factories.MailboxFactory()
++    thread_a, _ = _editable_thread(user, mailbox=mailbox)
++    thread_b, _ = _editable_thread(user, mailbox=mailbox)
++    other_thread, other_mailbox = _editable_thread(user)
++    trashed_a = factories.MessageFactory(thread=thread_a, is_trashed=True)
++    trashed_b = factories.MessageFactory(thread=thread_b, is_trashed=True)
++    active = factories.MessageFactory(thread=thread_b, is_trashed=False)
++    other_trashed = factories.MessageFactory(
++        thread=other_thread,
++        is_trashed=True,
++    )
++
++    client = APIClient()
++    client.force_authenticate(user=user)
++    response = client.post(
++        BULK_DELETE_URL,
++        {"scope": "trashed", "mailbox_id": str(mailbox.id)},
++        format="json",
++    )
++
++    assert response.status_code == status.HTTP_200_OK
++    assert response.json()["deleted_count"] == 2
++    assert not models.Message.objects.filter(id=trashed_a.id).exists()
++    assert not models.Message.objects.filter(id=trashed_b.id).exists()
++    assert models.Message.objects.filter(id=active.id).exists()
++    assert models.Message.objects.filter(id=other_trashed.id).exists()
++    assert models.Mailbox.objects.filter(id=other_mailbox.id).exists()
++
++
++def test_api_bulk_delete_trashed_requires_edit_rights():
++    """A mailbox viewer cannot permanently delete trash."""
++    user = factories.UserFactory()
++    mailbox = factories.MailboxFactory()
++    factories.MailboxAccessFactory(
++        mailbox=mailbox,
++        user=user,
++        role=enums.MailboxRoleChoices.VIEWER,
++    )
++    thread = factories.ThreadFactory()
++    factories.ThreadAccessFactory(
++        mailbox=mailbox,
++        thread=thread,
++        role=enums.ThreadAccessRoleChoices.VIEWER,
++    )
++    trashed = factories.MessageFactory(thread=thread, is_trashed=True)
++
++    client = APIClient()
++    client.force_authenticate(user=user)
++    response = client.post(
++        BULK_DELETE_URL,
++        {"scope": "trashed", "mailbox_id": str(mailbox.id)},
++        format="json",
++    )
++
++    assert response.status_code == status.HTTP_200_OK
++    assert response.json()["deleted_count"] == 0
++    assert models.Message.objects.filter(id=trashed.id).exists()
+diff --git a/src/frontend/public/locales/common/en-US.json b/src/frontend/public/locales/common/en-US.json
+index a5412c7..77e4db3 100755
+--- a/src/frontend/public/locales/common/en-US.json
++++ b/src/frontend/public/locales/common/en-US.json
+@@ -51,6 +51,8 @@
+   "{{count}} messages have been archived._other": "{{count}} messages have been archived.",
+   "{{count}} messages have been deleted._one": "The message has been deleted.",
+   "{{count}} messages have been deleted._other": "{{count}} messages have been deleted.",
++  "{{count}} trashed messages have been permanently deleted._one": "The trashed message has been permanently deleted.",
++  "{{count}} trashed messages have been permanently deleted._other": "{{count}} trashed messages have been permanently deleted.",
+   "{{count}} messages have been reported as spam._one": "The message has been reported as spam.",
+   "{{count}} messages have been reported as spam._other": "{{count}} messages have been reported as spam.",
+   "{{count}} messages have been updated._one": "The message has been updated.",
+@@ -177,6 +179,9 @@
+   "Addresses": "Addresses",
+   "After creating the widget, you will receive the installation code to add to your website.": "After creating the widget, you will receive the installation code to add to your website.",
+   "All messages": "All messages",
++  "All messages in Trash will be permanently deleted. This action cannot be undone.": "All messages in Trash will be permanently deleted. This action cannot be undone.",
++  "All trashed messages in the selected conversations will be permanently deleted. This action cannot be undone.": "All trashed messages in the selected conversations will be permanently deleted. This action cannot be undone.",
++  "All trashed messages in this conversation will be permanently deleted. This action cannot be undone.": "All trashed messages in this conversation will be permanently deleted. This action cannot be undone.",
+   "All settings": "All settings",
+   "All users with access to the mailbox \"{{mailboxName}}\" will no longer see this thread.": "All users with access to the mailbox \"{{mailboxName}}\" will no longer see this thread.",
+   "Always": "Always",
+@@ -314,6 +319,8 @@
+   "Default signature": "Default signature",
+   "Delegated": "Delegated",
+   "Delete": "Delete",
++  "Delete forever": "Delete forever",
++  "Delete selected messages forever?": "Delete selected messages forever?",
+   "Delete auto-reply \"{{autoreply}}\"": "Delete auto-reply \"{{autoreply}}\"",
+   "Delete draft": "Delete draft",
+   "Delete drafts": "Delete drafts",
+@@ -332,6 +339,8 @@
+   "Did you forget an attachment?": "Did you forget an attachment?",
+   "Disable thread selection": "Disable thread selection",
+   "Display those images": "Display those images",
++  "Empty trash": "Empty trash",
++  "Empty trash?": "Empty trash?",
+   "DNS": "DNS",
+   "Do you have any feedback?": "Do you have any feedback?",
+   "Domain": "Domain",
+@@ -571,6 +580,7 @@
+   "No message could be deleted.": "No message could be deleted.",
+   "No message could be reported as spam.": "No message could be reported as spam.",
+   "No message could be starred.": "No message could be starred.",
++  "No trashed message could be deleted.": "No trashed message could be deleted.",
+   "No message template": "No message template",
+   "No results": "No results",
+   "No signatures": "No signatures",
+@@ -598,6 +608,7 @@
+   "Other services...": "Other services...",
+   "Outbox": "Outbox",
+   "Password": "Password",
++  "Permanently delete this conversation?": "Permanently delete this conversation?",
+   "Password is required.": "Password is required.",
+   "Password reset successfully!": "Password reset successfully!",
+   "Personal mailbox": "Personal mailbox",
+diff --git a/src/frontend/public/locales/common/fr-FR.json b/src/frontend/public/locales/common/fr-FR.json
+index 4c6cecf..8269358 100755
+--- a/src/frontend/public/locales/common/fr-FR.json
++++ b/src/frontend/public/locales/common/fr-FR.json
+@@ -74,6 +74,9 @@
+   "{{count}} messages have been deleted._one": "Le message a été supprimé.",
+   "{{count}} messages have been deleted._many": "{{count}} messages ont été supprimés.",
+   "{{count}} messages have been deleted._other": "{{count}} messages ont été supprimés.",
++  "{{count}} trashed messages have been permanently deleted._one": "Le message de la corbeille a été supprimé définitivement.",
++  "{{count}} trashed messages have been permanently deleted._many": "{{count}} messages de la corbeille ont été supprimés définitivement.",
++  "{{count}} trashed messages have been permanently deleted._other": "{{count}} messages de la corbeille ont été supprimés définitivement.",
+   "{{count}} messages have been reported as spam._one": "Le message a été signalé comme spam.",
+   "{{count}} messages have been reported as spam._many": "{{count}} messages ont été signalés comme spam.",
+   "{{count}} messages have been reported as spam._other": "{{count}} messages ont été signalés comme spam.",
+@@ -247,6 +250,9 @@
+   "Addresses": "Adresses",
+   "After creating the widget, you will receive the installation code to add to your website.": "Après avoir créé le widget, vous recevrez le code d'installation à ajouter à votre site web.",
+   "All messages": "Tous les messages",
++  "All messages in Trash will be permanently deleted. This action cannot be undone.": "Tous les messages de la corbeille seront supprimés définitivement. Cette action est irréversible.",
++  "All trashed messages in the selected conversations will be permanently deleted. This action cannot be undone.": "Tous les messages supprimés des conversations sélectionnées seront supprimés définitivement. Cette action est irréversible.",
++  "All trashed messages in this conversation will be permanently deleted. This action cannot be undone.": "Tous les messages supprimés de cette conversation seront supprimés définitivement. Cette action est irréversible.",
+   "All settings": "Tous les paramètres",
+   "All users with access to the mailbox \"{{mailboxName}}\" will no longer see this thread.": "Tous les utilisateurs avec un accès à la boîte \"{{mailboxName}}\" ne verront plus ce thread.",
+   "Always": "Toujours",
+@@ -386,6 +392,8 @@
+   "Default signature": "Signature par défaut",
+   "Delegated": "Délégué",
+   "Delete": "Supprimer",
++  "Delete forever": "Supprimer définitivement",
++  "Delete selected messages forever?": "Supprimer définitivement les messages sélectionnés ?",
+   "Delete auto-reply \"{{autoreply}}\"": "Supprimer la réponse automatique \"{{autoreply}}\"",
+   "Delete draft": "Supprimer le brouillon",
+   "Delete drafts": "Supprimer les brouillons",
+@@ -404,6 +412,8 @@
+   "Did you forget an attachment?": "N'avez-vous pas oublié une pièce jointe ?",
+   "Disable thread selection": "Désactiver la sélection",
+   "Display those images": "Afficher ces images",
++  "Empty trash": "Vider la corbeille",
++  "Empty trash?": "Vider la corbeille ?",
+   "DNS": "DNS",
+   "Do you have any feedback?": "Partager un retour ou une question",
+   "Domain": "Domaine",
+@@ -644,6 +654,7 @@
+   "No auto-reply": "Aucune réponse automatique",
+   "No DNS records found": "Aucun enregistrement DNS trouvé",
+   "No draft could be deleted.": "Aucun brouillon n'a pu être supprimé.",
++  "No trashed message could be deleted.": "Aucun message de la corbeille n'a pu être supprimé définitivement.",
+   "No event found in calendar invite": "Aucun événement trouvé dans l'invitation calendrier",
+   "No integration": "Aucune intégration",
+   "No integrations": "Aucune intégration",
+@@ -680,6 +691,7 @@
+   "Other services...": "Autres services...",
+   "Outbox": "Boîte d'envoi",
+   "Password": "Mot de passe",
++  "Permanently delete this conversation?": "Supprimer définitivement cette conversation ?",
+   "Password is required.": "Le mot de passe est requis.",
+   "Password reset successfully!": "Mot de passe réinitialisé avec succès !",
+   "Personal mailbox": "Boîte personnelle",
+diff --git a/src/frontend/public/locales/common/nl-NL.json b/src/frontend/public/locales/common/nl-NL.json
+index 677de27..13ad38b 100644
+--- a/src/frontend/public/locales/common/nl-NL.json
++++ b/src/frontend/public/locales/common/nl-NL.json
+@@ -11,6 +11,8 @@
+   "{{count}} messages have been archived._other": "{{count}} berichten zijn gearchiveerd.",
+   "{{count}} messages have been deleted._one": "Het bericht is verwijderd.",
+   "{{count}} messages have been deleted._other": "{{count}} berichten zijn verwijderd.",
++  "{{count}} trashed messages have been permanently deleted._one": "Het bericht uit de prullenbak is permanent verwijderd.",
++  "{{count}} trashed messages have been permanently deleted._other": "{{count}} berichten uit de prullenbak zijn permanent verwijderd.",
+   "{{count}} messages have been reported as spam._one": "Het bericht is gerapporteerd als spam.",
+   "{{count}} messages have been reported as spam._other": "{{count}} berichten zijn gerapporteerd als spam.",
+   "{{count}} messages have been updated._one": "Het bericht is bijgewerkt.",
+@@ -66,6 +68,9 @@
+   "Addresses": "Adressen",
+   "After creating the widget, you will receive the installation code to add to your website.": "Na het maken van de widget ontvangt u de installatiecode om uw website toe te voegen.",
+   "All messages": "Alle berichten",
++  "All messages in Trash will be permanently deleted. This action cannot be undone.": "Alle berichten in de prullenbak worden permanent verwijderd. Deze actie kan niet ongedaan worden gemaakt.",
++  "All trashed messages in the selected conversations will be permanently deleted. This action cannot be undone.": "Alle verwijderde berichten in de geselecteerde gesprekken worden permanent verwijderd. Deze actie kan niet ongedaan worden gemaakt.",
++  "All trashed messages in this conversation will be permanently deleted. This action cannot be undone.": "Alle verwijderde berichten in dit gesprek worden permanent verwijderd. Deze actie kan niet ongedaan worden gemaakt.",
+   "An address with this prefix already exists in this domain.": "Een adres met dit voorvoegsel bestaat al in dit domein.",
+   "An archive is uploading": "Een archief wordt geüpload",
+   "An error occurred while creating the address.": "Fout opgetreden tijdens het aanmaken van uw adres.",
+@@ -162,6 +167,8 @@
+   "Default signature": "Standaard handtekening",
+   "Delegated": "Overgedragen",
+   "Delete": "Verwijderen",
++  "Delete forever": "Permanent verwijderen",
++  "Delete selected messages forever?": "Geselecteerde berichten permanent verwijderen?",
+   "Delete draft": "Concept verwijderen",
+   "Delete integration \"{{name}}\"": "Integratie verwijderen \"{{name}}\"",
+   "Delete label \"{{label}}\"": "Verwijder label \"{{label}}\"",
+@@ -178,6 +185,8 @@
+   "Did you forget an attachment?": "Ben je de bijlage vergeten?",
+   "Disable thread selection": "Thread-selectie uitschakelen",
+   "Display those images": "Deze afbeeldingen weergeven",
++  "Empty trash": "Prullenbak leegmaken",
++  "Empty trash?": "Prullenbak leegmaken?",
+   "DNS": "DNS",
+   "Do you have any feedback?": "Heeft u feedback?",
+   "Domain": "Domein",
+@@ -354,7 +363,9 @@
+   "or drag and drop some files": "of sleep enkele bestanden",
+   "Other services...": "Andere diensten...",
+   "Outbox": "Postvak UIT",
++  "No trashed message could be deleted.": "Geen bericht uit de prullenbak kon permanent worden verwijderd.",
+   "Password": "Wachtwoord",
++  "Permanently delete this conversation?": "Dit gesprek permanent verwijderen?",
+   "Password is required.": "Wachtwoord is vereist.",
+   "Password reset successfully!": "Wachtwoord succesvol gereset!",
+   "Personal mailbox": "Persoonlijke mailbox",
+diff --git a/src/frontend/src/features/api/gen/models/scope_enum.ts b/src/frontend/src/features/api/gen/models/scope_enum.ts
+index d1a602f..47659bf 100644
+--- a/src/frontend/src/features/api/gen/models/scope_enum.ts
++++ b/src/frontend/src/features/api/gen/models/scope_enum.ts
+@@ -8,10 +8,12 @@
+ 
+ /**
+  * * `draft` - draft
++ * * `trashed` - trashed
+  */
+ export type ScopeEnum = (typeof ScopeEnum)[keyof typeof ScopeEnum];
+ 
+ // eslint-disable-next-line @typescript-eslint/no-redeclare
+ export const ScopeEnum = {
+   draft: "draft",
++  trashed: "trashed",
+ } as const;
+diff --git a/src/frontend/src/features/api/gen/models/thread_bulk_delete_request_request.ts b/src/frontend/src/features/api/gen/models/thread_bulk_delete_request_request.ts
+index 6278dc3..d5a2bf0 100644
+--- a/src/frontend/src/features/api/gen/models/thread_bulk_delete_request_request.ts
++++ b/src/frontend/src/features/api/gen/models/thread_bulk_delete_request_request.ts
+@@ -12,10 +12,13 @@ import type { ScopeEnum } from "./scope_enum";
+ to permanently delete.
+  */
+ export interface ThreadBulkDeleteRequestRequest {
+-  /** Which messages to permanently delete. Only 'draft' (draft messages) is supported.
++  /** Which messages to permanently delete: 'draft' or 'trashed'.
+ 
+-* `draft` - draft */
++* `draft` - draft
++* `trashed` - trashed */
+   scope: ScopeEnum;
++  /** Mailbox used to authorize and scope trash deletion. Required when scope is 'trashed'. */
++  mailbox_id?: string | null;
+   /** Threads whose scope-matching messages should be deleted. */
+   thread_ids?: string[];
+   /** Specific messages to delete (still scope-filtered). */
+diff --git a/src/frontend/src/features/layouts/components/thread-panel/components/thread-panel-header.tsx b/src/frontend/src/features/layouts/components/thread-panel/components/thread-panel-header.tsx
+index 5a8f793..daef4d1 100644
+--- a/src/frontend/src/features/layouts/components/thread-panel/components/thread-panel-header.tsx
++++ b/src/frontend/src/features/layouts/components/thread-panel/components/thread-panel-header.tsx
+@@ -5,7 +5,7 @@ import type { TreeLabel } from "@/features/api/gen/models";
+ import { useMailboxContext } from "@/features/providers/mailbox";
+ import { useTranslation } from "react-i18next";
+ import { useMemo, useState } from "react";
+-import { Button, Tooltip, Checkbox } from "@gouvfr-lasuite/cunningham-react";
++import { Button, Tooltip, Checkbox, useModals } from "@gouvfr-lasuite/cunningham-react";
+ import useRead from "@/features/message/use-read";
+ import { DropdownMenu, Icon, IconType, VerticalSeparator } from "@gouvfr-lasuite/ui-kit";
+ import ViewHelper from "@/features/utils/view-helper";
+@@ -13,6 +13,7 @@ import useArchive from "@/features/message/use-archive";
+ import useSpam from "@/features/message/use-spam";
+ import useTrash from "@/features/message/use-trash";
+ import useDeleteDrafts from "@/features/message/use-delete-drafts";
++import useDeleteTrashed from "@/features/message/use-delete-trashed";
+ import useStarred from "@/features/message/use-starred";
+ import useCanEditThreads from "@/features/message/use-can-edit-threads";
+ import { ThreadPanelFilter } from "./thread-panel-filter";
+@@ -40,9 +41,11 @@ const ThreadPanelTitle = ({ selectedThreadIds, isAllSelected, isSomeSelected, is
+     const { markAsArchived, markAsUnarchived } = useArchive();
+     const { markAsTrashed, markAsUntrashed } = useTrash();
+     const { deleteDrafts } = useDeleteDrafts();
++    const { deleteTrashed } = useDeleteTrashed();
+     const { markAsSpam, markAsNotSpam } = useSpam();
+     const { markAsStarred, markAsUnstarred } = useStarred();
+     const [isDropdownOpen, setIsDropdownOpen] = useState(false);
++    const modals = useModals();
+     const searchParams = useUrlSearchParams();
+     const isSearch = searchParams.has('search');
+     const { threads, selectedMailbox, unselectThread } = useMailboxContext();
+@@ -119,9 +122,48 @@ const ThreadPanelTitle = ({ selectedThreadIds, isAllSelected, isSomeSelected, is
+     const canReportSpam = canEditSelection && !isTrashedView && !isSentView && !isDraftsView;
+     const canTrash = canEditSelection && !isDraftsView;
+     const canDeleteDrafts = canEditSelection && isDraftsView;
++    const canDeleteTrashed = canEditSelection && isTrashedView;
+     const canManageLabels = useAbility(Abilities.CAN_MANAGE_MAILBOX_LABELS, selectedMailbox);
++    const canEmptyTrash = useAbility(Abilities.CAN_WRITE_MESSAGES, selectedMailbox);
+     const canAssignLabel = canManageLabels && !isSpamView && !isTrashedView && !isDraftsView;
+-    const hasSelectionActions = canArchive || canReportSpam || canTrash || canDeleteDrafts || canAssignLabel;
++    const hasSelectionActions = canArchive || canReportSpam || canTrash || canDeleteDrafts || canDeleteTrashed || canAssignLabel;
++
++    const handleDeleteSelectedForever = async () => {
++        if (!selectedMailbox || selectedThreadIds.size === 0) return;
++        const decision = await modals.deleteConfirmationModal({
++            title: t('Delete selected messages forever?'),
++            children: t(
++                'All trashed messages in the selected conversations will be permanently deleted. This action cannot be undone.'
++            ),
++        });
++        if (decision !== 'delete') return;
++        deleteTrashed({
++            mailboxId: selectedMailbox.id,
++            threadIds: threadIdsToMark,
++            onSuccess: () => {
++                unselectThread();
++                onClearSelection();
++            },
++        });
++    };
++
++    const handleEmptyTrash = async () => {
++        if (!selectedMailbox) return;
++        const decision = await modals.deleteConfirmationModal({
++            title: t('Empty trash?'),
++            children: t(
++                'All messages in Trash will be permanently deleted. This action cannot be undone.'
++            ),
++        });
++        if (decision !== 'delete') return;
++        deleteTrashed({
++            mailboxId: selectedMailbox.id,
++            onSuccess: () => {
++                unselectThread();
++                onClearSelection();
++            },
++        });
++    };
+ 
+     const countLabel = useMemo(() => {
+         if (isSearch) {
+@@ -303,6 +345,18 @@ const ThreadPanelTitle = ({ selectedThreadIds, isAllSelected, isSomeSelected, is
+                                     />
+                                 </Tooltip>
+                             )}
++                            {canDeleteTrashed && (
++                                <Tooltip content={t('Delete forever')} className={selectedThreadIds.size === 0 ? 'hidden' : ''}>
++                                    <Button
++                                        onClick={handleDeleteSelectedForever}
++                                        disabled={selectedThreadIds.size === 0}
++                                        icon={<Icon name="delete_forever" type={IconType.OUTLINED} />}
++                                        variant="tertiary"
++                                        size="nano"
++                                        aria-label={t('Delete forever')}
++                                    />
++                                </Tooltip>
++                            )}
+                             {canAssignLabel && (
+                                 <LabelsWidget
+                                     threadIds={Array.from(selectedThreadIds)}
+@@ -311,6 +365,17 @@ const ThreadPanelTitle = ({ selectedThreadIds, isAllSelected, isSomeSelected, is
+                             <VerticalSeparator withPadding={false} />
+                         </>
+                     )}
++                    {isTrashedView && canEmptyTrash && (threads?.count ?? 0) > 0 && !isSelectionMode && (
++                        <Tooltip content={t('Empty trash')}>
++                            <Button
++                                onClick={handleEmptyTrash}
++                                icon={<Icon name="delete_sweep" type={IconType.OUTLINED} />}
++                                variant="tertiary"
++                                size="nano"
++                                aria-label={t('Empty trash')}
++                            />
++                        </Tooltip>
++                    )}
+                     <DropdownMenu
+                         isOpen={isDropdownOpen}
+                         onOpenChange={setIsDropdownOpen}
+diff --git a/src/frontend/src/features/layouts/components/thread-view/components/thread-action-bar/index.tsx b/src/frontend/src/features/layouts/components/thread-view/components/thread-action-bar/index.tsx
+index 5b11b69..137024d 100644
+--- a/src/frontend/src/features/layouts/components/thread-view/components/thread-action-bar/index.tsx
++++ b/src/frontend/src/features/layouts/components/thread-view/components/thread-action-bar/index.tsx
+@@ -13,6 +13,7 @@ import useArchive from "@/features/message/use-archive";
+ import useSpam from "@/features/message/use-spam";
+ import useStarred from "@/features/message/use-starred";
+ import useDeleteDrafts from "@/features/message/use-delete-drafts";
++import useDeleteTrashed from "@/features/message/use-delete-trashed";
+ import useDeleteThreadAccess from "@/features/message/use-delete-thread-access";
+ import ViewHelper from "@/features/utils/view-helper";
+ import { MailboxRoleChoices, ThreadAccessRoleChoices } from "@/features/api/gen";
+@@ -33,8 +34,10 @@ export const ThreadActionBar = ({ canUndelete, canUnarchive }: ThreadActionBarPr
+     const { markAsSpam, markAsNotSpam } = useSpam();
+     const { markAsStarred, markAsUnstarred } = useStarred();
+     const { deleteDrafts } = useDeleteDrafts();
++    const { deleteTrashed } = useDeleteTrashed();
+     const { deleteThreadAccess } = useDeleteThreadAccess();
+     const isDraftsView = ViewHelper.isDraftsView();
++    const isTrashedView = ViewHelper.isTrashedView();
+     const modals = useModals();
+     const accessesWidgetRef = useRef<ThreadAccessesWidgetHandle>(null);
+     // Full edit rights on the thread — gates archive, spam, delete.
+@@ -78,6 +81,22 @@ export const ThreadActionBar = ({ canUndelete, canUnarchive }: ThreadActionBarPr
+         });
+     };
+ 
++    const handleDeleteForever = async () => {
++        if (!selectedMailbox || !selectedThread) return;
++        const decision = await modals.deleteConfirmationModal({
++            title: t('Permanently delete this conversation?'),
++            children: t(
++                'All trashed messages in this conversation will be permanently deleted. This action cannot be undone.'
++            ),
++        });
++        if (decision !== 'delete') return;
++        deleteTrashed({
++            mailboxId: selectedMailbox.id,
++            threadIds: [selectedThread.id],
++            onSuccess: unselectThread,
++        });
++    };
++
+     return (
+         <div className="thread-action-bar__container">
+             <div className="thread-action-bar">
+@@ -176,6 +195,17 @@ export const ThreadActionBar = ({ canUndelete, canUnarchive }: ThreadActionBarPr
+                         </Tooltip>
+                     )
+                 )}
++                {canEditThread && isTrashedView && (
++                    <Tooltip content={t('Delete forever')}>
++                        <Button
++                            variant="tertiary"
++                            aria-label={t('Delete forever')}
++                            size="nano"
++                            icon={<Icon name="delete_forever" type={IconType.OUTLINED} />}
++                            onClick={handleDeleteForever}
++                        />
++                    </Tooltip>
++                )}
+                 {canEditThread && <VerticalSeparator />}
+                 {hasUnread ? (
+                     <Tooltip content={t('Mark as read')}>
+diff --git a/src/frontend/src/features/message/use-delete-trashed.tsx b/src/frontend/src/features/message/use-delete-trashed.tsx
+new file mode 100644
+index 0000000..e5878ed
+--- /dev/null
++++ b/src/frontend/src/features/message/use-delete-trashed.tsx
+@@ -0,0 +1,32 @@
++import { useTranslation } from "react-i18next";
++import { useMailboxContext } from "../providers/mailbox";
++import useDelete from "./use-delete";
++
++/**
++ * Hook to permanently delete messages that are already in Trash.
++ */
++const useDeleteTrashed = () => {
++    const { t } = useTranslation();
++    const { invalidateMailbox, invalidateThreadsStats } = useMailboxContext();
++
++    const { remove, status } = useDelete("trashed", {
++        toastMessage: (deletedCount) => {
++            if (deletedCount === 0) return t("No trashed message could be deleted.");
++            return t("{{count}} trashed messages have been permanently deleted.", {
++                count: deletedCount,
++                defaultValue_one: "The trashed message has been permanently deleted.",
++            });
++        },
++        onSuccess: () => {
++            invalidateMailbox();
++            invalidateThreadsStats();
++        },
++    });
++
++    return {
++        deleteTrashed: remove,
++        status,
++    };
++};
++
++export default useDeleteTrashed;
+diff --git a/src/frontend/src/features/message/use-delete.tsx b/src/frontend/src/features/message/use-delete.tsx
+index 75656ab..2ec6415 100644
+--- a/src/frontend/src/features/message/use-delete.tsx
++++ b/src/frontend/src/features/message/use-delete.tsx
+@@ -6,6 +6,7 @@ import { useMailboxContext } from "../providers/mailbox";
+ type DeleteOnSuccess = (deletedCount?: number) => void;
+ 
+ type DeleteOptions = {
++    mailboxId?: string;
+     threadIds?: Thread["id"][];
+     messageIds?: Message["id"][];
+     onSuccess?: DeleteOnSuccess;
+@@ -51,11 +52,12 @@ const useDelete = (scope: ScopeEnum, options?: UseDeleteOptions) => {
+         },
+     });
+ 
+-    const remove = ({ threadIds = [], messageIds = [], onSuccess }: DeleteOptions) =>
++    const remove = ({ mailboxId, threadIds = [], messageIds = [], onSuccess }: DeleteOptions) =>
+         mutate(
+             {
+                 data: {
+                     scope,
++                    mailbox_id: mailboxId,
+                     thread_ids: threadIds,
+                     message_ids: messageIds,
+                 },
