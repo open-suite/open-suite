@@ -79,11 +79,14 @@ try {
   // --- Rendered global navigation on every app surface -----------------------
   await assertGlobalHeader("bridge");
 
-  const logoutLink = page.getByRole("link", { name: "Logout", exact: true });
+  const logoutLink = page
+    .locator("#ko-portal-header")
+    .getByRole("link", { name: "Logout", exact: true });
   try {
     await logoutLink.waitFor({ state: "visible", timeout: 5000 });
     const logoutHref = await logoutLink.getAttribute("href");
-    if (logoutHref === "/api/v1/auth/logout") ok("portal exposes the coordinated logout action");
+    if (logoutHref === `https://bridge.${DOMAIN}/api/v1/auth/logout`)
+      ok("suite header exposes the coordinated logout action");
     else fail("portal logout action", `unexpected href: ${logoutHref}`);
   } catch (e) {
     fail("portal logout action", e.message.slice(0, 120));
