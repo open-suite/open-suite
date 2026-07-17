@@ -35,6 +35,34 @@
     var target = nc + (path || "");
     return nc + "/apps/user_oidc/login/1?redirectUrl=" + encodeURIComponent(target);
   };
+
+  // Demo resets used to delete and recreate the seeded direct-message room.
+  // Element can retain those purged rooms in its local sync database even
+  // after Synapse no longer returns them. 09-portal-header.sh enables this
+  // one-time migration only on demo deployments. This is the same database
+  // Element's own "Clear cache and reload" action deletes; auth and both
+  // crypto databases are deliberately left intact.
+  var ELEMENT_SYNC_MIGRATION = "";
+  if (host.indexOf("element.") === 0 && ELEMENT_SYNC_MIGRATION) {
+    var elementMigrationKey = "opensuite.element.sync-migration";
+    var elementSyncDatabase = "matrix-js-sdk:riot-web-sync";
+    try {
+      if (window.localStorage.getItem(elementMigrationKey) !== ELEMENT_SYNC_MIGRATION) {
+        var deleteSyncDatabase = window.indexedDB.deleteDatabase(elementSyncDatabase);
+        deleteSyncDatabase.onsuccess = function () {
+          window.localStorage.setItem(elementMigrationKey, ELEMENT_SYNC_MIGRATION);
+        };
+        deleteSyncDatabase.onerror = function () {
+          console.warn("Open Suite could not clear Element's stale sync cache", deleteSyncDatabase.error);
+        };
+        deleteSyncDatabase.onblocked = function () {
+          console.warn("Open Suite will retry Element's sync-cache migration on the next load");
+        };
+      }
+    } catch (e) {
+      console.warn("Open Suite could not run Element's sync-cache migration", e);
+    }
+  }
   // Office dropdown deep-links into the Nextcloud Office overview sections.
   // The header sidecar rewrites these clean URLs to the stock Office app while
   // preserving the visible path for reloads, sharing, and switching sections.

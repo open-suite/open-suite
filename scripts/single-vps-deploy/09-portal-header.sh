@@ -22,19 +22,31 @@
 set -euo pipefail
 
 REPO_ROOT="$(cd "$(dirname "$0")/../.." && pwd)"
-HEADER_JS="${REPO_ROOT}/overlays/portal-header/opensuite-header.js"
+HEADER_SOURCE="${REPO_ROOT}/overlays/portal-header/opensuite-header.js"
 export KUBECONFIG=/etc/rancher/k3s/k3s.yaml
 
-[ -f "${HEADER_JS}" ] || { echo "missing ${HEADER_JS}"; exit 1; }
+[ -f "${HEADER_SOURCE}" ] || { echo "missing ${HEADER_SOURCE}"; exit 1; }
+
+# Work on a generated copy: app availability and demo-only migrations are
+# deployment facts, not defaults that should be baked into the shared source.
+HEADER_JS="$(mktemp)"
+trap 'rm -f "${HEADER_JS}"' EXIT
+cp "${HEADER_SOURCE}" "${HEADER_JS}"
 
 # Gate the Mail nav item on the messages app actually being deployed: flip the
 # MAIL_ENABLED flag in a temp copy so the shipped asset stays link-dead-free
 # when application.messages is off.
 if kubectl get deploy -n mb-messages messages-frontend >/dev/null 2>&1; then
-  TMP_HEADER="$(mktemp)"
-  sed 's/var MAIL_ENABLED = false;/var MAIL_ENABLED = true;/' "${HEADER_JS}" > "${TMP_HEADER}"
-  HEADER_JS="${TMP_HEADER}"
+  sed -i 's/var MAIL_ENABLED = false;/var MAIL_ENABLED = true;/' "${HEADER_JS}"
   echo "==> messages app detected — enabling the Mail nav item"
+fi
+
+# The old demo reset recreated Matrix rooms, leaving now-purged room copies in
+# Element's browser-side sync database. Production deployments never ran that
+# reset, so scope the one-time resync to clusters carrying the demo seed.
+if kubectl get secret -n mb-bureaublad demo-seed >/dev/null 2>&1; then
+  sed -i 's/var ELEMENT_SYNC_MIGRATION = "";/var ELEMENT_SYNC_MIGRATION = "stable-demo-dm-v1";/' "${HEADER_JS}"
+  echo "==> demo seed detected — enabling the one-time Element sync migration"
 fi
 
 # --- Static SPAs: overwrite the already-injected button file -----------------
