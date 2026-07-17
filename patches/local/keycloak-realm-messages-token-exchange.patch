@@ -1,0 +1,31 @@
+diff --git a/helmfile/apps/keycloak/keycloak.yaml.gotmpl b/helmfile/apps/keycloak/keycloak.yaml.gotmpl
+--- a/helmfile/apps/keycloak/keycloak.yaml.gotmpl
++++ b/helmfile/apps/keycloak/keycloak.yaml.gotmpl
+@@ -588,6 +588,9 @@ keycloakConfigCli:
+               "composite": true,
+               "composites": {
+                 "client": {
++                  {{- if .Values.application.messages.enabled }}
++                  "{{ .Values.authentication.client.messages.client_id }}": ["token-exchange-role"],
++                  {{- end }}
+                   "{{ .Values.authentication.client.docs.client_id }}": ["token-exchange-role"],
+                   "{{ .Values.authentication.client.openproject.client_id }}": ["token-exchange-role"],
+                   "{{ .Values.authentication.client.nextcloud.client_id }}": ["token-exchange-role"],
+@@ -604,6 +607,17 @@ keycloakConfigCli:
+             }
+           ],
+           "client": {
++            {{- if .Values.application.messages.enabled }}
++            "{{ .Values.authentication.client.messages.client_id }}": [
++              {
++                "name": "token-exchange-role",
++                "description": "",
++                "composite": false,
++                "clientRole": true,
++                "attributes": {}
++              }
++            ],
++            {{- end }}
+             "{{ .Values.authentication.client.grist.client_id }}": [
+               {
+                 "name": "token-exchange-role",
