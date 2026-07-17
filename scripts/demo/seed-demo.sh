@@ -285,12 +285,50 @@ Jane"
     "Laptop renewal approved" "laptop-renewal" \
     "Your laptop renewal request has been approved. We will send the delivery details shortly."
 
-  # The MTA hands messages to the backend asynchronously. Do not report a
-  # successful reset until all three baseline messages are visible and unread.
-  mail_ready=false
+  # The MTA hands messages to the backend asynchronously. Local demo senders
+  # can cause the inbound pipeline to initialize read_at while it resolves both
+  # sides of a thread, so first wait for delivery to settle and then make the
+  # recipient state explicitly unread through model saves. Saving each access
+  # also schedules the Messages search-index refresh.
+  mail_delivered=false
   for _ in $(seq 1 20); do
-    mail_state=$(kubectl -n mb-messages exec deploy/messages-backend -- \
+    mail_count=$(kubectl -n mb-messages exec deploy/messages-backend -- \
       python manage.py shell -c "
+from core.models import Message
+print(Message.objects.filter(
+    thread__accesses__mailbox__local_part='johndoe',
+    thread__accesses__mailbox__domain__name='${DOMAIN}',
+).distinct().count())
+" | tail -1)
+    if [ "${mail_count}" = "3" ]; then
+      mail_delivered=true
+      break
+    fi
+    sleep 1
+  done
+  [ "${mail_delivered}" = true ] || {
+    echo "!! seed-demo: Mail delivery did not converge (expected 3 messages, got ${mail_count:-unknown})" >&2
+    exit 1
+  }
+
+  kubectl -n mb-messages exec deploy/messages-backend -- \
+    python manage.py shell -c "
+from core.models import ThreadAccess
+accesses = ThreadAccess.objects.filter(
+    mailbox__local_part='johndoe',
+    mailbox__domain__name='${DOMAIN}',
+)
+for access in accesses:
+    access.read_at = None
+    access.save(update_fields=['read_at'])
+print(f'    = marked {accesses.count()} demo threads unread')
+"
+
+  # Give deferred ingestion/index work time to run before checking the durable
+  # database state. This prevents a transient null read_at from passing.
+  sleep 2
+  mail_state=$(kubectl -n mb-messages exec deploy/messages-backend -- \
+    python manage.py shell -c "
 from core.models import Message, ThreadAccess
 messages = Message.objects.filter(
     thread__accesses__mailbox__local_part='johndoe',
@@ -299,17 +337,10 @@ messages = Message.objects.filter(
 unread = ThreadAccess.objects.filter(
     mailbox__local_part='johndoe',
     mailbox__domain__name='${DOMAIN}',
-    read_at__isnull=True,
-).count()
+).filter(ThreadAccess.unread_filter()).count()
 print(f'{messages}:{unread}')
 " | tail -1)
-    if [ "${mail_state}" = "3:3" ]; then
-      mail_ready=true
-      break
-    fi
-    sleep 1
-  done
-  [ "${mail_ready}" = true ] || {
+  [ "${mail_state}" = "3:3" ] || {
     echo "!! seed-demo: Mail reset did not converge (expected 3 messages/3 unread, got ${mail_state:-unknown})" >&2
     exit 1
   }
