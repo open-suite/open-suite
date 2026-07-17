@@ -65,7 +65,7 @@ cat >/tmp/opensuite-auth-gate-client.json <<EOF
   "frontchannelLogout": true,
   "attributes": {
     "pkce.code.challenge.method": "S256",
-    "post.logout.redirect.uris": "+",
+    "post.logout.redirect.uris": "https://bridge.$DOMAIN/",
     "frontchannel.logout.url": "https://$AUTH_HOST/frontchannel-logout",
     "frontchannel.logout.session.required": "true"
   }
