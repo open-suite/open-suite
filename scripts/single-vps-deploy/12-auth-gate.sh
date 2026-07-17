@@ -41,12 +41,13 @@ KC_ADMIN_PASS="$(kubectl -n mb-keycloak exec keycloak-keycloak-0 -c keycloak -- 
   sh -c 'cat "$KC_BOOTSTRAP_ADMIN_PASSWORD_FILE"')"
 printf '%s' "${KC_ADMIN_PASS}" | \
 kubectl -n mb-keycloak exec -i keycloak-keycloak-0 -c keycloak -- sh -c '
-set -e
+set -eu
 KC=/opt/bitnami/keycloak/bin/kcadm.sh
 CFG=/tmp/opensuite-auth-gate-kcadm.config
 CLIENT_ID="$1"
 CLIENT_SECRET="$2"
 AUTH_HOST="$3"
+DOMAIN="$4"
 ADMIN_PASS="$(cat)"
 "$KC" config credentials --config "$CFG" --server http://localhost:8080/ --realm master --user admin --password "$ADMIN_PASS" >/dev/null
 CLIENT_UUID="$("$KC" get clients -r mijnbureau --config "$CFG" -q clientId="$CLIENT_ID" --fields id 2>/dev/null | grep -oE "[0-9a-f-]{36}" | head -1 || true)"
@@ -78,7 +79,7 @@ else
 fi
 CLIENT_UUID="$("$KC" get clients -r mijnbureau --config "$CFG" -q clientId="$CLIENT_ID" --fields id 2>/dev/null | grep -oE "[0-9a-f-]{36}" | head -1 || true)"
 test -n "$CLIENT_UUID"
-' sh "$CLIENT_ID" "$CLIENT_SECRET" "$AUTH_HOST"
+' sh "$CLIENT_ID" "$CLIENT_SECRET" "$AUTH_HOST" "$DOMAIN"
 
 echo "==> [3/5] Using prebuilt auth-gate image ${IMAGE}"
 
