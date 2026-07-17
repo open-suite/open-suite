@@ -94,6 +94,28 @@ try {
     await assertGlobalHeader(host);
   }
 
+  // Cross-app navigation must reuse the native Nextcloud session. A previous
+  // implementation sent every Office click through user_oidc again; Keycloak
+  // then back-channel-logged out the existing Nextcloud session and exposed a
+  // login wall in the middle of an otherwise authenticated suite.
+  await page.goto(`https://bridge.${DOMAIN}/`, { waitUntil: "domcontentloaded" });
+  const suiteHeader = page.locator("#ko-portal-header");
+  const officeButton = suiteHeader.getByRole("button", { name: "Office ▾", exact: true });
+  await officeButton.click();
+  const spreadsheetsLink = suiteHeader.getByRole("link", { name: "Spreadsheets", exact: true });
+  const spreadsheetsHref = await spreadsheetsLink.getAttribute("href");
+  if (spreadsheetsHref?.includes("/apps/user_oidc/login/")) {
+    fail("Portal -> Office auth continuity", `navigation forces OIDC: ${spreadsheetsHref}`);
+  } else {
+    await spreadsheetsLink.click();
+    await page.waitForURL(`https://nextcloud.${DOMAIN}/apps/office/spreadsheets`, { timeout: 30000 });
+    if (page.url().includes(`id.${DOMAIN}`) || page.url().includes("/login")) {
+      fail("Portal -> Office auth continuity", `landed on login: ${page.url()}`);
+    } else {
+      ok("Portal -> Office -> Spreadsheets reuses the authenticated session");
+    }
+  }
+
   // --- Portal widgets answer AND carry seeded content -----------------------
   // The empty-widget incident (Jul 2026) passed every "widget renders" check
   // while the widgets were empty because the seed had silently died. These

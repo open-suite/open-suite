@@ -30,11 +30,6 @@
   var host = window.location.hostname;
   var base = host.indexOf(".") === -1 ? host : host.slice(host.indexOf(".") + 1);
   var origin = function (sub) { return window.location.protocol + "//" + sub + "." + base; };
-  var nextcloudHref = function (path) {
-    var nc = origin("nextcloud");
-    var target = nc + (path || "");
-    return nc + "/apps/user_oidc/login/1?redirectUrl=" + encodeURIComponent(target);
-  };
 
   // Demo resets used to delete and recreate the seeded direct-message room.
   // Element can retain those purged rooms in its local sync database even
@@ -209,7 +204,7 @@
       menu.className = "ko-menu";
       item.children.forEach(function (child) {
         var a = document.createElement("a");
-        a.href = item.sub === "nextcloud" ? nextcloudHref(child.path) : origin(item.sub) + child.path;
+        a.href = origin(item.sub) + child.path;
         a.textContent = child.label;
         menu.appendChild(a);
       });
@@ -217,7 +212,7 @@
     } else {
       var link = document.createElement("a");
       link.className = "ko-link" + (isActive(item) ? " ko-active" : "");
-      link.href = item.sub === "nextcloud" ? nextcloudHref(item.path) : origin(item.sub) + (item.path || "");
+      link.href = origin(item.sub) + (item.path || "");
       link.textContent = item.label;
       wrap.appendChild(link);
     }
