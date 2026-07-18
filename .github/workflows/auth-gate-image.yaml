@@ -9,11 +9,13 @@ on:
     tags: ["v*"]
     paths:
       - "overlays/auth-gate/**"
+      - "scripts/single-vps-deploy/12-auth-gate.sh"
       - ".github/workflows/auth-gate-image.yaml"
   pull_request:
     branches: [main]
     paths:
       - "overlays/auth-gate/**"
+      - "scripts/single-vps-deploy/12-auth-gate.sh"
       - ".github/workflows/auth-gate-image.yaml"
   workflow_dispatch:
 

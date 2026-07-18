@@ -37,7 +37,7 @@ CLIENT_ID = os.environ.get("OIDC_CLIENT_ID", "opensuite-auth-gate")
 CLIENT_SECRET = os.environ["OIDC_CLIENT_SECRET"]
 COOKIE_SECRET = os.environ["COOKIE_SECRET"].encode("utf-8")
 COOKIE_NAME = os.environ.get("COOKIE_NAME", "opensuite_auth")
-STATE_COOKIE_NAME = os.environ.get("STATE_COOKIE_NAME", "opensuite_auth_state")
+STATE_COOKIE_NAME = os.environ.get("STATE_COOKIE_NAME", "__Host-opensuite_auth_state")
 COOKIE_DOMAIN = os.environ.get("COOKIE_DOMAIN", f".{DOMAIN}")
 SESSION_TTL = int(os.environ.get("SESSION_TTL_SECONDS", "604800"))
 STATE_TTL = int(os.environ.get("STATE_TTL_SECONDS", "600"))
@@ -53,44 +53,129 @@ JWKS_ENDPOINT = f"{ISSUER}/protocol/openid-connect/certs"
 
 SESSIONS: dict[str, dict[str, object]] = {}
 
-# Nextcloud richdocuments endpoints Collabora fetches server-to-server (with
-# or without index.php): the WOPI callbacks, and since CODE 26.04 also
-# /apps/richdocuments/settings/... (browsersetting/presets json). These carry
-# WOPI tokens, not a realm session; a gate 302 here makes docbrokers abort and
-# the editor hangs at "Connecting...".
-WOPI_PATH = re.compile(r"^/(index\.php/)?apps/richdocuments/(wopi|settings)/")
+# Only these public hosts are attached to the gate. Treating an arbitrary suite
+# subdomain as a protected destination would turn forwarded-host spoofing into
+# an authorization decision and would also permit open redirects after login.
+PROTECTED_HOSTS = {
+    f"bridge.{DOMAIN}",
+    f"docs.{DOMAIN}",
+    f"element.{DOMAIN}",
+    f"grist.{DOMAIN}",
+    f"meet.{DOMAIN}",
+    f"messages.{DOMAIN}",
+    f"nextcloud.{DOMAIN}",
+}
+
+# A realm token is not a suite-wide credential. Direct app tokens identify the
+# destination client in azp; exchanged tokens keep the caller in azp and put
+# the resource server in aud. Each destination therefore names both its client
+# and the callers explicitly allowed to obtain an exchanged token for it.
+BEARER_POLICIES = {
+    f"bridge.{DOMAIN}": ("bureaublad", frozenset({"bureaublad"})),
+    f"docs.{DOMAIN}": ("docs", frozenset({"bureaublad", "docs"})),
+    f"grist.{DOMAIN}": ("grist", frozenset({"bureaublad", "grist"})),
+    f"meet.{DOMAIN}": ("meet", frozenset({"bureaublad", "meet", "nextcloud"})),
+    f"messages.{DOMAIN}": ("messages", frozenset({"bureaublad", "messages"})),
+    f"nextcloud.{DOMAIN}": ("nextcloud", frozenset({"bureaublad", "nextcloud"})),
+}
+
+# Nextcloud richdocuments endpoints fetched by Collabora without a realm
+# session. Keep this narrower than the application's route tree: nearby admin
+# and font-management endpoints must remain gated. Nextcloud still validates
+# the WOPI/settings token and its own source allowlist after this pass-through.
+WOPI_ROUTES = (
+    (frozenset({"GET", "POST"}), re.compile(r"^/(?:index\.php/)?apps/richdocuments/wopi/files/[^/]+(?:/contents)?$")),
+    (frozenset({"GET"}), re.compile(r"^/(?:index\.php/)?apps/richdocuments/wopi/template/[^/]+$")),
+    (frozenset({"GET", "DELETE"}), re.compile(r"^/(?:index\.php/)?apps/richdocuments/wopi/settings$")),
+    (frozenset({"POST"}), re.compile(r"^/(?:index\.php/)?apps/richdocuments/wopi/settings/upload$")),
+    (frozenset({"GET"}), re.compile(r"^/(?:index\.php/)?apps/richdocuments/settings/fonts(?:\.json)?$")),
+    (
+        frozenset({"GET"}),
+        re.compile(r"^/(?:index\.php/)?apps/richdocuments/settings/fonts/[^/]+(?:/overview)?$"),
+    ),
+    (
+        frozenset({"GET"}),
+        re.compile(r"^/(?:index\.php/)?apps/richdocuments/settings/[A-Za-z0-9_-]+/[^/]+/[A-Za-z0-9_-]+/.+$"),
+    ),
+)
 
 # Keycloak must reach each relying party's logout endpoint without an edge
 # session. In particular, back-channel logout is server-to-server and never
 # carries the browser's gate cookie. Keep this allowlist exact: only endpoints
 # whose sole purpose is clearing an application session bypass forwardAuth.
 LOGOUT_CALLBACKS = {
-    f"bridge.{DOMAIN}": {"/api/v1/auth/logout"},
-    f"docs.{DOMAIN}": {"/api/v1.0/logout/"},
-    f"grist.{DOMAIN}": {"/o/docs/logout"},
-    f"meet.{DOMAIN}": {"/api/v1.0/logout/"},
-    f"nextcloud.{DOMAIN}": {"/index.php/apps/user_oidc/backchannel-logout/keycloak"},
+    f"bridge.{DOMAIN}": {"/api/v1/auth/logout": frozenset({"GET", "POST"})},
+    f"docs.{DOMAIN}": {"/api/v1.0/logout/": frozenset({"GET", "POST"})},
+    f"grist.{DOMAIN}": {"/o/docs/logout": frozenset({"GET"})},
+    f"meet.{DOMAIN}": {"/api/v1.0/logout/": frozenset({"GET", "POST"})},
+    f"messages.{DOMAIN}": {"/api/v1.0/logout/": frozenset({"GET", "POST"})},
+    f"nextcloud.{DOMAIN}": {
+        "/index.php/apps/user_oidc/backchannel-logout/keycloak": frozenset({"POST"}),
+    },
 }
 
 # Keys are cached ~10 min so a fresh JWKS fetch is not on every request's path.
 JWKS_CLIENT = PyJWKClient(JWKS_ENDPOINT, cache_keys=True, lifespan=600, timeout=10)
 
 
-def valid_bearer(token: str) -> dict[str, object] | None:
-    """Return verified claims for a realm-issued access token, else None.
+def token_audiences(claims: dict[str, object]) -> set[str]:
+    audience = claims.get("aud")
+    if isinstance(audience, str):
+        return {audience}
+    if isinstance(audience, list) and all(isinstance(value, str) for value in audience):
+        return set(audience)
+    return set()
 
-    Signature is checked against the realm JWKS plus iss and exp. aud is not
-    checked: callers hold tokens minted for a mix of realm clients.
-    """
+
+def bearer_allowed(claims: dict[str, object], target_host: str) -> bool:
+    policy = BEARER_POLICIES.get(target_host)
+    if not policy or not isinstance(claims.get("sub"), str) or not claims["sub"]:
+        return False
+    target_audience, allowed_parties = policy
+    authorized_party = claims.get("azp")
+    if not isinstance(authorized_party, str) or authorized_party not in allowed_parties:
+        return False
+    # Direct client tokens do not reliably include their own client in aud.
+    # Exchanged tokens must explicitly name the destination resource server.
+    return authorized_party == target_audience or target_audience in token_audiences(claims)
+
+
+def valid_bearer(token: str, target_host: str) -> dict[str, object] | None:
+    """Return verified, destination-authorized realm access-token claims."""
     try:
         key = JWKS_CLIENT.get_signing_key_from_jwt(token).key
-        return jwt.decode(
+        claims = jwt.decode(
             token,
             key,
             algorithms=["RS256", "RS384", "RS512", "ES256", "ES384", "ES512"],
             issuer=ISSUER,
             options={"verify_aud": False, "require": ["exp", "iss"]},
         )
+        return claims if bearer_allowed(claims, target_host) else None
+    except Exception:
+        return None
+
+
+def valid_id_token(token: str, nonce: str) -> dict[str, object] | None:
+    """Verify the ID token that establishes a gate session."""
+    try:
+        key = JWKS_CLIENT.get_signing_key_from_jwt(token).key
+        claims = jwt.decode(
+            token,
+            key,
+            algorithms=["RS256", "RS384", "RS512", "ES256", "ES384", "ES512"],
+            issuer=ISSUER,
+            audience=CLIENT_ID,
+            options={"require": ["exp", "iss", "aud", "sub", "nonce", "sid"]},
+        )
+        token_nonce = claims.get("nonce")
+        if not isinstance(token_nonce, str) or not hmac.compare_digest(token_nonce, nonce):
+            return None
+        authorized_party = claims.get("azp")
+        audiences = token_audiences(claims)
+        if authorized_party not in (None, CLIENT_ID) or (len(audiences) > 1 and authorized_party != CLIENT_ID):
+            return None
+        return claims
     except Exception:
         return None
 
@@ -122,11 +207,18 @@ def parse_cookies(header: str | None) -> SimpleCookie:
     return cookie
 
 
-def cookie_header(name: str, value: str, max_age: int | None, path: str = "/") -> str:
+def cookie_header(
+    name: str,
+    value: str,
+    max_age: int | None,
+    path: str = "/",
+    domain: str | None = COOKIE_DOMAIN,
+) -> str:
     cookie = SimpleCookie()
     cookie[name] = value
     cookie[name]["Path"] = path
-    cookie[name]["Domain"] = COOKIE_DOMAIN
+    if domain:
+        cookie[name]["Domain"] = domain
     if max_age is not None:
         cookie[name]["Max-Age"] = str(max_age)
     cookie[name]["HttpOnly"] = True
@@ -137,6 +229,17 @@ def cookie_header(name: str, value: str, max_age: int | None, path: str = "/") -
 
 def clear_cookie_header(name: str) -> str:
     return cookie_header(name, "", 0)
+
+
+def state_cookie_header(value: str, max_age: int) -> str:
+    # The state/PKCE verifier is needed only at auth.<domain>/callback. A
+    # __Host- cookie prevents sibling applications from receiving or replacing
+    # it while retaining Path=/ as required by the prefix.
+    return cookie_header(STATE_COOKIE_NAME, value, max_age, domain=None)
+
+
+def clear_state_cookie_header() -> str:
+    return state_cookie_header("", 0)
 
 
 def json_b64(payload: dict[str, object]) -> str:
@@ -152,29 +255,84 @@ def json_unb64(value: str) -> dict[str, object] | None:
         return None
 
 
-def request_url(handler: http.server.BaseHTTPRequestHandler) -> str:
-    proto = handler.headers.get("X-Forwarded-Proto", "https")
-    host = handler.headers.get("X-Forwarded-Host") or handler.headers.get("Host", "")
-    uri = handler.headers.get("X-Forwarded-Uri") or handler.path
-    return f"{proto}://{host}{uri}"
+def single_header(handler: http.server.BaseHTTPRequestHandler, name: str) -> str | None:
+    values = handler.headers.get_all(name, [])
+    if len(values) != 1:
+        return None
+    value = values[0].strip()
+    return value if value and "\r" not in value and "\n" not in value else None
 
 
-def is_logout_callback(handler: http.server.BaseHTTPRequestHandler) -> bool:
-    host = (handler.headers.get("X-Forwarded-Host") or "").partition(":")[0].lower()
-    uri = handler.headers.get("X-Forwarded-Uri") or ""
-    path = urllib.parse.urlparse(uri).path
-    return path in LOGOUT_CALLBACKS.get(host, set())
+def forwarded_request(handler: http.server.BaseHTTPRequestHandler) -> tuple[str, str, str] | None:
+    """Return Traefik's canonical HTTPS host, URI and method, or fail closed."""
+    proto = single_header(handler, "X-Forwarded-Proto")
+    raw_host = single_header(handler, "X-Forwarded-Host")
+    uri = single_header(handler, "X-Forwarded-Uri")
+    method = single_header(handler, "X-Forwarded-Method")
+    if proto != "https" or not raw_host or not uri or not method:
+        return None
+    if "," in raw_host or not uri.startswith("/") or uri.startswith("//"):
+        return None
+    parsed_host = urllib.parse.urlsplit(f"//{raw_host}")
+    try:
+        port = parsed_host.port
+    except ValueError:
+        return None
+    host = (parsed_host.hostname or "").lower()
+    if (
+        parsed_host.username
+        or parsed_host.password
+        or parsed_host.path
+        or parsed_host.query
+        or parsed_host.fragment
+        or port not in (None, 443)
+        or host not in PROTECTED_HOSTS
+    ):
+        return None
+    parsed_uri = urllib.parse.urlsplit(uri)
+    if parsed_uri.scheme or parsed_uri.netloc:
+        return None
+    method = method.upper()
+    if not re.fullmatch(r"[A-Z]+", method):
+        return None
+    return host, uri, method
+
+
+def request_url(request: tuple[str, str, str]) -> str:
+    host, uri, _ = request
+    return f"https://{host}{uri}"
+
+
+def is_wopi_request(request: tuple[str, str, str]) -> bool:
+    host, uri, method = request
+    if host != f"nextcloud.{DOMAIN}":
+        return False
+    path = urllib.parse.urlsplit(uri).path
+    decoded_path = urllib.parse.unquote(path)
+    # Avoid a proxy/backend decoding discrepancy turning an encoded separator
+    # or dot segment into a different Nextcloud route after authorization.
+    if decoded_path.count("/") != path.count("/") or "\\" in decoded_path:
+        return False
+    if any(segment in {".", ".."} for segment in decoded_path.split("/")):
+        return False
+    return any(method in methods and pattern.fullmatch(path) for methods, pattern in WOPI_ROUTES)
+
+
+def is_logout_callback(request: tuple[str, str, str]) -> bool:
+    host, uri, method = request
+    path = urllib.parse.urlsplit(uri).path
+    return method in LOGOUT_CALLBACKS.get(host, {}).get(path, frozenset())
 
 
 def allowed_origin(origin: str | None) -> str | None:
-    """Return the Origin if it is https on this domain or a subdomain, else None."""
+    """Return an exact suite Origin, else None."""
     if not origin:
         return None
     parsed = urllib.parse.urlparse(origin)
     if parsed.scheme != "https" or parsed.netloc != parsed.hostname:
         return None
     host = parsed.hostname or ""
-    if host == DOMAIN or host.endswith(f".{DOMAIN}"):
+    if host in PROTECTED_HOSTS or host == AUTH_HOST:
         return origin
     return None
 
@@ -184,18 +342,18 @@ def safe_redirect_target(raw: str | None) -> str:
     if not raw:
         return fallback
     parsed = urllib.parse.urlparse(raw)
-    same_site = parsed.netloc == DOMAIN or parsed.netloc.endswith(f".{DOMAIN}")
-    if parsed.scheme != "https" or not same_site:
+    if parsed.scheme != "https" or parsed.netloc != parsed.hostname or parsed.hostname not in PROTECTED_HOSTS:
         return fallback
     return raw
 
 
-def make_state(rd: str, verifier: str) -> tuple[str, str]:
+def make_state(rd: str, verifier: str, nonce: str) -> tuple[str, str]:
     state = secrets.token_urlsafe(24)
     payload = {
         "state": state,
         "rd": rd,
         "verifier": verifier,
+        "nonce": nonce,
         "exp": int(time.time()) + STATE_TTL,
     }
     return state, sign(json_b64(payload))
@@ -295,7 +453,11 @@ def update_session_tokens(session: dict[str, object], tokens: dict[str, object],
     session["token_exp"] = now + int(tokens.get("expires_in", 0))
 
 
-def make_session(tokens: dict[str, object], user: dict[str, object]) -> str:
+def make_session(
+    tokens: dict[str, object],
+    user: dict[str, object],
+    id_claims: dict[str, object],
+) -> str:
     sid = secrets.token_urlsafe(32)
     now = int(time.time())
     refresh_ttl = int(tokens.get("refresh_expires_in", SESSION_TTL))
@@ -306,6 +468,7 @@ def make_session(tokens: dict[str, object], user: dict[str, object]) -> str:
         "name": user.get("name") or user.get("preferred_username", ""),
         "exp": now + ttl,
         "validated_at": now,
+        "oidc_sid": id_claims["sid"],
     }
     update_session_tokens(SESSIONS[sid], tokens, now)
     return sign(sid)
@@ -336,7 +499,15 @@ def valid_session(cookie_value: str | None) -> dict[str, object] | None:
                 SESSIONS.pop(sid, None)
                 return None
             session["validated_at"] = now
-    except (KeyError, urllib.error.URLError, TimeoutError, json.JSONDecodeError, ValueError):
+    except (
+        AttributeError,
+        KeyError,
+        TypeError,
+        urllib.error.URLError,
+        TimeoutError,
+        json.JSONDecodeError,
+        ValueError,
+    ):
         # Fail closed. Keep the record so a transient IdP outage can recover.
         return None
     return session
@@ -348,6 +519,12 @@ class Handler(http.server.BaseHTTPRequestHandler):
     def log_message(self, fmt: str, *args: object) -> None:
         print(f"{self.address_string()} - {fmt % args}", flush=True)
 
+    def log_request(self, code: int | str = "-", size: int | str = "-") -> None:
+        # Authorization codes, state and WOPI access tokens can appear in query
+        # strings. Never emit them to pod logs, including on failed exchanges.
+        path = urllib.parse.urlsplit(self.path).path
+        self.log_message('"%s %s %s" %s %s', self.command, path, self.request_version, code, size)
+
     def send_empty(self, status: int, headers: dict[str, str] | None = None) -> None:
         self.send_response(status)
         for key, value in (headers or {}).items():
@@ -358,14 +535,19 @@ class Handler(http.server.BaseHTTPRequestHandler):
         origin = allowed_origin(self.headers.get("Origin"))
         headers: dict[str, str] = {"Vary": "Origin"}
         if origin:
-            headers.update(
-                {
-                    "Access-Control-Allow-Origin": origin,
-                    "Access-Control-Allow-Methods": self.headers.get("Access-Control-Request-Method", "GET, HEAD, POST, PUT, DELETE, OPTIONS"),
-                    "Access-Control-Allow-Headers": self.headers.get("Access-Control-Request-Headers", "Authorization, Content-Type"),
-                    "Access-Control-Max-Age": "600",
-                }
-            )
+            requested_method = self.headers.get("Access-Control-Request-Method", "GET").upper()
+            if re.fullmatch(r"[!#$%&'*+.^_`|~0-9A-Z-]+", requested_method):
+                headers.update(
+                    {
+                        "Access-Control-Allow-Origin": origin,
+                        "Access-Control-Allow-Methods": requested_method,
+                        "Access-Control-Allow-Headers": self.headers.get(
+                            "Access-Control-Request-Headers",
+                            "Authorization, Content-Type",
+                        ),
+                        "Access-Control-Max-Age": "600",
+                    }
+                )
         self.send_empty(HTTPStatus.NO_CONTENT, headers)
 
     def redirect(self, location: str, headers: dict[str, str] | None = None) -> None:
@@ -395,7 +577,7 @@ class Handler(http.server.BaseHTTPRequestHandler):
             self.handle_logout(params)
             return
         if parsed.path == "/frontchannel-logout":
-            self.handle_frontchannel_logout()
+            self.handle_frontchannel_logout(params)
             return
         self.send_empty(HTTPStatus.NOT_FOUND)
 
@@ -417,25 +599,30 @@ class Handler(http.server.BaseHTTPRequestHandler):
             self.send_preflight()
             return
 
+        request = forwarded_request(self)
+        if not request:
+            self.send_empty(HTTPStatus.BAD_REQUEST)
+            return
+
         # Collabora's WOPI callbacks (CheckFileInfo, contents) authenticate
         # with their own WOPI access_token, not a realm token; Nextcloud
         # additionally IP-restricts them to the pod subnet (wopi_allowlist).
         # Without this pass-through every document open dies with
         # "Unauthorized WOPI host".
-        uri = self.headers.get("X-Forwarded-Uri") or self.path or ""
-        if WOPI_PATH.match(uri):
+        if is_wopi_request(request):
             self.send_empty(HTTPStatus.NO_CONTENT, {})
             return
 
-        if is_logout_callback(self):
+        if is_logout_callback(request):
             self.send_empty(HTTPStatus.NO_CONTENT, {})
             return
 
         # Service-to-service API calls behind gated ingresses pass through on a
-        # valid realm token only; anything else falls into the normal gate flow.
+        # realm token authorized for this exact destination only; anything else
+        # falls into the normal browser-session flow.
         authorization = self.headers.get("Authorization", "")
         if authorization.lower().startswith("bearer "):
-            claims = valid_bearer(authorization[7:].strip())
+            claims = valid_bearer(authorization[7:].strip(), request[0])
             if claims:
                 self.send_empty(
                     HTTPStatus.NO_CONTENT,
@@ -461,13 +648,14 @@ class Handler(http.server.BaseHTTPRequestHandler):
             )
             return
 
-        rd = urllib.parse.quote(request_url(self), safe="")
+        rd = urllib.parse.quote(request_url(request), safe="")
         self.redirect(f"https://{AUTH_HOST}/login?rd={rd}")
 
     def handle_login(self, params: dict[str, list[str]]) -> None:
         rd = safe_redirect_target(params.get("rd", [""])[0])
         verifier = secrets.token_urlsafe(64)
-        state, state_cookie = make_state(rd, verifier)
+        nonce = secrets.token_urlsafe(24)
+        state, state_cookie = make_state(rd, verifier, nonce)
         query = urllib.parse.urlencode(
             {
                 "response_type": "code",
@@ -475,11 +663,12 @@ class Handler(http.server.BaseHTTPRequestHandler):
                 "redirect_uri": f"https://{AUTH_HOST}/callback",
                 "scope": "openid email profile",
                 "state": state,
+                "nonce": nonce,
                 "code_challenge": code_challenge(verifier),
                 "code_challenge_method": "S256",
             }
         )
-        self.redirect(f"{AUTH_ENDPOINT}?{query}", {"Set-Cookie": cookie_header(STATE_COOKIE_NAME, state_cookie, STATE_TTL)})
+        self.redirect(f"{AUTH_ENDPOINT}?{query}", {"Set-Cookie": state_cookie_header(state_cookie, STATE_TTL)})
 
     def handle_callback(self, params: dict[str, list[str]]) -> None:
         code = params.get("code", [""])[0]
@@ -488,20 +677,33 @@ class Handler(http.server.BaseHTTPRequestHandler):
         state_cookie = cookies.get(STATE_COOKIE_NAME).value if cookies.get(STATE_COOKIE_NAME) else None
         state_payload = read_state(state_cookie, state)
         if not code or not state_payload:
-            self.redirect(f"https://{AUTH_HOST}/login", {"Set-Cookie": clear_cookie_header(STATE_COOKIE_NAME)})
+            self.redirect(f"https://{AUTH_HOST}/login", {"Set-Cookie": clear_state_cookie_header()})
             return
 
         try:
             tokens = exchange_code(code, str(state_payload["verifier"]))
+            id_claims = valid_id_token(str(tokens["id_token"]), str(state_payload["nonce"]))
+            if not id_claims:
+                raise ValueError("invalid ID token")
             user = fetch_userinfo(str(tokens["access_token"]))
-            session_cookie = make_session(tokens, user)
-        except (KeyError, urllib.error.URLError, TimeoutError, json.JSONDecodeError):
-            self.redirect(f"https://{AUTH_HOST}/login", {"Set-Cookie": clear_cookie_header(STATE_COOKIE_NAME)})
+            if not user.get("sub") or user.get("sub") != id_claims.get("sub"):
+                raise ValueError("userinfo subject mismatch")
+            session_cookie = make_session(tokens, user, id_claims)
+        except (
+            AttributeError,
+            KeyError,
+            TypeError,
+            urllib.error.URLError,
+            TimeoutError,
+            json.JSONDecodeError,
+            ValueError,
+        ):
+            self.redirect(f"https://{AUTH_HOST}/login", {"Set-Cookie": clear_state_cookie_header()})
             return
 
         self.send_response(HTTPStatus.FOUND)
         self.send_header("Location", safe_redirect_target(str(state_payload.get("rd", ""))))
-        self.send_header("Set-Cookie", clear_cookie_header(STATE_COOKIE_NAME))
+        self.send_header("Set-Cookie", clear_state_cookie_header())
         # Match Keycloak's browser-session cookie. A persistent gate cookie can
         # otherwise survive a browser restart after Keycloak's cookie is gone,
         # admitting users who can no longer establish a native app session.
@@ -509,6 +711,9 @@ class Handler(http.server.BaseHTTPRequestHandler):
         self.end_headers()
 
     def handle_logout(self, params: dict[str, list[str]]) -> None:
+        if self.headers.get("Sec-Fetch-Site", "").lower() == "cross-site":
+            self.send_empty(HTTPStatus.FORBIDDEN)
+            return
         cookies = parse_cookies(self.headers.get("Cookie"))
         auth_cookie = cookies.get(COOKIE_NAME).value if cookies.get(COOKIE_NAME) else None
         sid = unsign(auth_cookie) if auth_cookie else None
@@ -520,13 +725,28 @@ class Handler(http.server.BaseHTTPRequestHandler):
         logout_query = urllib.parse.urlencode(logout_params)
         self.redirect(f"{END_SESSION_ENDPOINT}?{logout_query}", {"Set-Cookie": clear_cookie_header(COOKIE_NAME)})
 
-    def handle_frontchannel_logout(self) -> None:
+    def handle_frontchannel_logout(self, params: dict[str, list[str]]) -> None:
         cookies = parse_cookies(self.headers.get("Cookie"))
         auth_cookie = cookies.get(COOKIE_NAME).value if cookies.get(COOKIE_NAME) else None
         sid = unsign(auth_cookie) if auth_cookie else None
-        if sid:
+        session = SESSIONS.get(sid) if sid else None
+        issuers = params.get("iss", [])
+        oidc_sids = params.get("sid", [])
+        if (
+            sid
+            and session
+            and len(issuers) == 1
+            and issuers[0] == ISSUER
+            and len(oidc_sids) == 1
+            and oidc_sids[0] == session.get("oidc_sid")
+        ):
             SESSIONS.pop(sid, None)
-        self.send_empty(HTTPStatus.NO_CONTENT, {"Set-Cookie": clear_cookie_header(COOKIE_NAME)})
+            self.send_empty(
+                HTTPStatus.NO_CONTENT,
+                {"Cache-Control": "no-store", "Set-Cookie": clear_cookie_header(COOKIE_NAME)},
+            )
+            return
+        self.send_empty(HTTPStatus.NO_CONTENT, {"Cache-Control": "no-store"})
 
 
 if __name__ == "__main__":

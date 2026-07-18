@@ -196,7 +196,16 @@ metadata:
 spec:
   forwardAuth:
     address: http://opensuite-auth-gate.${NAMESPACE}.svc.cluster.local/auth
-    trustForwardHeader: true
+    # Rebuild X-Forwarded-Host/Uri/Proto/Method from Traefik's request instead
+    # of trusting attacker-supplied copies. The gate uses these values for its
+    # exact WOPI/logout bypasses, so this is an authentication boundary.
+    trustForwardHeader: false
+    authRequestHeaders:
+      - Authorization
+      - Cookie
+      - Origin
+      - Access-Control-Request-Method
+      - Access-Control-Request-Headers
     authResponseHeaders:
       - X-Open-Suite-User
       - X-Open-Suite-Email
