@@ -97,6 +97,8 @@ const request = (baseUrl, path, agent, nonce, captureBody = false) =>
               cacheControl: response.headers["cache-control"] ?? null,
               vary: response.headers.vary ?? null,
               lastModified: response.headers["last-modified"] ?? null,
+              etag: response.headers.etag ?? null,
+              acceptRanges: response.headers["accept-ranges"] ?? null,
             },
             body: captureBody ? Buffer.concat(chunks) : null,
           });
@@ -173,7 +175,20 @@ for (const [index, path] of resourcePaths.entries()) {
   ) {
     throw new Error(`Compressed response does not vary on Accept-Encoding: ${path}`);
   }
-  correctness.push({ path, decodedSha256: baselineDigest });
+  correctness.push({
+    path,
+    decodedSha256: baselineDigest,
+    representationHeaders: {
+      baseline: {
+        etag: baselineResponse.headers.etag,
+        acceptRanges: baselineResponse.headers.acceptRanges,
+      },
+      candidate: {
+        etag: candidateResponse.headers.etag,
+        acceptRanges: candidateResponse.headers.acceptRanges,
+      },
+    },
+  });
 }
 baselineAgent.destroy();
 candidateAgent.destroy();

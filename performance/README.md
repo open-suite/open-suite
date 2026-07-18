@@ -85,10 +85,12 @@ npm run benchmark:http-assets
 The HTTP harness alternates paired runs, adds a cache-busting query, and checks
 every resource before measurement. It fails if status, decoded SHA-256,
 content type/encoding, cache policy, `Vary`, or `Last-Modified` differs. The
-manifest's digest and resource count make the workload exact. Baseline and
-candidate origins must be isolated instances of the same application build;
-do not compare unrelated deployments or use this origin-serving measurement to
-claim end-to-end browser readiness.
+report also records ETag and `Accept-Ranges` for each representation without
+requiring them to match, because serving a prebuilt encoded representation can
+legitimately change both. The manifest's digest and resource count make the
+workload exact. Baseline and candidate origins must be isolated instances of
+the same application build; do not compare unrelated deployments or use this
+origin-serving measurement to claim end-to-end browser readiness.
 
 Capture the Kubernetes resource state on the target server with:
 
