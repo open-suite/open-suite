@@ -5,18 +5,15 @@
 # opensuite-header.js) into every app so direct (non-portal) navigation still
 # shows the Open Suite top bar. ONE asset, served same-origin everywhere.
 #
-# Two delivery paths, by how each app is served:
-#   - Element already injects a same-origin `/bureaublad-button.js` tag: we
-#     overwrite that configmap file's contents with our shared header.
-#   - Meet carries `/opensuite-header.js` in the Open Suite frontend image.
-#   - Nextcloud, Grist, Docs, Bureaublad: an nginx sidecar proxies the app and
-#     sub_filters a same-origin <script> tag into the HTML. The sidecar itself
-#     is DECLARATIVE — patches/local/opensuite-header-sidecar.patch adds the
-#     container, service reroute (:8091) and NetworkPolicy port to the vendored
-#     charts, so `helmfile apply` owns it. This script only uploads the header
-#     JS into the `opensuite-header-js` configmap each sidecar dir-mounts
-#     (optional: pages render headerless until this runs; kubelet syncs the
-#     mount in ~1 min, no restart needed).
+# Apps expose one of two same-origin asset keys through a ConfigMap:
+#   - `opensuite-header.js`: directory-mounted into an nginx header sidecar.
+#   - `bureaublad-button.js`: injected by an existing SPA init container.
+#
+# This script discovers both keys cluster-wide and publishes the same generated
+# asset to every consumer. There is deliberately no app or namespace list here:
+# adding an app means mounting one of these standard assets, not copying the nav
+# or remembering to extend this deploy script. Legacy SPA consumers are rolled
+# after their ConfigMap changes; sidecar directory mounts update in place.
 #
 # Idempotent and safe to re-run.
 set -euo pipefail
@@ -49,58 +46,82 @@ if kubectl get secret -n mb-bureaublad demo-seed >/dev/null 2>&1; then
   echo "==> demo seed detected — enabling the one-time Element sync migration"
 fi
 
-# --- Static SPAs: overwrite the already-injected button file -----------------
-# patch_static <ns> <cm> <deploy...> — restarts exactly the deployments that
-# mount the configmap and waits for each.
-patch_static() {
-  local ns="$1" cm="$2"; shift 2
-  echo "==> [${ns}] injecting header into ${cm}"
-  python3 - "$ns" "$cm" "$HEADER_JS" <<'PY' | kubectl apply -f -
-import json, subprocess, sys
-ns, cm, path = sys.argv[1], sys.argv[2], sys.argv[3]
-obj = json.loads(subprocess.check_output(["kubectl","-n",ns,"get","cm",cm,"-o","json"]))
-obj["data"]["bureaublad-button.js"] = open(path).read()
-for k in ("creationTimestamp","resourceVersion","uid","managedFields"):
-    obj.get("metadata",{}).pop(k, None)
-print(json.dumps(obj))
+# Stamp the generated deployment-specific asset. The runtime uses this hash to
+# replace a stale header that an old app image may have mounted first.
+HEADER_VERSION="$(sha256sum "${HEADER_JS}" | cut -c1-12)"
+sed -i "s/var HEADER_VERSION = \"source\";/var HEADER_VERSION = \"${HEADER_VERSION}\";/" "${HEADER_JS}"
+echo "==> publishing shared header ${HEADER_VERSION}"
+
+echo "==> Discovering and publishing every shared-header asset"
+python3 - "$HEADER_JS" <<'PY'
+import json
+import subprocess
+import sys
+import tempfile
+
+header = open(sys.argv[1]).read()
+configmaps = json.loads(
+    subprocess.check_output(["kubectl", "get", "configmap", "-A", "-o", "json"])
+)["items"]
+deployments = json.loads(
+    subprocess.check_output(["kubectl", "get", "deployment", "-A", "-o", "json"])
+)["items"]
+
+# Map each ConfigMap to the deployments that mount it. Only a mounted legacy
+# asset is a header target; this avoids rewriting unrelated historical data.
+consumers = {}
+for deployment in deployments:
+    namespace = deployment["metadata"]["namespace"]
+    name = deployment["metadata"]["name"]
+    volumes = deployment.get("spec", {}).get("template", {}).get("spec", {}).get("volumes", [])
+    for volume in volumes:
+        configmap = (volume.get("configMap") or {}).get("name")
+        if configmap:
+            consumers.setdefault((namespace, configmap), set()).add(name)
+
+targets = []
+for configmap in configmaps:
+    namespace = configmap["metadata"]["namespace"]
+    name = configmap["metadata"]["name"]
+    data = configmap.get("data") or {}
+    mounted_by = consumers.get((namespace, name), set())
+    if "opensuite-header.js" in data:
+        targets.append((namespace, name, "opensuite-header.js", set()))
+    elif "bureaublad-button.js" in data and mounted_by:
+        targets.append((namespace, name, "bureaublad-button.js", mounted_by))
+
+if not targets:
+    raise SystemExit("no shared-header ConfigMaps discovered")
+
+restarts = set()
+for namespace, name, key, mounted_by in sorted(targets):
+    patch = {
+        "metadata": {"labels": {"opensuite.online/shared-header": "true"}},
+        "data": {key: header},
+    }
+    with tempfile.NamedTemporaryFile(mode="w", suffix=".json") as patch_file:
+        json.dump(patch, patch_file)
+        patch_file.flush()
+        subprocess.check_call([
+            "kubectl", "-n", namespace, "patch", "configmap", name,
+            "--type=merge", "--patch-file", patch_file.name,
+        ])
+    print(f"==> [{namespace}] published {name}/{key}")
+    if key == "bureaublad-button.js":
+        restarts.update((namespace, deployment) for deployment in mounted_by)
+
+for namespace, deployment in sorted(restarts):
+    print(f"==> [{namespace}] restarting deployment/{deployment}")
+    subprocess.check_call([
+        "kubectl", "-n", namespace, "rollout", "restart", f"deployment/{deployment}"
+    ])
+for namespace, deployment in sorted(restarts):
+    subprocess.check_call([
+        "kubectl", "-n", namespace, "rollout", "status", f"deployment/{deployment}",
+        "--timeout=180s",
+    ])
+
+print(f"==> Published {len(targets)} shared-header assets; restarted {len(restarts)} consumers")
 PY
-  local d
-  for d in "$@"; do
-    kubectl -n "$ns" rollout restart "deploy/${d}"
-    kubectl -n "$ns" rollout status "deploy/${d}" --timeout=180s
-  done
-}
 
-# --- Sidecar apps: upload the header JS the declarative sidecar serves -------
-upload_header_js() {
-  local ns="$1"
-  echo "==> [${ns}] uploading opensuite-header-js"
-  python3 - "$ns" "$HEADER_JS" <<'PY' | kubectl apply -f -
-import json, sys
-ns, jspath = sys.argv[1], sys.argv[2]
-print(json.dumps({"apiVersion":"v1","kind":"ConfigMap",
-  "metadata":{"name":"opensuite-header-js","namespace":ns,
-    "labels":{"app.kubernetes.io/part-of":"open-suite",
-              "app.kubernetes.io/component":"opensuite-header"}},
-  "data":{"opensuite-header.js":open(jspath).read()}}))
-PY
-}
-
-echo "==> [1/2] Element static SPA (already injects a same-origin tag)"
-# Meet's header ships inside the meet-frontend SPA bundle (patches/meet), served
-# on meet.<domain>; the old meet-static-files injection only reached
-# meet-static-nginx on the unused static-meet.<domain> host, so it did nothing.
-patch_static mb-element element-web-bureaublad-button element-web
-
-echo "==> [2/2] Header JS for the sidecar apps"
-upload_header_js mb-nextcloud
-upload_header_js mb-grist
-upload_header_js mb-docs
-upload_header_js mb-bureaublad
-# Optional app: only when the messages namespace exists (its own chart carries
-# the header sidecar; this uploads the JS it serves).
-if kubectl get ns mb-messages >/dev/null 2>&1; then
-  upload_header_js mb-messages
-fi
-
-echo "==> Done — header published (sidecars pick up configmap changes within ~1 min)"
+echo "==> Done — one canonical header published cluster-wide"

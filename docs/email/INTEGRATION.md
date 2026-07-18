@@ -131,9 +131,9 @@ Everything survives a bare `helmfile apply`; nothing is kubectl-patched.
   enabled: false }`; flipping this single flag deploys the app.
 - `scripts/single-vps-deploy/02-networking.sh` — mb-messages in the egress
   netpol list (skipped while the namespace does not exist).
-- `overlays/portal-header/opensuite-header.js` + `09-portal-header.sh` — a
-  "Mail" nav item next to Meet, enabled by 09 only when the messages app is
-  actually deployed; 09 also uploads the header JS the chart's sidecar serves.
+- `overlays/portal-header/opensuite-header.js` + `09-portal-header.sh` — the
+  canonical nav includes Mail when the messages app is deployed; 09 discovers
+  and updates every app's mounted shared-header asset from that one source.
 - `overlays/messages/brevo-relay-secret.example.yaml` — template for the
   out-of-band `messages-mta-out-relay` secret (Brevo SMTP credentials); the
   mta-out deployment consumes it via an optional envFrom.

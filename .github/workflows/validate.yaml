@@ -74,6 +74,3 @@ jobs:
             git -C /tmp/meet apply --check "$GITHUB_WORKSPACE/$patch"
             git -C /tmp/meet apply "$GITHUB_WORKSPACE/$patch"
           done
-          cp overlays/portal-header/opensuite-header.js /tmp/meet/src/frontend/public/opensuite-header.js
-          grep -Fq '<script src="/opensuite-header.js"></script>' /tmp/meet/src/frontend/index.html
-          test -s /tmp/meet/src/frontend/public/opensuite-header.js

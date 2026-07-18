@@ -44,7 +44,7 @@ case before Helmfile runs:
 | `03-restart-oidc-apps.sh` | restarts the OIDC apps so they re-read Keycloak discovery |
 | `04-nextcloud-office.sh` | warms the Collabora capabilities cache |
 | `08-open-suite-portal.sh` | installs required Nextcloud integration apps and configures the apex redirect |
-| `09-portal-header.sh` | publishes the shared Open Suite header asset (Meet carries the same asset in its image) |
+| `09-portal-header.sh` | discovers every mounted shared-header asset and publishes the one canonical navigation definition cluster-wide |
 | `10-keycloak-login.sh` | Keycloak login theme (+ demo credential panel when `OPEN_SUITE_DEMO_MODE=true`) |
 | `12-auth-gate.sh` | edge auth gate at `auth.DOMAIN`; ingress attachment is declarative via `patches/local/auth-gate-ingress-middleware.patch` |
 

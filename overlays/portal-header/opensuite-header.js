@@ -11,9 +11,8 @@
  * The base domain is derived from the current host at runtime, so the SAME file
  * works on every app and every deployment without templating.
  *
- * Nav mirrors the portal's pageConfig.jsx:
- *   Home | Office(▾) | Meet | Chat | Tables | Wiki | Calendar
- * where Office is a dropdown that deep-links into Nextcloud.
+ * This is the only menu definition. App integrations only arrange to execute
+ * this asset same-origin; they do not carry their own navigation arrays.
  */
 (function () {
   // Don't render when embedded in an iframe (e.g. an app shown inside the
@@ -21,6 +20,9 @@
   if (window.self !== window.top) return;
 
   var HEADER_ID = "ko-portal-header";
+  // The deploy publisher replaces "source" with a content hash. That lets a
+  // newer runtime asset replace an older image-baked header deterministically.
+  var HEADER_VERSION = "source";
   var HEADER_HEIGHT = 48; // px
   var HEADER_HEIGHT_VAR = "--ko-header-height";
   var headerResizeObserver = null;
@@ -69,18 +71,20 @@
     { label: "Files", path: "/apps/files/files" },
   ];
 
-  // sub = subdomain the item points at; used both for the href and to mark the
-  // currently-active app.
-  var NAV = [
-    { label: "Home", sub: "bridge" },
-    { label: "Office", sub: "nextcloud", children: OFFICE_CHILDREN },
-    { label: "Contacts", sub: "nextcloud", path: "/apps/contacts" },
-    { label: "Projects", sub: "nextcloud", path: "/apps/deck/" },
-    { label: "Meet", sub: "meet" },
-    { label: "Chat", sub: "element" },
+  var MORE_CHILDREN = [
     { label: "Tables", sub: "grist" },
     { label: "Wiki", sub: "docs" },
+    { label: "Contacts", sub: "nextcloud", path: "/apps/contacts" },
+  ];
+
+  // sub = subdomain the item points at; used for both the href and active app.
+  var NAV = [
+    { label: "Home", sub: "bridge" },
+    { label: "Chat", sub: "element" },
+    { label: "Meet", sub: "meet" },
+    { label: "Office", sub: "nextcloud", children: OFFICE_CHILDREN },
     { label: "Calendar", sub: "nextcloud", path: "/apps/calendar" },
+    { label: "More", children: MORE_CHILDREN },
   ];
 
   // Mail (La Suite Messages) is an optional app: 09-portal-header.sh flips
@@ -120,9 +124,12 @@
   }
 
   function injectStyles() {
-    if (document.getElementById(HEADER_ID + "-styles")) return;
+    var old = document.getElementById(HEADER_ID + "-styles");
+    if (old && old.dataset.version === HEADER_VERSION) return;
+    if (old) old.remove();
     var s = document.createElement("style");
     s.id = HEADER_ID + "-styles";
+    s.dataset.version = HEADER_VERSION;
     s.textContent = [
       "#" + HEADER_ID + "{position:fixed;top:0;left:0;right:0;height:" + HEADER_HEIGHT + "px;",
       "z-index:2147483647;display:flex;align-items:center;gap:2px;padding:0 14px;",
@@ -131,6 +138,7 @@
       "#" + HEADER_ID + " .ko-brand{display:flex;align-items:center;gap:8px;font-weight:700;margin-right:12px;color:#fff;text-decoration:none;}",
       "#" + HEADER_ID + " .ko-brand .ko-mark{width:26px;height:26px;border-radius:6px;background:#ff5b39;color:#1a1a1a;",
       "display:flex;align-items:center;justify-content:center;font-weight:800;font-size:16px;}",
+      "#" + HEADER_ID + " .ko-desktop-nav{display:flex;align-items:center;gap:2px;flex:1;min-width:0;}",
       "#" + HEADER_ID + " .ko-item{position:relative;}",
       "#" + HEADER_ID + " .ko-link{display:flex !important;align-items:center;gap:5px;color:#cdd6e0;text-decoration:none;",
       "padding:6px 10px;border-radius:6px;white-space:nowrap;cursor:pointer;background:none;border:0;font:inherit;}",
@@ -147,6 +155,30 @@
       "#" + HEADER_ID + " .ko-item.ko-open .ko-menu{display:flex;}",
       "#" + HEADER_ID + " .ko-menu a{color:#cdd6e0;text-decoration:none;padding:8px 10px;border-radius:6px;white-space:nowrap;}",
       "#" + HEADER_ID + " .ko-menu a:hover{background:rgba(255,255,255,.10);color:#fff;}",
+      "#" + HEADER_ID + " .ko-mobile-toggle,#" + HEADER_ID + " .ko-mobile-menu{display:none;}",
+      "@media(max-width:899px){",
+      "#" + HEADER_ID + "{padding:0 10px;}",
+      "#" + HEADER_ID + " .ko-brand{margin-right:auto;}",
+      "#" + HEADER_ID + " .ko-desktop-nav{display:none;}",
+      "#" + HEADER_ID + " .ko-mobile-toggle{display:flex;align-items:center;justify-content:center;width:36px;height:36px;",
+      "padding:0;border:0;border-radius:6px;background:none;color:#fff;font:inherit;font-size:24px;cursor:pointer;}",
+      "#" + HEADER_ID + " .ko-mobile-toggle:hover,#" + HEADER_ID + " .ko-mobile-toggle:focus-visible{",
+      "background:rgba(255,255,255,.10);outline:2px solid #fff;outline-offset:1px;}",
+      "#" + HEADER_ID + " .ko-mobile-menu{position:fixed;top:var(" + HEADER_HEIGHT_VAR + ");left:0;right:0;",
+      "max-height:calc(100dvh - var(" + HEADER_HEIGHT_VAR + "));overflow:auto;padding:8px 10px 12px;",
+      "background:#10263d;border-top:1px solid rgba(255,255,255,.12);box-shadow:0 8px 20px rgba(0,0,0,.3);",
+      "box-sizing:border-box;flex-direction:column;gap:3px;}",
+      "#" + HEADER_ID + ".ko-mobile-open .ko-mobile-menu{display:flex;}",
+      "#" + HEADER_ID + " .ko-mobile-menu a,#" + HEADER_ID + " .ko-mobile-menu summary{",
+      "display:block;color:#e6edf4;text-decoration:none;padding:10px;border-radius:6px;cursor:pointer;list-style:none;}",
+      "#" + HEADER_ID + " .ko-mobile-menu a:hover,#" + HEADER_ID + " .ko-mobile-menu summary:hover{",
+      "background:rgba(255,255,255,.10);color:#fff;}",
+      "#" + HEADER_ID + " .ko-mobile-menu summary::-webkit-details-marker{display:none;}",
+      "#" + HEADER_ID + " .ko-mobile-menu summary:after{content:'▾';float:right;opacity:.8;}",
+      "#" + HEADER_ID + " .ko-mobile-menu details[open] summary:after{transform:rotate(180deg);}",
+      "#" + HEADER_ID + " .ko-mobile-children{padding-left:14px;}",
+      "#" + HEADER_ID + " .ko-mobile-logout{margin-top:5px;border-top:1px solid rgba(255,255,255,.12);border-radius:0;}",
+      "}",
       // The bar overlays the top of apps (no document offset), so full-height
       // apps like Nextcloud Calendar keep their full viewport and their popovers
       // aren't clipped. On the bridge portal we instead hide its built-in nav
@@ -175,12 +207,17 @@
     document.head.appendChild(s);
   }
 
-  function isActive(item) {
-    if (host.indexOf(item.sub + ".") !== 0) return false;
-    if (item.path) return window.location.pathname.indexOf(item.path) === 0;
-    // Office (nextcloud, no path): active on nextcloud except the calendar path.
-    if (item.children) return window.location.pathname.indexOf("/apps/calendar") !== 0;
-    return true;
+  function hrefFor(item, inheritedSub) {
+    return origin(item.sub || inheritedSub) + (item.path || "");
+  }
+
+  function isActive(item, inheritedSub) {
+    var sub = item.sub || inheritedSub;
+    if (item.children) {
+      return item.children.some(function (child) { return isActive(child, sub); });
+    }
+    if (!sub || host.indexOf(sub + ".") !== 0) return false;
+    return item.path ? window.location.pathname.indexOf(item.path) === 0 : true;
   }
 
   function syncHeaderHeight(bar) {
@@ -193,14 +230,15 @@
     wrap.className = "ko-item";
 
     if (item.children) {
-      var btn = document.createElement("span");
+      var btn = document.createElement("button");
       btn.className = "ko-link" + (isActive(item) ? " ko-active" : "");
-      btn.setAttribute("role", "button");
-      btn.setAttribute("tabindex", "0");
+      btn.type = "button";
+      btn.setAttribute("aria-expanded", "false");
       btn.innerHTML = item.label + ' <span class="ko-caret">▾</span>';
       btn.addEventListener("click", function (e) {
         e.stopPropagation();
         wrap.classList.toggle("ko-open");
+        btn.setAttribute("aria-expanded", wrap.classList.contains("ko-open") ? "true" : "false");
       });
       wrap.appendChild(btn);
 
@@ -208,7 +246,7 @@
       menu.className = "ko-menu";
       item.children.forEach(function (child) {
         var a = document.createElement("a");
-        a.href = origin(item.sub) + child.path;
+        a.href = hrefFor(child, item.sub);
         a.textContent = child.label;
         menu.appendChild(a);
       });
@@ -216,16 +254,52 @@
     } else {
       var link = document.createElement("a");
       link.className = "ko-link" + (isActive(item) ? " ko-active" : "");
-      link.href = origin(item.sub) + (item.path || "");
+      link.href = hrefFor(item);
       link.textContent = item.label;
       wrap.appendChild(link);
     }
     return wrap;
   }
 
+  function buildMobileItem(item) {
+    if (!item.children) {
+      var link = document.createElement("a");
+      link.href = hrefFor(item);
+      link.textContent = item.label;
+      if (isActive(item)) link.className = "ko-active";
+      return link;
+    }
+
+    var details = document.createElement("details");
+    var summary = document.createElement("summary");
+    summary.textContent = item.label;
+    details.appendChild(summary);
+    var children = document.createElement("div");
+    children.className = "ko-mobile-children";
+    item.children.forEach(function (child) {
+      var link = document.createElement("a");
+      link.href = hrefFor(child, item.sub);
+      link.textContent = child.label;
+      children.appendChild(link);
+    });
+    details.appendChild(children);
+    return details;
+  }
+
+  function logoutLink(className) {
+    var logout = document.createElement("a");
+    logout.className = className;
+    logout.href = origin("auth") + "/logout?rd=" + encodeURIComponent(origin("bridge") + "/");
+    logout.textContent = "Log out";
+    logout.setAttribute("aria-label", "Logout");
+    return logout;
+  }
+
   function mount() {
-    if (document.getElementById(HEADER_ID)) return;
     if (!document.body) return;
+    var existing = document.getElementById(HEADER_ID);
+    if (existing && existing.dataset.version === HEADER_VERSION) return;
+    if (existing) existing.remove();
     injectStyles();
     // On the bridge portal, take over from its built-in nav (hide it + offset).
     if (host.indexOf("bridge.") === 0) {
@@ -238,6 +312,8 @@
 
     var bar = document.createElement("nav");
     bar.id = HEADER_ID;
+    bar.dataset.version = HEADER_VERSION;
+    bar.setAttribute("aria-label", "Open Suite");
 
     var brand = document.createElement("a");
     brand.className = "ko-brand";
@@ -245,14 +321,33 @@
     brand.innerHTML = '<span class="ko-mark">O</span><span>Open Suite</span>';
     bar.appendChild(brand);
 
-    NAV.forEach(function (item) { bar.appendChild(buildItem(item)); });
+    var desktop = document.createElement("div");
+    desktop.className = "ko-desktop-nav";
+    NAV.forEach(function (item) { desktop.appendChild(buildItem(item)); });
+    desktop.appendChild(logoutLink("ko-logout"));
+    bar.appendChild(desktop);
 
-    var logout = document.createElement("a");
-    logout.className = "ko-logout";
-    logout.href = origin("auth") + "/logout?rd=" + encodeURIComponent(origin("bridge") + "/");
-    logout.textContent = "Log out";
-    logout.setAttribute("aria-label", "Logout");
-    bar.appendChild(logout);
+    var mobileToggle = document.createElement("button");
+    mobileToggle.className = "ko-mobile-toggle";
+    mobileToggle.type = "button";
+    mobileToggle.textContent = "☰";
+    mobileToggle.setAttribute("aria-label", "Open navigation");
+    mobileToggle.setAttribute("aria-expanded", "false");
+    bar.appendChild(mobileToggle);
+
+    var mobileMenu = document.createElement("div");
+    mobileMenu.className = "ko-mobile-menu";
+    NAV.forEach(function (item) { mobileMenu.appendChild(buildMobileItem(item)); });
+    mobileMenu.appendChild(logoutLink("ko-mobile-logout"));
+    bar.appendChild(mobileMenu);
+
+    mobileToggle.addEventListener("click", function (e) {
+      e.stopPropagation();
+      bar.classList.toggle("ko-mobile-open");
+      var open = bar.classList.contains("ko-mobile-open");
+      mobileToggle.setAttribute("aria-expanded", open ? "true" : "false");
+      mobileToggle.setAttribute("aria-label", open ? "Close navigation" : "Open navigation");
+    });
 
     document.body.appendChild(bar);
     syncHeaderHeight(bar);
@@ -262,10 +357,21 @@
       headerResizeObserver.observe(bar);
     }
 
-    // Close any open dropdown when clicking elsewhere.
-    document.addEventListener("click", function () {
+    // Close menus when clicking elsewhere or pressing Escape.
+    document.addEventListener("click", function (e) {
       var open = bar.querySelector(".ko-item.ko-open");
       if (open) open.classList.remove("ko-open");
+      if (!bar.contains(e.target)) {
+        bar.classList.remove("ko-mobile-open");
+        mobileToggle.setAttribute("aria-expanded", "false");
+        mobileToggle.setAttribute("aria-label", "Open navigation");
+      }
+    });
+    document.addEventListener("keydown", function (e) {
+      if (e.key !== "Escape") return;
+      bar.classList.remove("ko-mobile-open");
+      mobileToggle.setAttribute("aria-expanded", "false");
+      mobileToggle.setAttribute("aria-label", "Open navigation");
     });
   }
 
