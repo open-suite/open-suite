@@ -16,7 +16,7 @@
 //
 // Exit code 0 = pass. Failures are collected and all reported.
 
-import { chromium } from "playwright";
+import { chromium, devices } from "playwright";
 
 const DOMAIN = process.env.SMOKE_DOMAIN;
 const USER = process.env.SMOKE_USER;
@@ -64,6 +64,19 @@ const browser = await chromium.launch();
 // SMOKE_INSECURE=1: tolerate self-signed certs (local VM deploys).
 const ctx = await browser.newContext({ ignoreHTTPSErrors: process.env.SMOKE_INSECURE === "1" });
 const page = await ctx.newPage();
+const elementRuntimeErrors = [];
+const recordElementError = (message) => {
+  if (
+    page.url().startsWith(`https://element.${DOMAIN}/`) &&
+    /before initialization|before initialisation/i.test(message)
+  ) {
+    elementRuntimeErrors.push(message);
+  }
+};
+page.on("pageerror", (error) => recordElementError(error.stack || error.message));
+page.on("console", (message) => {
+  if (message.type() === "error") recordElementError(message.text());
+});
 
 try {
   // --- SSO login through the gate ------------------------------------------
@@ -228,7 +241,51 @@ try {
     await page.waitForLoadState("domcontentloaded").catch(() => {});
     if (r && r.status() >= 400) fail(`${host}: load`, `HTTP ${r.status()}`);
     await assertGlobalHeader(host);
+    if (host === "element") {
+      await page
+        .goto(`https://element.${DOMAIN}/#/room/#welcome:matrix.${DOMAIN}`, {
+          waitUntil: "domcontentloaded",
+        })
+        .catch(() => null);
+      await page.waitForURL(`https://element.${DOMAIN}/#/room/**`, { timeout: 30000 });
+      await page.waitForTimeout(2000);
+      if (elementRuntimeErrors.length === 0)
+        ok("Element room starts without temporal-dead-zone runtime errors");
+      else fail("Element room runtime", elementRuntimeErrors[0].slice(0, 180));
+
+      const elementConfig = await page.request
+        .get(`https://element.${DOMAIN}/config.json`)
+        .then((response) => response.json());
+      if (elementConfig.mobile_guide_toast === false)
+        ok("Element native-app guide toast is disabled");
+      else fail("Element mobile guide config", `mobile_guide_toast=${elementConfig.mobile_guide_toast}`);
+    }
   }
+
+  // Element redirects mobile user agents before loading config.json. Verify a
+  // clean Element cookie jar receives the server-side web-client opt-out and
+  // never renders or lands on the native-app guide.
+  const mobileState = await ctx.storageState();
+  mobileState.cookies = mobileState.cookies.filter(
+    (cookie) => cookie.name !== "element_mobile_redirect_to_guide"
+  );
+  const elementMobileCtx = await browser.newContext({
+    ...devices["iPhone 13"],
+    ignoreHTTPSErrors: process.env.SMOKE_INSECURE === "1",
+    storageState: mobileState,
+  });
+  const elementMobilePage = await elementMobileCtx.newPage();
+  await elementMobilePage
+    .goto(`https://element.${DOMAIN}/`, { waitUntil: "domcontentloaded" })
+    .catch(() => null);
+  await elementMobilePage.waitForTimeout(2000);
+  const mobileGuideText = elementMobilePage.getByText("The desktop site does not work on mobile", {
+    exact: false,
+  });
+  if (!elementMobilePage.url().includes("/mobile_guide") && !(await mobileGuideText.isVisible()))
+    ok("Element mobile browsers stay in the Open Suite web client");
+  else fail("Element mobile entry", `landed on ${elementMobilePage.url()}`);
+  await elementMobileCtx.close();
 
   // --- Portal widgets answer AND carry seeded content -----------------------
   // The empty-widget incident (Jul 2026) passed every "widget renders" check

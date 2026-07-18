@@ -1,0 +1,26 @@
+diff --git a/helmfile/apps/element/charts/element-web/templates/configmap.yaml b/helmfile/apps/element/charts/element-web/templates/configmap.yaml
+index ad1374d..2db0695 100644
+--- a/helmfile/apps/element/charts/element-web/templates/configmap.yaml
++++ b/helmfile/apps/element/charts/element-web/templates/configmap.yaml
+@@ -48,6 +48,7 @@ data:
+       "permalink_prefix": "https://{{ .Values.config.name }}.{{ .Values.config.homeserver.domain }}",
+       "disable_guests": {{ .Values.config.disable_guests }},
+       "force_verification": {{ .Values.config.force_verification }},
++      "mobile_guide_toast": {{ .Values.config.mobile_guide_toast }},
+       "logout_redirect_url": "https://{{ .Values.config.name }}.{{ .Values.config.homeserver.domain }}",
+       "sso_redirect_options": {
+         "immediate": {{ .Values.config.sso_redirect_options.immediate }}
+diff --git a/helmfile/apps/element/values-element-web.yaml.gotmpl b/helmfile/apps/element/values-element-web.yaml.gotmpl
+index 55e6c1a..5d35920 100644
+--- a/helmfile/apps/element/values-element-web.yaml.gotmpl
++++ b/helmfile/apps/element/values-element-web.yaml.gotmpl
+@@ -296,6 +296,9 @@ config:
+   default_theme: "light"
+   disable_guests: true
+   force_verification: false
++  # The Open Suite web client is the product on desktop and mobile; never
++  # advertise a separate native Element application after login.
++  mobile_guide_toast: false
+   sso_redirect_options:
+     immediate: true
+   disable_custom_urls: true

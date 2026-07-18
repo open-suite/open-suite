@@ -22,7 +22,7 @@ permissions:
   packages: write
 
 env:
-  ELEMENT_TAG: v1.12.21
+  ELEMENT_TAG: v1.12.24-rc.1
 
 jobs:
   build:
