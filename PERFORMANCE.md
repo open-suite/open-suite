@@ -1,5 +1,10 @@
 # Open Suite performance notes
 
+Current repeatable full-application results and all new measured-improvement
+entries belong in [APP-PERFORMANCE-BENCHMARK.md](APP-PERFORMANCE-BENCHMARK.md).
+This file preserves earlier investigations, including rejected ideas; do not
+copy new benchmark summaries into both ledgers.
+
 ## Rule
 
 Open Suite has one supported path for each user action. We do not add fallback

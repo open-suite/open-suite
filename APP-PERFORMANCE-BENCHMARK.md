@@ -16,6 +16,12 @@ open and render the real Nextcloud and Element applications.
 **Result:** compression and Element burst login fixes accepted; all long-running
 suite containers now have measured resource requests without CPU limits
 
+**Historical sample/environment note:** the browser tables below use five
+samples per application/profile on Chromium 140.0.7339.186, headless 1440x900,
+from a Netherlands runner. They were captured with the original schema, which
+did not retain IQR or MAD, so variance is unavailable and p95 is only the sample
+maximum. New claims must follow the schema 2 comparison policy in Method.
+
 ### Browser KPIs
 
 | Application | Profile | Ready p50 | Ready p75 | Ready p95 |  FCP p75 |  LCP p75 | Spinner p75 | Transfer p75 |
@@ -38,8 +44,8 @@ The app origin is unloaded between samples. Warm means a same-context reload.
 The accepted sidecar change recompresses eligible responses after shared-header
 injection. Nextcloud's cold transfer fell from 9,015 to 2,203 KiB p75 (-76%):
 JavaScript fell from 8,415 to 2,076 KiB and CSS from 162 to 33 KiB. Readiness
-moved from 2,584 to 2,696 ms p75 inside observed run variance, so this is an
-accepted network-efficiency improvement, not a claimed latency improvement.
+moved from 2,584 to 2,696 ms p75 (+4%) in the small historical run, so this is
+an accepted network-efficiency improvement, not a claimed latency improvement.
 Element's owned image now materializes an nginx performance template into the
 chart's writable configuration volume. Its cold transfer fell from 15,315 to
 4,719 KiB p75 (-69%). The current image also preloads the late-discovered crypto
@@ -113,6 +119,30 @@ Protocol:
   exposure, request counts and Resource Timing encoded/decoded sizes.
 - Raw JSON and cluster snapshots are local artifacts. Summaries and anomalous
   discarded attempts are committed here.
+
+Schema 2 reports must identify the baseline and deployed revisions, workload,
+requested and completed sample counts, discarded attempts, runner class and
+coarse region, OS/CPU/browser/Node versions, and whether the checkout was dirty.
+Metrics use linearly interpolated type-7 quantiles plus IQR, MAD, scaled MAD
+(`1.4826 × MAD`), and robust CV. Use at least 10 samples in each comparable
+baseline/candidate run for a measured-improvement claim. With fewer than 20
+samples p95 is descriptive only. Baseline and candidate must use the same
+workload and materially compatible environments; otherwise rerun rather than
+normalizing unlike measurements.
+
+Every future history entry must include:
+
+- baseline and candidate/deployment revisions;
+- exact workload and correctness guard;
+- requested, completed, and discarded sample counts;
+- runner environment and any relevant network profile;
+- median/p75 with IQR or scaled MAD for latency, plus payload/resource variance
+  where applicable;
+- rejected or anomalous attempts and whether the delta exceeds observed spread.
+
+Historical schema 1 entries below predate this policy. Their sample counts are
+stated where known, but missing variance must remain “unavailable” rather than
+being reconstructed or implied.
 
 ## Targets
 

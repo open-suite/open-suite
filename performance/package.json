@@ -4,7 +4,9 @@
   "type": "module",
   "scripts": {
     "benchmark:apps": "node apps.mjs",
-    "benchmark:element-login": "node element-login.mjs"
+    "benchmark:element-login": "node element-login.mjs",
+    "check": "node --check apps.mjs && node --check element-login.mjs && node --check reporting.mjs",
+    "test": "node --test"
   },
   "dependencies": {
     "playwright": "1.55.1"
