@@ -1,0 +1,58 @@
+name: fresh self-signed install
+
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - .github/workflows/fresh-install.yaml
+      - ci/fresh-install.sh
+      - deploy.sh
+      - helmfile/**
+      - overlays/**
+      - patches/local/**
+      - scripts/lib/**
+      - scripts/single-vps-deploy/**
+      - UPSTREAM_REF
+  schedule:
+    - cron: "23 3 * * 6"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: fresh-install-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  fresh-install:
+    # Deliberately use the free standard public runner. Do not replace this
+    # with a larger runner: this check measures the supported minimum host.
+    runs-on: ubuntu-latest
+    timeout-minutes: 300
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install host prerequisites
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq gettext-base
+
+      - name: Deploy the complete stack twice and verify convergence
+        env:
+          FRESH_INSTALL_ARTIFACT_DIR: ${{ runner.temp }}/opensuite-fresh-install
+        run: |
+          sudo env \
+            "PATH=$PATH" \
+            "GITHUB_STEP_SUMMARY=$GITHUB_STEP_SUMMARY" \
+            "FRESH_INSTALL_ARTIFACT_DIR=$FRESH_INSTALL_ARTIFACT_DIR" \
+            bash ci/fresh-install.sh run
+
+      - name: Upload measurements and failure diagnostics
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: fresh-install-${{ github.run_id }}-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/opensuite-fresh-install
+          if-no-files-found: error
+          retention-days: 14
