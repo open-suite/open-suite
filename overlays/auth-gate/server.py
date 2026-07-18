@@ -122,12 +122,13 @@ def parse_cookies(header: str | None) -> SimpleCookie:
     return cookie
 
 
-def cookie_header(name: str, value: str, max_age: int, path: str = "/") -> str:
+def cookie_header(name: str, value: str, max_age: int | None, path: str = "/") -> str:
     cookie = SimpleCookie()
     cookie[name] = value
     cookie[name]["Path"] = path
     cookie[name]["Domain"] = COOKIE_DOMAIN
-    cookie[name]["Max-Age"] = str(max_age)
+    if max_age is not None:
+        cookie[name]["Max-Age"] = str(max_age)
     cookie[name]["HttpOnly"] = True
     cookie[name]["Secure"] = True
     cookie[name]["SameSite"] = "Lax"
@@ -501,7 +502,10 @@ class Handler(http.server.BaseHTTPRequestHandler):
         self.send_response(HTTPStatus.FOUND)
         self.send_header("Location", safe_redirect_target(str(state_payload.get("rd", ""))))
         self.send_header("Set-Cookie", clear_cookie_header(STATE_COOKIE_NAME))
-        self.send_header("Set-Cookie", cookie_header(COOKIE_NAME, session_cookie, SESSION_TTL))
+        # Match Keycloak's browser-session cookie. A persistent gate cookie can
+        # otherwise survive a browser restart after Keycloak's cookie is gone,
+        # admitting users who can no longer establish a native app session.
+        self.send_header("Set-Cookie", cookie_header(COOKIE_NAME, session_cookie, None))
         self.end_headers()
 
     def handle_logout(self, params: dict[str, list[str]]) -> None:
