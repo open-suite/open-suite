@@ -64,6 +64,32 @@ separately, report actual `n` and discarded attempts, and reject a latency
 claim when the change is not larger than run-to-run spread. A payload or
 correctness improvement may still be accepted without a latency claim.
 
+For an isolated HTTP-serving change, place the exact resource paths (one
+leading-slash path per line) in a local manifest and benchmark baseline and
+candidate origins with the same process and configuration except for the one
+change under test:
+
+```bash
+BENCHMARK_BASELINE_URL=http://127.0.0.1:18080 \
+BENCHMARK_CANDIDATE_URL=http://127.0.0.1:18081 \
+BENCHMARK_RESOURCE_MANIFEST=/tmp/resources.txt \
+BENCHMARK_SAMPLES=30 BENCHMARK_WARMUPS=5 BENCHMARK_CONCURRENCY=6 \
+BENCHMARK_BASELINE='<image and baseline setting>' \
+BENCHMARK_DEPLOYMENT_REVISION='<image and candidate setting>' \
+BENCHMARK_RUNNER_LABEL='<stable runner class>' \
+BENCHMARK_RUNNER_REGION='<coarse region>' \
+BENCHMARK_OUTPUT=/tmp/open-suite-http-assets.json \
+npm run benchmark:http-assets
+```
+
+The HTTP harness alternates paired runs, adds a cache-busting query, and checks
+every resource before measurement. It fails if status, decoded SHA-256,
+content type/encoding, cache policy, `Vary`, or `Last-Modified` differs. The
+manifest's digest and resource count make the workload exact. Baseline and
+candidate origins must be isolated instances of the same application build;
+do not compare unrelated deployments or use this origin-serving measurement to
+claim end-to-end browser readiness.
+
 Capture the Kubernetes resource state on the target server with:
 
 ```bash

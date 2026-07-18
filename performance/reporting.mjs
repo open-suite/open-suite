@@ -125,7 +125,9 @@ const gitValue = (args) => {
 };
 
 export const captureEnvironment = ({
+  browser = "chromium",
   browserVersion,
+  headless = true,
   viewport,
   locale,
   timezone,
@@ -133,7 +135,9 @@ export const captureEnvironment = ({
   runnerRegion,
 }) => {
   const cpu = os.cpus()[0];
-  const playwrightVersion = require("playwright/package.json").version;
+  const playwrightVersion = browser
+    ? require("playwright/package.json").version
+    : null;
   const gitStatus = gitValue(["status", "--porcelain"]);
   return {
     runnerLabel,
@@ -146,9 +150,9 @@ export const captureEnvironment = ({
     totalMemoryMiB: Math.round(os.totalmem() / 1024 / 1024),
     nodeVersion: process.version,
     playwrightVersion,
-    browser: "chromium",
+    browser,
     browserVersion,
-    headless: true,
+    headless,
     viewport,
     locale,
     timezone,
