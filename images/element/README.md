@@ -1,7 +1,7 @@
 # Open Suite Element Web image
 
 `ghcr.io/open-suite/element-web` — the pinned upstream `vectorim/element-web`
-image with Element's device-verification reminder toasts patched out of the
+v1.12.24-rc.1 image with Element's device-verification reminder toasts patched out of the
 static bundle at build time. Its nginx configuration also gzip-compresses
 textual responses, including Element's JavaScript, CSS, JSON, SVG and WebAssembly
 assets.
@@ -11,6 +11,11 @@ WebAssembly module. Element otherwise discovers the 1.8 MiB module only after
 its main bundle has executed, leaving its transfer directly on the room-list
 startup path. The build locates the pinned image's exact hashed filename and
 fails if that assumption drifts.
+
+Element redirects mobile browsers to a native-app guide before loading its
+runtime config. The image sets Element's opt-out cookie in the initial HTML
+response and redirects stale `/mobile_guide` URLs to the web app; the Helm
+config also disables the later mobile-guide toast.
 
 ## Why
 
