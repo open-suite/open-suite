@@ -131,8 +131,8 @@ try {
     .locator("#ko-portal-header")
     .getByRole("button", { name: "Open navigation", exact: true });
   const desktopVisible = await page.locator("#ko-portal-header .ko-desktop-nav").isVisible();
-  const hasHorizontalOverflow = await page.evaluate(
-    () => document.documentElement.scrollWidth > window.innerWidth
+  const hasHorizontalOverflow = await page.locator("#ko-portal-header").evaluate(
+    (header) => header.scrollWidth > header.clientWidth || header.getBoundingClientRect().right > window.innerWidth
   );
   if ((await mobileToggle.isVisible()) && !desktopVisible && !hasHorizontalOverflow)
     ok("mobile header uses a hamburger without horizontal overflow");
