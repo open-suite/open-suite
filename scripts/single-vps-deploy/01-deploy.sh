@@ -23,7 +23,7 @@ MEET_TAG="${MEET_TAG:-sha-d1cd4d2}"
 NEXTCLOUD_TAG="${NEXTCLOUD_TAG:-sha-03c989f}"
 # Open Suite Element Web image tag: pinned immutable build with verification
 # reminders removed and textual assets compressed.
-ELEMENT_TAG="${ELEMENT_TAG:-sha-97fff32}"
+ELEMENT_TAG="${ELEMENT_TAG:-sha-a11ee66}"
 # TLS mode: letsencrypt (default; needs public DNS + ports) or selfsigned
 # (local VMs: every chart generates its own cert, no cert-manager, no ACME).
 OPEN_SUITE_TLS_MODE="${OPEN_SUITE_TLS_MODE:-letsencrypt}"
