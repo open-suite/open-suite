@@ -28,7 +28,7 @@ rejected experiments; **[the harness guide](performance/README.md)** explains
 how to reproduce it. Credentials and bulky raw browser/cluster artifacts remain
 local.
 
-Latest measured improvements on the demo (2026-07-11):
+Latest accepted demo improvements (2026-07-11):
 
 | Change | Measured result | Interpretation |
 |---|---:|---|
@@ -37,10 +37,16 @@ Latest measured improvements on the demo (2026-07-11):
 | Element crypto WASM preload | LCP 3,292 → 2,476 ms (-25%); spinner 1,171 → 619 ms (-47%) | startup gate overlaps with application boot; payload unchanged |
 | Synapse NAT login burst | 5/10 → 10/10 successful fresh logins | removed false shared-address throttling; per-account protections retained |
 
-These historical runs used five browser samples; their original result schema
-did not retain IQR/MAD. New improvement claims require at least 10 baseline and
-10 candidate samples and report robust spread. The ledger is authoritative for
-the full environment and limitations.
+Candidate measured locally, pending demo rollout:
+
+| Change | Measured result | Interpretation |
+|---|---:|---|
+| Element bundle precompression candidate | one-worker 21-resource origin p75 367.8 → 10.7 ms (-97%); bytes +0.1% | local CPU-isolation result; production uses auto workers, and demo/end-to-end confirmation is pending |
+
+The accepted demo browser runs used five samples; their original result schema
+did not retain IQR/MAD. New improvement claims use at least 10 baseline and 10
+candidate samples and report robust spread. The ledger is authoritative for the
+full environment and limitations.
 
 ## Deploy (single VPS, k3s)
 

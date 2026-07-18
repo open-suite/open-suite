@@ -6,6 +6,12 @@ static bundle at build time. Its nginx configuration also gzip-compresses
 textual responses, including Element's JavaScript, CSS, JSON, SVG and WebAssembly
 assets.
 
+The image precompresses only the content-hashed files under `bundles/` at the
+same gzip level used by nginx, then serves those copies with `gzip_static`.
+Mutable runtime files such as `config.json` are deliberately excluded so a
+generated configuration can never be shadowed by a stale build-time `.gz`
+file. Dynamic gzip remains enabled for non-bundle textual responses.
+
 The image also inserts an HTML preload for Element's hashed Rust E2EE
 WebAssembly module. Element otherwise discovers the 1.8 MiB module only after
 its main bundle has executed, leaving its transfer directly on the room-list
