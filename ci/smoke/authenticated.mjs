@@ -33,6 +33,7 @@ const fail = (name, detail) => {
   failures.push(name);
 };
 
+let sharedHeaderVersion;
 const assertGlobalHeader = async (host) => {
   const header = page.locator("#ko-portal-header");
   try {
@@ -40,9 +41,20 @@ const assertGlobalHeader = async (host) => {
     const home = header.getByRole("link", { name: "Home", exact: true });
     const href = await home.getAttribute("href");
     const box = await header.boundingBox();
+    const version = await header.getAttribute("data-version");
     if (href === `https://bridge.${DOMAIN}` && box && box.height >= 40 && box.y <= 1)
       ok(`${host}: rendered Open Suite navigation`);
     else fail(`${host} header`, `bad Home href or geometry: ${href}, ${JSON.stringify(box)}`);
+    if (!version) {
+      fail(`${host} header version`, "missing data-version");
+    } else if (!sharedHeaderVersion) {
+      sharedHeaderVersion = version;
+      ok(`${host}: established shared header version ${version}`);
+    } else if (version === sharedHeaderVersion) {
+      ok(`${host}: shared header version matches ${version}`);
+    } else {
+      fail(`${host} header version`, `expected ${sharedHeaderVersion}, got ${version}`);
+    }
   } catch (e) {
     fail(`${host} header`, e.message.slice(0, 120));
   }
@@ -79,6 +91,23 @@ try {
   // --- Rendered global navigation on every app surface -----------------------
   await assertGlobalHeader("bridge");
 
+  const expectedTopLevel = ["Home", "Mail", "Chat", "Meet", "Office", "Calendar", "More"];
+  const desktopTopLevel = await page
+    .locator("#ko-portal-header .ko-desktop-nav > .ko-item > .ko-link")
+    .evaluateAll((items) => items.map((item) => item.textContent.replace("▾", "").trim()));
+  if (JSON.stringify(desktopTopLevel) === JSON.stringify(expectedTopLevel))
+    ok("suite navigation has the canonical desktop order");
+  else fail("suite navigation order", `expected ${expectedTopLevel}, got ${desktopTopLevel}`);
+
+  const moreButton = page
+    .locator("#ko-portal-header .ko-desktop-nav")
+    .getByRole("button", { name: "More ▾", exact: true });
+  await moreButton.click();
+  const moreItems = await moreButton.locator("..").locator(".ko-menu a").allTextContents();
+  if (JSON.stringify(moreItems) === JSON.stringify(["Tables", "Wiki", "Contacts"]))
+    ok("suite More menu has the canonical order");
+  else fail("suite More menu order", `got ${moreItems}`);
+
   const logoutLink = page
     .locator("#ko-portal-header")
     .getByRole("link", { name: "Logout", exact: true });
@@ -97,9 +126,36 @@ try {
     fail("portal logout action", e.message.slice(0, 120));
   }
 
+  await page.setViewportSize({ width: 390, height: 844 });
+  const mobileToggle = page
+    .locator("#ko-portal-header")
+    .getByRole("button", { name: "Open navigation", exact: true });
+  const desktopVisible = await page.locator("#ko-portal-header .ko-desktop-nav").isVisible();
+  const hasHorizontalOverflow = await page.evaluate(
+    () => document.documentElement.scrollWidth > window.innerWidth
+  );
+  if ((await mobileToggle.isVisible()) && !desktopVisible && !hasHorizontalOverflow)
+    ok("mobile header uses a hamburger without horizontal overflow");
+  else
+    fail(
+      "mobile header layout",
+      `toggle=${await mobileToggle.isVisible()}, desktop=${desktopVisible}, overflow=${hasHorizontalOverflow}`
+    );
+  await mobileToggle.click();
+  const mobileMenu = page.locator("#ko-portal-header .ko-mobile-menu");
+  await mobileMenu.waitFor({ state: "visible" });
+  const mobileTopLevel = await mobileMenu
+    .locator(":scope > a, :scope > details > summary")
+    .allTextContents();
+  const expectedMobile = [...expectedTopLevel, "Log out"];
+  if (JSON.stringify(mobileTopLevel) === JSON.stringify(expectedMobile))
+    ok("mobile menu exposes every canonical destination and logout");
+  else fail("mobile navigation order", `expected ${expectedMobile}, got ${mobileTopLevel}`);
+  await page.setViewportSize({ width: 1280, height: 720 });
+
   // Visiting nextcloud also establishes its user_oidc session (auto-SSO) and
   // stores the login token the meetcal/caldav token exchange needs.
-  for (const host of ["nextcloud", "grist", "docs", "meet", "element"]) {
+  for (const host of ["nextcloud", "grist", "docs", "meet", "element", "messages"]) {
     // Some OIDC SPAs replace the initial navigation while Playwright is still
     // awaiting it, which surfaces as net::ERR_ABORTED even though the redirect
     // succeeds. The rendered-header assertion below remains the acceptance
