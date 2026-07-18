@@ -88,6 +88,15 @@ try {
   await dashboard.waitFor({ timeout: 30000 });
   ok("portal renders (dashboard widgets present)");
 
+  const gateCookie = (await ctx.cookies()).find((cookie) => cookie.name === "opensuite_auth");
+  if (gateCookie?.expires === -1)
+    ok("edge gate session lifetime matches Keycloak's browser session");
+  else
+    fail(
+      "edge gate session lifetime",
+      `expected a browser-session cookie, got expires=${gateCookie?.expires ?? "missing"}`
+    );
+
   // --- Rendered global navigation on every app surface -----------------------
   await assertGlobalHeader("bridge");
 
@@ -153,9 +162,62 @@ try {
   else fail("mobile navigation order", `expected ${expectedMobile}, got ${mobileTopLevel}`);
   await page.setViewportSize({ width: 1280, height: 720 });
 
-  // Visiting nextcloud also establishes its user_oidc session (auto-SSO) and
-  // stores the login token the meetcal/caldav token exchange needs.
-  for (const host of ["nextcloud", "grist", "docs", "meet", "element", "messages"]) {
+  // Mail must use its native silent-login mode and enter the mailbox on the
+  // first load. The old header-side redirect rendered the upstream marketing
+  // splash before it noticed the 401, while the smoke only checked the header.
+  await ctx.addInitScript(() => {
+    if (!window.location.hostname.startsWith("messages.")) return;
+    const scan = () => {
+      if (/Simple and intuitive messaging|ProConnect/i.test(document.body?.innerText || "")) {
+        sessionStorage.setItem("__openSuiteMailSplashSeen", "1");
+      }
+    };
+    new MutationObserver(scan).observe(document, { childList: true, subtree: true });
+    window.addEventListener("DOMContentLoaded", scan);
+  });
+  await page.goto(`https://messages.${DOMAIN}/`, { waitUntil: "domcontentloaded" }).catch(() => null);
+  await page.waitForURL(new RegExp(`^https://messages\\.${DOMAIN.replaceAll(".", "\\.")}/mailbox/`), {
+    timeout: 30000,
+  });
+  await page.getByText("Inbox", { exact: true }).first().waitFor({ state: "visible", timeout: 15000 });
+  const mailSplashSeen = await page.evaluate(
+    () => sessionStorage.getItem("__openSuiteMailSplashSeen") === "1"
+  );
+  const mailConfig = await page.request
+    .get(`https://messages.${DOMAIN}/api/v1.0/config/`)
+    .then((response) => response.json());
+  if (!mailSplashSeen && mailConfig.FRONTEND_SILENT_LOGIN_ENABLED === true)
+    ok("Mail enters the inbox through native silent login without its marketing splash");
+  else
+    fail(
+      "Mail first-load contract",
+      `splashSeen=${mailSplashSeen}, silentLogin=${mailConfig.FRONTEND_SILENT_LOGIN_ENABLED}`
+    );
+  await assertGlobalHeader("messages");
+
+  // Reproduce the real first-session path before any direct Nextcloud warm-up:
+  // Mail -> portal -> Office -> Spreadsheets must remain one SSO session.
+  await page.goto(`https://bridge.${DOMAIN}/`, { waitUntil: "domcontentloaded" });
+  const suiteHeader = page.locator("#ko-portal-header");
+  const officeButton = suiteHeader.getByRole("button", { name: "Office ▾", exact: true });
+  await officeButton.click();
+  const spreadsheetsLink = suiteHeader.getByRole("link", { name: "Spreadsheets", exact: true });
+  const spreadsheetsHref = await spreadsheetsLink.getAttribute("href");
+  if (spreadsheetsHref?.includes("/apps/user_oidc/login/")) {
+    fail("Mail -> Office auth continuity", `navigation forces OIDC: ${spreadsheetsHref}`);
+  } else {
+    await spreadsheetsLink.click();
+    await page.waitForURL(`https://nextcloud.${DOMAIN}/apps/office/spreadsheets`, { timeout: 30000 });
+    if (page.url().includes(`id.${DOMAIN}`) || page.url().includes("/login")) {
+      fail("Mail -> Office auth continuity", `landed on login: ${page.url()}`);
+    } else {
+      ok("Mail -> Office -> Spreadsheets stays in the authenticated suite session");
+    }
+  }
+
+  // The Office path above establishes Nextcloud's user_oidc session and stores
+  // the login token the meetcal/caldav token exchange needs.
+  for (const host of ["nextcloud", "grist", "docs", "meet", "element"]) {
     // Some OIDC SPAs replace the initial navigation while Playwright is still
     // awaiting it, which surfaces as net::ERR_ABORTED even though the redirect
     // succeeds. The rendered-header assertion below remains the acceptance
@@ -166,28 +228,6 @@ try {
     await page.waitForLoadState("domcontentloaded").catch(() => {});
     if (r && r.status() >= 400) fail(`${host}: load`, `HTTP ${r.status()}`);
     await assertGlobalHeader(host);
-  }
-
-  // Cross-app navigation must reuse the native Nextcloud session. A previous
-  // implementation sent every Office click through user_oidc again; Keycloak
-  // then back-channel-logged out the existing Nextcloud session and exposed a
-  // login wall in the middle of an otherwise authenticated suite.
-  await page.goto(`https://bridge.${DOMAIN}/`, { waitUntil: "domcontentloaded" });
-  const suiteHeader = page.locator("#ko-portal-header");
-  const officeButton = suiteHeader.getByRole("button", { name: "Office ▾", exact: true });
-  await officeButton.click();
-  const spreadsheetsLink = suiteHeader.getByRole("link", { name: "Spreadsheets", exact: true });
-  const spreadsheetsHref = await spreadsheetsLink.getAttribute("href");
-  if (spreadsheetsHref?.includes("/apps/user_oidc/login/")) {
-    fail("Portal -> Office auth continuity", `navigation forces OIDC: ${spreadsheetsHref}`);
-  } else {
-    await spreadsheetsLink.click();
-    await page.waitForURL(`https://nextcloud.${DOMAIN}/apps/office/spreadsheets`, { timeout: 30000 });
-    if (page.url().includes(`id.${DOMAIN}`) || page.url().includes("/login")) {
-      fail("Portal -> Office auth continuity", `landed on login: ${page.url()}`);
-    } else {
-      ok("Portal -> Office -> Spreadsheets reuses the authenticated session");
-    }
   }
 
   // --- Portal widgets answer AND carry seeded content -----------------------

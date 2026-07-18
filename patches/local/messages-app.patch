@@ -1006,7 +1006,7 @@ new file mode 100644
 index 0000000..136a8d8
 --- /dev/null
 +++ b/helmfile/apps/messages/values.yaml.gotmpl
-@@ -0,0 +1,148 @@
+@@ -0,0 +1,149 @@
 +{{- $releaseId := now | unixEpoch }}
 +{{- $hostname := printf "%s.%s" .Values.global.hostname.messages .Values.global.domain }}
 +{{- $sslPostfix := ternary "s" "" (.Values.global.tls.enabled | default true) }}
@@ -1057,6 +1057,7 @@ index 0000000..136a8d8
 +    DJANGO_CSRF_TRUSTED_ORIGINS: {{ $baseUrl | quote }}
 +    SALT_KEY: {{ .Values.application.messages.saltKey | quote }}
 +    LANGUAGE_CODE: "en-us"
++    FRONTEND_SILENT_LOGIN_ENABLED: "true"
 +    LOGGING_LEVEL_HANDLERS_CONSOLE: "INFO"
 +    LOGGING_LEVEL_LOGGERS_APP: "INFO"
 +    LOGGING_LEVEL_LOGGERS_ROOT: "INFO"

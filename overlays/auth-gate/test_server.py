@@ -37,6 +37,18 @@ class SessionTests(unittest.TestCase):
         self.assertEqual(session["token_exp"], 1_300)
         self.assertEqual(session["refresh_token"], "refresh-1")
 
+    def test_gate_cookie_is_scoped_to_the_browser_session(self) -> None:
+        header = server.cookie_header(server.COOKIE_NAME, "signed-session", None)
+
+        self.assertNotIn("Max-Age", header)
+        self.assertIn("HttpOnly", header)
+        self.assertIn("SameSite=Lax", header)
+
+    def test_state_cookie_remains_short_lived_and_persistent(self) -> None:
+        header = server.cookie_header(server.STATE_COOKIE_NAME, "signed-state", server.STATE_TTL)
+
+        self.assertIn(f"Max-Age={server.STATE_TTL}", header)
+
     def test_session_is_rejected_when_keycloak_marks_token_inactive(self) -> None:
         cookie, _ = self.make_session()
 
