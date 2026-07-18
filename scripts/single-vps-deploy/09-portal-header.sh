@@ -55,9 +55,11 @@ echo "==> publishing shared header ${HEADER_VERSION}"
 echo "==> Discovering and publishing every shared-header asset"
 python3 - "$HEADER_JS" <<'PY'
 import json
+import re
 import subprocess
 import sys
 import tempfile
+import time
 
 header = open(sys.argv[1]).read()
 configmaps = json.loads(
@@ -70,14 +72,28 @@ deployments = json.loads(
 # Map each ConfigMap to the deployments that mount it. Only a mounted legacy
 # asset is a header target; this avoids rewriting unrelated historical data.
 consumers = {}
+live_mounts = {}
 for deployment in deployments:
     namespace = deployment["metadata"]["namespace"]
     name = deployment["metadata"]["name"]
-    volumes = deployment.get("spec", {}).get("template", {}).get("spec", {}).get("volumes", [])
+    pod_spec = deployment.get("spec", {}).get("template", {}).get("spec", {})
+    volumes = pod_spec.get("volumes", [])
+    volume_configmaps = {}
     for volume in volumes:
         configmap = (volume.get("configMap") or {}).get("name")
         if configmap:
+            volume_configmaps[volume["name"]] = configmap
             consumers.setdefault((namespace, configmap), set()).add(name)
+    for container in pod_spec.get("containers", []):
+        for mount in container.get("volumeMounts", []):
+            configmap = volume_configmaps.get(mount["name"])
+            if configmap:
+                live_mounts.setdefault((namespace, configmap), set()).add((
+                    name,
+                    container["name"],
+                    mount["mountPath"],
+                    mount.get("subPath"),
+                ))
 
 targets = []
 for configmap in configmaps:
@@ -94,6 +110,7 @@ if not targets:
     raise SystemExit("no shared-header ConfigMaps discovered")
 
 restarts = set()
+convergence_checks = set()
 for namespace, name, key, mounted_by in sorted(targets):
     patch = {
         "metadata": {"labels": {"opensuite.online/shared-header": "true"}},
@@ -109,6 +126,10 @@ for namespace, name, key, mounted_by in sorted(targets):
     print(f"==> [{namespace}] published {name}/{key}")
     if key == "bureaublad-button.js":
         restarts.update((namespace, deployment) for deployment in mounted_by)
+    else:
+        for deployment, container, mount_path, sub_path in live_mounts.get((namespace, name), set()):
+            live_path = mount_path if sub_path else f"{mount_path.rstrip('/')}/{key}"
+            convergence_checks.add((namespace, deployment, container, live_path))
 
 for namespace, deployment in sorted(restarts):
     print(f"==> [{namespace}] restarting deployment/{deployment}")
@@ -121,6 +142,29 @@ for namespace, deployment in sorted(restarts):
         "--timeout=180s",
     ])
 
+version_match = re.search(r'var HEADER_VERSION = "([^"]+)";', header)
+if not version_match:
+    raise SystemExit("generated header has no version stamp")
+version_marker = f'var HEADER_VERSION = "{version_match.group(1)}";'
+deadline = time.monotonic() + 120
+pending = sorted(convergence_checks)
+while pending and time.monotonic() < deadline:
+    still_pending = []
+    for namespace, deployment, container, live_path in pending:
+        result = subprocess.run([
+            "kubectl", "-n", namespace, "exec", f"deployment/{deployment}",
+            "-c", container, "--", "grep", "-Fq", version_marker, live_path,
+        ], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        if result.returncode:
+            still_pending.append((namespace, deployment, container, live_path))
+    pending = still_pending
+    if pending:
+        time.sleep(3)
+if pending:
+    locations = ", ".join(f"{ns}/{deployment}:{container}" for ns, deployment, container, _ in pending)
+    raise SystemExit(f"header ConfigMap did not converge within 120s: {locations}")
+
+print(f"==> Verified {len(convergence_checks)} live sidecar mounts at the published version")
 print(f"==> Published {len(targets)} shared-header assets; restarted {len(restarts)} consumers")
 PY
 
