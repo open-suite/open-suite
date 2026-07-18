@@ -40,7 +40,9 @@ awk -v cookie="${cookie}" '
   END { if (replaced != 1) exit 3 }
 ' "${config}" > "${patched}"
 mv "${patched}" "${config}"
+chmod 0644 "${config}"
 
 [ "$(grep -Fc 'element_mobile_redirect_to_guide=false' "${config}")" -eq 3 ]
 grep -F 'location ~ ^/mobile_guide/?$ {' "${config}" >/dev/null
+[ "$(LC_ALL=C ls -l "${config}" | cut -c1-10)" = "-rw-r--r--" ]
 echo "Element mobile-web entry contract added to ${config}"
