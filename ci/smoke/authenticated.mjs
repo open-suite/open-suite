@@ -92,7 +92,7 @@ try {
   // The portal has its own OIDC session; a fresh browser lands on its /login.
   // Wait for either the dashboard or the login stub, click through the latter
   // (round-trips Keycloak silently — the SSO session exists).
-  const dashboard = page.locator("text=Start instant meeting").first();
+  const dashboard = page.locator(".dashboard-grid");
   const loginBtn = page.locator("text=Log in").last();
   await dashboard.or(loginBtn).first().waitFor({ timeout: 30000 });
   if (!(await dashboard.isVisible().catch(() => false))) {
