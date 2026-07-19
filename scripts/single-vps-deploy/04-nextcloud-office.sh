@@ -44,6 +44,11 @@ kubectl exec -n mb-nextcloud deploy/nextcloud -c nextcloud -- php occ app:enable
 # store. Import the local certs so every occ/app fetch below verifies.
 if [ "${OPEN_SUITE_TLS_MODE:-letsencrypt}" = "selfsigned" ]; then
   DOMAIN="$(cat /etc/mijnbureau/domain)"
+  # On a resource-constrained fresh install Traefik can still be failing its
+  # readiness probe while application rollouts complete. openssl then receives
+  # no certificate, so wait for the TLS endpoint before importing from it.
+  echo "==> Waiting for Traefik before reading self-signed certificates"
+  kubectl rollout status deploy/traefik -n kube-system --timeout=300s
   echo "==> Importing self-signed certs into Nextcloud's certificate store"
   for h in id collabora meet nextcloud; do
     kubectl exec -n mb-nextcloud deploy/nextcloud -c nextcloud -- sh -c "
