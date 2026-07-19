@@ -158,6 +158,59 @@ being reconstructed or implied.
 
 ## History
 
+### 6. Candidate: serve precompressed Element bundles - 2026-07-18
+
+**Status:** measured locally against the exact pinned image; demo rollout and
+end-to-end browser confirmation remain pending. This is not a live-demo latency
+claim.
+
+| 21-resource origin workload | Baseline | Candidate | Change |
+| --------------------------- | -------: | --------: | -----: |
+| Elapsed p50 (IQR) | 368.2 ms (1.7 ms) | 10.8 ms (0.8 ms) | -97.1% |
+| Elapsed p75 | 369.5 ms | 11.3 ms | -96.9% |
+| Encoded bytes | 4,159,588 | 4,163,958 | +0.1% |
+| Gzip responses | 21/21 | 21/21 | 0 |
+
+Baseline and candidate used `ghcr.io/open-suite/element-web:sha-a11ee66`
+as their identical amd64 root filesystem and nginx 1.31.2. The candidate then
+ran this branch's precompression script and enabled `gzip_static`; it was not a
+published image. The benchmark forced one nginx worker and fetched the 21
+startup textual resources in `performance/element-startup-resources.txt` over
+HTTP/1.1 with six keep-alive sockets and `Accept-Encoding: gzip`. After five
+warmups, 30 samples per variant ran in alternating order on the same 16-vCPU
+x86_64 Amp orb. The final run used clean revision `2efeadb`; the manifest
+SHA-256 was
+`1449b81f7d41b8884f3567e7b0d546fbfd598672a15b292006ee3e3be5a2fd42`.
+Baseline used dynamic gzip level 5; candidate used level-5 build-time gzip for
+the hashed `bundles/` directory plus `gzip_static on`. Non-bundle responses
+still used identical dynamic gzip, which is why candidate elapsed time did not
+fall to zero.
+
+The correctness preflight matched status, decoded SHA-256, content type and
+encoding, cache policy, `Vary`, and `Last-Modified` for all 21 responses. All 73
+generated `.gz` files also decoded byte-for-byte to their source bundles. The
+candidate retained `Vary: Accept-Encoding`; identity requests still use the
+original files. Encoded bytes increased 0.1% because nginx's streaming output
+and deterministic `gzip -5 -n` are not byte-identical encoders.
+
+Representation headers intentionally differ: dynamic gzip returns a weak ETag
+for the source while `gzip_static` returns a strong ETag and `Accept-Ranges` for
+the compressed representation. That can cause one revalidation miss when this
+image replaces the baseline but does not reuse stale content. Production nginx
+uses `worker_processes auto`, not the benchmark's one worker, so the durable
+result is avoided compression CPU per cold response; the -97% local origin wall
+time is not presented as an end-to-end latency forecast.
+
+The candidate Dockerfile built successfully into local OCI manifest
+`sha256:124eee37187501946c9432b663968a1828071fdbaec2d2cec58b7d2683065762`.
+Its final application layer was 7.70 MB versus 0.33 MB across the published
+image's existing patch layers: a measured 7.37 MB addition, or 12.2% of the
+baseline's 60.17 MB registry layers. That image-pull cost is accepted for
+review, not hidden; it is paid once per uncached node rather than on every cold
+bundle response. The built candidate contained exactly 73 `.gz` files and none
+outside the content-hashed bundle directory, so runtime-generated `config.json`
+and other mutable paths cannot be shadowed by stale gzip files.
+
 ### 5. Accepted: preload Element's crypto WebAssembly gate - `sha-a6bbc34` - 2026-07-11
 
 | Element KPI | Baseline p75 | Candidate p75 | Change |
