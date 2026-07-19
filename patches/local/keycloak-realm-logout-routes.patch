@@ -1,0 +1,37 @@
+diff --git a/helmfile/apps/keycloak/keycloak.yaml.gotmpl b/helmfile/apps/keycloak/keycloak.yaml.gotmpl
+index 5e284cb..d6bae83 100644
+--- a/helmfile/apps/keycloak/keycloak.yaml.gotmpl
++++ b/helmfile/apps/keycloak/keycloak.yaml.gotmpl
+@@ -318,9 +318,9 @@ keycloakConfigCli:
+               "oidc.ciba.grant.enabled": "false",
+               "client.secret.creation.time": "1759388679",
+               "backchannel.logout.session.required": "true",
+-              "backchannel.logout.url": "https://{{ .Values.global.hostname.meet }}.{{ .Values.global.domain }}/api/v1.0/logout/",
++              "backchannel.logout.url": "https://{{ .Values.global.hostname.meet }}.{{ .Values.global.domain }}/api/v1.0/backchannel-logout/",
+               "standard.token.exchange.enabled": "false",
+-              "frontchannel.logout.url": "https://{{ .Values.global.hostname.meet }}.{{ .Values.global.domain }}/api/v1.0/logout/",
++              "frontchannel.logout.url": "https://{{ .Values.global.hostname.meet }}.{{ .Values.global.domain }}/api/v1.0/logout-callback/",
+               "post.logout.redirect.uris": "https://{{ .Values.global.hostname.meet }}.{{ .Values.global.domain }}/*",
+               "frontchannel.logout.session.required": "false",
+               "oauth2.device.authorization.grant.enabled": "false",
+@@ -522,9 +522,9 @@ keycloakConfigCli:
+               "oidc.ciba.grant.enabled": "false",
+               "client.secret.creation.time": "1759388679",
+               "backchannel.logout.session.required": "true",
+-              "backchannel.logout.url": "https://{{ .Values.global.hostname.docs }}.{{ .Values.global.domain }}/api/v1.0/logout/",
++              "backchannel.logout.url": "",
+               "standard.token.exchange.enabled": "false",
+-              "frontchannel.logout.url": "https://{{ .Values.global.hostname.docs }}.{{ .Values.global.domain }}/api/v1.0/logout/",
++              "frontchannel.logout.url": "https://{{ .Values.global.hostname.docs }}.{{ .Values.global.domain }}/api/v1.0/logout-callback/",
+               "post.logout.redirect.uris": "https://{{ .Values.global.hostname.docs }}.{{ .Values.global.domain }}/*",
+               "frontchannel.logout.session.required": "false",
+               "oauth2.device.authorization.grant.enabled": "false",
+@@ -565,7 +565,7 @@ keycloakConfigCli:
+               "oidc.ciba.grant.enabled": "false",
+               "client.secret.creation.time": "1759388679",
+               "backchannel.logout.session.required": "true",
+-              "backchannel.logout.url": "https://{{ .Values.global.hostname.bureaublad }}.{{ .Values.global.domain }}/api/v1/auth/logout",
++              "backchannel.logout.url": "",
+               "standard.token.exchange.enabled": "true",
+               "frontchannel.logout.url": "https://{{ .Values.global.hostname.bureaublad }}.{{ .Values.global.domain }}/api/v1/auth/logout",
+               "post.logout.redirect.uris": "https://{{ .Values.global.hostname.bureaublad }}.{{ .Values.global.domain }}/*",

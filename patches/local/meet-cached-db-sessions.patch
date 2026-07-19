@@ -1,0 +1,13 @@
+diff --git a/helmfile/apps/meet/values.yaml.gotmpl b/helmfile/apps/meet/values.yaml.gotmpl
+index 6542bb9..bd1b718 100644
+--- a/helmfile/apps/meet/values.yaml.gotmpl
++++ b/helmfile/apps/meet/values.yaml.gotmpl
+@@ -113,3 +113,7 @@ meet_backend:
+   runtimeClassName: {{ .Values.cluster.runtimeClassName | quote }}
+-
++  # django-lasuite backchannel logout enumerates Django's Session model.
++  extraEnvVars:
++    - name: SESSION_ENGINE
++      value: django.contrib.sessions.backends.cached_db
++
+   secretKey: {{ .Values.application.meet.secretKey | quote }}
