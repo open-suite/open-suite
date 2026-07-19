@@ -32,6 +32,13 @@ done
 echo "==> Applying pending Nextcloud/core app database upgrades"
 kubectl exec -n mb-nextcloud deploy/nextcloud -c nextcloud -- php occ upgrade
 
+# The chart's fresh-install hook treats app installation failures as warnings,
+# so the app source can exist while richdocuments remains disabled. Office
+# configuration below requires its command namespace: reconcile that state
+# strictly here and fail deployment if the app cannot be enabled.
+echo "==> Ensuring the Nextcloud Office app is enabled"
+kubectl exec -n mb-nextcloud deploy/nextcloud -c nextcloud -- php occ app:enable richdocuments
+
 # Self-signed deploys: Nextcloud's outbound HTTP client (richdocuments WOPI
 # discovery, user_oidc, meetcal) verifies TLS against Nextcloud's own cert
 # store. Import the local certs so every occ/app fetch below verifies.
