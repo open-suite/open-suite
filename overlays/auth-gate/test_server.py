@@ -1,5 +1,6 @@
 import http.client
 import os
+from pathlib import Path
 import threading
 import types
 import unittest
@@ -213,14 +214,13 @@ class LogoutCallbackTests(unittest.TestCase):
     def test_exact_app_logout_callbacks_bypass_gate(self) -> None:
         callbacks = (
             ("bridge.example.test", "/api/v1/auth/logout", "GET"),
-            ("bridge.example.test", "/api/v1/auth/logout", "POST"),
-            ("docs.example.test", "/api/v1.0/logout/", "GET"),
-            ("docs.example.test", "/api/v1.0/logout/", "POST"),
+            ("docs.example.test", "/api/v1.0/logout-callback/", "GET"),
             ("grist.example.test", "/o/docs/logout?next=/", "GET"),
-            ("meet.example.test", "/api/v1.0/logout/", "GET"),
-            ("meet.example.test", "/api/v1.0/logout/", "POST"),
-            ("messages.example.test", "/api/v1.0/logout/", "GET"),
-            ("messages.example.test", "/api/v1.0/logout/", "POST"),
+            ("grist.example.test", "/signed-out", "GET"),
+            ("meet.example.test", "/api/v1.0/logout-callback/", "GET"),
+            ("meet.example.test", "/api/v1.0/backchannel-logout/", "POST"),
+            ("messages.example.test", "/api/v1.0/logout-callback/", "GET"),
+            ("messages.example.test", "/api/v1.0/backchannel-logout/", "POST"),
             (
                 "nextcloud.example.test",
                 "/index.php/apps/user_oidc/backchannel-logout/keycloak",
@@ -238,16 +238,30 @@ class LogoutCallbackTests(unittest.TestCase):
     def test_nearby_grist_path_stays_protected(self) -> None:
         self.assertEqual(self.request_auth("grist.example.test", "/o/docs/logout-all"), 302)
 
-    def test_logout_callback_on_unexpected_method_stays_protected(self) -> None:
-        self.assertEqual(self.request_auth("grist.example.test", "/o/docs/logout", "POST"), 302)
-        self.assertEqual(
-            self.request_auth(
+    def test_logout_initiators_and_wrong_callback_methods_stay_protected(self) -> None:
+        protected = (
+            ("bridge.example.test", "/api/v1/auth/logout", "POST"),
+            ("docs.example.test", "/api/v1.0/logout/", "POST"),
+            ("docs.example.test", "/api/v1.0/logout-callback/", "POST"),
+            ("docs.example.test", "/api/v1.0/backchannel-logout/", "POST"),
+            ("grist.example.test", "/o/docs/logout", "POST"),
+            ("grist.example.test", "/signed-out", "POST"),
+            ("meet.example.test", "/api/v1.0/logout/", "POST"),
+            ("meet.example.test", "/api/v1.0/logout-callback/", "POST"),
+            ("meet.example.test", "/api/v1.0/backchannel-logout/", "GET"),
+            ("messages.example.test", "/api/v1.0/logout/", "POST"),
+            ("messages.example.test", "/api/v1.0/logout-callback/", "POST"),
+            ("messages.example.test", "/api/v1.0/backchannel-logout/", "GET"),
+            (
                 "nextcloud.example.test",
                 "/index.php/apps/user_oidc/backchannel-logout/keycloak",
                 "GET",
             ),
-            302,
         )
+
+        for host, uri, method in protected:
+            with self.subTest(host=host, uri=uri, method=method):
+                self.assertEqual(self.request_auth(host, uri, method), 302)
 
 
 class BearerPolicyTests(unittest.TestCase):
@@ -393,6 +407,7 @@ class ForwardedRequestTests(unittest.TestCase):
 
 class WopiBypassTests(unittest.TestCase):
     def test_exact_wopi_callbacks_bypass_on_nextcloud_only(self) -> None:
+        token = "AbCdEf0123456789AbCdEf0123456789"
         routes = (
             ("GET", "/index.php/apps/richdocuments/wopi/files/42_instance?access_token=secret"),
             ("GET", "/apps/richdocuments/wopi/files/42_instance/contents?access_token=secret"),
@@ -402,11 +417,10 @@ class WopiBypassTests(unittest.TestCase):
             ("GET", "/index.php/apps/richdocuments/wopi/settings?access_token=secret"),
             ("POST", "/index.php/apps/richdocuments/wopi/settings/upload"),
             ("DELETE", "/index.php/apps/richdocuments/wopi/settings"),
-            ("GET", "/index.php/apps/richdocuments/settings/user/token/presets/config.json"),
-            ("GET", "/index.php/apps/richdocuments/settings/fonts"),
+            ("GET", f"/index.php/apps/richdocuments/settings/userconfig/{token}/presets/config.json"),
+            ("GET", f"/apps/richdocuments/settings/systemconfig/{token}/template/slides/default.otp"),
             ("GET", "/apps/richdocuments/settings/fonts.json"),
             ("GET", "/index.php/apps/richdocuments/settings/fonts/custom.ttf"),
-            ("GET", "/apps/richdocuments/settings/fonts/custom.ttf/overview"),
         )
 
         for method, uri in routes:
@@ -420,9 +434,16 @@ class WopiBypassTests(unittest.TestCase):
         self.assertEqual(request("/auth", headers).status, 302)
 
     def test_nearby_richdocuments_admin_routes_stay_protected(self) -> None:
+        token = "AbCdEf0123456789AbCdEf0123456789"
         routes = (
+            ("GET", "/apps/richdocuments/settings/fonts"),
             ("POST", "/apps/richdocuments/settings/fonts"),
+            ("GET", "/apps/richdocuments/settings/fonts/custom.ttf/overview"),
             ("GET", "/apps/richdocuments/settings/generateToken/user"),
+            ("GET", f"/apps/richdocuments/settings/admin/{token}/presets/config.json"),
+            ("GET", "/apps/richdocuments/settings/userconfig/short-token/presets/config.json"),
+            ("GET", f"/apps/richdocuments/settings/userconfig/{token}/bad.category/config.json"),
+            ("GET", f"/apps/richdocuments/settings/userconfig/{token}/presets"),
             ("GET", "/apps/richdocuments/wopi/anything"),
             ("PUT", "/apps/richdocuments/wopi/files/42"),
             ("GET", "/apps/richdocuments/wopi/files/..%2Fsettings"),
@@ -433,6 +454,34 @@ class WopiBypassTests(unittest.TestCase):
             with self.subTest(method=method, uri=uri):
                 response = request("/auth", forwarded_headers("nextcloud.example.test", uri, method))
                 self.assertEqual(response.status, 302)
+
+
+class DeployScriptTests(unittest.TestCase):
+    def test_hardened_middleware_is_verified_before_deployment_apply(self) -> None:
+        repo_root = Path(__file__).resolve().parent.parent.parent
+        script_path = repo_root / "scripts/single-vps-deploy/12-auth-gate.sh"
+        if not script_path.exists():
+            self.skipTest("deploy script is outside the auth-gate container build context")
+        script = script_path.read_text()
+
+        middleware_apply = script.index("<<MIDDLEWARE_YAML")
+        middleware_readback = script.index("get middleware opensuite-auth-gate")
+        deployment_apply = script.index("<<WORKLOAD_YAML")
+        self.assertLess(middleware_apply, middleware_readback)
+        self.assertLess(middleware_readback, deployment_apply)
+        middleware_stage = script[middleware_apply:middleware_readback]
+        self.assertNotIn("kind: Deployment", middleware_stage)
+        self.assertIn("trustForwardHeader: false", middleware_stage)
+        for header in (
+            "Authorization",
+            "Cookie",
+            "Origin",
+            "Access-Control-Request-Method",
+            "Access-Control-Request-Headers",
+        ):
+            self.assertIn(f"      - {header}", middleware_stage)
+        self.assertIn('[[ "${ACTUAL_TRUST_FORWARD_HEADER}" == "false" ]]', script)
+        self.assertIn('[[ "${ACTUAL_AUTH_REQUEST_HEADERS}" == "${EXPECTED_AUTH_REQUEST_HEADERS}" ]]', script)
 
 
 class PreflightTests(unittest.TestCase):

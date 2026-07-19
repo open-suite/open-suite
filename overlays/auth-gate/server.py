@@ -88,14 +88,17 @@ WOPI_ROUTES = (
     (frozenset({"GET"}), re.compile(r"^/(?:index\.php/)?apps/richdocuments/wopi/template/[^/]+$")),
     (frozenset({"GET", "DELETE"}), re.compile(r"^/(?:index\.php/)?apps/richdocuments/wopi/settings$")),
     (frozenset({"POST"}), re.compile(r"^/(?:index\.php/)?apps/richdocuments/wopi/settings/upload$")),
-    (frozenset({"GET"}), re.compile(r"^/(?:index\.php/)?apps/richdocuments/settings/fonts(?:\.json)?$")),
+    (frozenset({"GET"}), re.compile(r"^/(?:index\.php/)?apps/richdocuments/settings/fonts\.json$")),
     (
         frozenset({"GET"}),
-        re.compile(r"^/(?:index\.php/)?apps/richdocuments/settings/fonts/[^/]+(?:/overview)?$"),
+        re.compile(r"^/(?:index\.php/)?apps/richdocuments/settings/fonts/[^/]+$"),
     ),
     (
         frozenset({"GET"}),
-        re.compile(r"^/(?:index\.php/)?apps/richdocuments/settings/[A-Za-z0-9_-]+/[^/]+/[A-Za-z0-9_-]+/.+$"),
+        re.compile(
+            r"^/(?:index\.php/)?apps/richdocuments/settings/"
+            r"(?:userconfig|systemconfig)/[A-Za-z0-9]{32}/[A-Za-z0-9_-]+/.+$"
+        ),
     ),
 )
 
@@ -103,12 +106,23 @@ WOPI_ROUTES = (
 # session. In particular, back-channel logout is server-to-server and never
 # carries the browser's gate cookie. Keep this allowlist exact: only endpoints
 # whose sole purpose is clearing an application session bypass forwardAuth.
+# Docs v5.3.0 is intentionally frontchannel-only because it hard-codes cache
+# sessions. Meet is configured for cached_db; Messages uses database sessions.
 LOGOUT_CALLBACKS = {
-    f"bridge.{DOMAIN}": {"/api/v1/auth/logout": frozenset({"GET", "POST"})},
-    f"docs.{DOMAIN}": {"/api/v1.0/logout/": frozenset({"GET", "POST"})},
-    f"grist.{DOMAIN}": {"/o/docs/logout": frozenset({"GET"})},
-    f"meet.{DOMAIN}": {"/api/v1.0/logout/": frozenset({"GET", "POST"})},
-    f"messages.{DOMAIN}": {"/api/v1.0/logout/": frozenset({"GET", "POST"})},
+    f"bridge.{DOMAIN}": {"/api/v1/auth/logout": frozenset({"GET"})},
+    f"docs.{DOMAIN}": {"/api/v1.0/logout-callback/": frozenset({"GET"})},
+    f"grist.{DOMAIN}": {
+        "/o/docs/logout": frozenset({"GET"}),
+        "/signed-out": frozenset({"GET"}),
+    },
+    f"meet.{DOMAIN}": {
+        "/api/v1.0/logout-callback/": frozenset({"GET"}),
+        "/api/v1.0/backchannel-logout/": frozenset({"POST"}),
+    },
+    f"messages.{DOMAIN}": {
+        "/api/v1.0/logout-callback/": frozenset({"GET"}),
+        "/api/v1.0/backchannel-logout/": frozenset({"POST"}),
+    },
     f"nextcloud.{DOMAIN}": {
         "/index.php/apps/user_oidc/backchannel-logout/keycloak": frozenset({"POST"}),
     },
