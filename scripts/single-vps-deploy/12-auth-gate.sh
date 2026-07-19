@@ -143,7 +143,7 @@ EXPECTED_AUTH_REQUEST_HEADERS="$(printf '%s\n' \
   Access-Control-Request-Method \
   Access-Control-Request-Headers)"
 ACTUAL_AUTH_REQUEST_HEADERS="$(kubectl -n "${NAMESPACE}" get middleware opensuite-auth-gate \
-  -o jsonpath='{range .spec.forwardAuth.authRequestHeaders[*]}{.}{"\n"}{end}')"
+  -o jsonpath='{range .spec.forwardAuth.authRequestHeaders[*]}{@}{"\n"}{end}')"
 [[ "${ACTUAL_TRUST_FORWARD_HEADER}" == "false" ]] || {
   echo "ERROR: refusing auth-gate rollout: Middleware trustForwardHeader is not false" >&2
   exit 1
