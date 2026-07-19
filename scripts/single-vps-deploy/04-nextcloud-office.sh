@@ -97,10 +97,39 @@ if [ "${OPEN_SUITE_TLS_MODE:-letsencrypt}" = "selfsigned" ]; then
     php occ config:app:set richdocuments disable_certificate_verification --value yes
 fi
 
+echo "==> Waiting for Traefik before refreshing Collabora capabilities"
+if ! kubectl rollout status deploy/traefik -n kube-system --timeout=300s; then
+  echo "ERROR: Traefik did not become available within 5 minutes" >&2
+  kubectl get deploy,pod -n kube-system -l app.kubernetes.io/name=traefik -o wide >&2 || true
+  kubectl logs -n kube-system deploy/traefik --tail=200 >&2 || true
+  kubectl get events -A --sort-by=.lastTimestamp | tail -100 >&2 || true
+  exit 1
+fi
+
 echo "==> Refreshing Collabora capabilities cache"
 # activate-config re-fetches /hosting/discovery + /hosting/capabilities and
-# rewrites the cache. Idempotent: running it again just re-fetches.
-kubectl exec -n mb-nextcloud deploy/nextcloud -c nextcloud -- php occ richdocuments:activate-config
+# rewrites the cache. The free runner can restart Traefik under first-install
+# load just after its rollout became available, so retry the actual dependency
+# check rather than relying only on Kubernetes readiness.
+activated=false
+for attempt in $(seq 1 24); do
+  if timeout --signal=TERM --kill-after=5s 15s \
+      kubectl exec -n mb-nextcloud deploy/nextcloud -c nextcloud -- \
+        php occ richdocuments:activate-config; then
+    activated=true
+    break
+  fi
+  echo "  Collabora discovery not ready (${attempt}/24); retrying in 5 seconds"
+  [ "${attempt}" = 24 ] || sleep 5
+done
+if [ "${activated}" != true ]; then
+  echo "ERROR: Collabora discovery did not converge after bounded retries" >&2
+  kubectl get deploy,pod,svc,endpoints -n mb-collabora -o wide >&2 || true
+  kubectl get deploy,pod -n kube-system -l app.kubernetes.io/name=traefik -o wide >&2 || true
+  kubectl logs -n kube-system deploy/traefik --tail=200 >&2 || true
+  kubectl get events -A --sort-by=.lastTimestamp | tail -100 >&2 || true
+  exit 1
+fi
 
 echo ""
 echo "Done. Office files (xlsx/docx/etc.) should now open in Nextcloud."
