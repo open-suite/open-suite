@@ -106,7 +106,54 @@ kubectl -n "${NAMESPACE}" create secret generic opensuite-auth-gate \
   --from-literal=COOKIE_SECRET="${COOKIE_SECRET}" \
   --dry-run=client -o yaml | kubectl apply -f -
 
-kubectl apply -f - <<YAML
+# Security invariant: harden and verify Traefik's forwarded-header boundary
+# before a new auth-gate image can start. The previous image is compatible with
+# this Middleware, so an upgrade never requires a permissive transition.
+kubectl apply -f - <<MIDDLEWARE_YAML
+apiVersion: traefik.io/v1alpha1
+kind: Middleware
+metadata:
+  name: opensuite-auth-gate
+  namespace: ${NAMESPACE}
+spec:
+  forwardAuth:
+    address: http://opensuite-auth-gate.${NAMESPACE}.svc.cluster.local/auth
+    # Rebuild X-Forwarded-Host/Uri/Proto/Method from Traefik's request instead
+    # of trusting attacker-supplied copies. The gate uses these values for its
+    # exact WOPI/logout bypasses, so this is an authentication boundary.
+    trustForwardHeader: false
+    authRequestHeaders:
+      - Authorization
+      - Cookie
+      - Origin
+      - Access-Control-Request-Method
+      - Access-Control-Request-Headers
+    authResponseHeaders:
+      - X-Open-Suite-User
+      - X-Open-Suite-Email
+      - X-Open-Suite-Name
+MIDDLEWARE_YAML
+
+ACTUAL_TRUST_FORWARD_HEADER="$(kubectl -n "${NAMESPACE}" get middleware opensuite-auth-gate \
+  -o jsonpath='{.spec.forwardAuth.trustForwardHeader}')"
+EXPECTED_AUTH_REQUEST_HEADERS="$(printf '%s\n' \
+  Authorization \
+  Cookie \
+  Origin \
+  Access-Control-Request-Method \
+  Access-Control-Request-Headers)"
+ACTUAL_AUTH_REQUEST_HEADERS="$(kubectl -n "${NAMESPACE}" get middleware opensuite-auth-gate \
+  -o jsonpath='{range .spec.forwardAuth.authRequestHeaders[*]}{.}{"\n"}{end}')"
+[[ "${ACTUAL_TRUST_FORWARD_HEADER}" == "false" ]] || {
+  echo "ERROR: refusing auth-gate rollout: Middleware trustForwardHeader is not false" >&2
+  exit 1
+}
+[[ "${ACTUAL_AUTH_REQUEST_HEADERS}" == "${EXPECTED_AUTH_REQUEST_HEADERS}" ]] || {
+  echo "ERROR: refusing auth-gate rollout: Middleware authRequestHeaders do not match the least-privilege set" >&2
+  exit 1
+}
+
+kubectl apply -f - <<WORKLOAD_YAML
 apiVersion: apps/v1
 kind: Deployment
 metadata:
@@ -188,20 +235,6 @@ spec:
       port: 80
       targetPort: http
 ---
-apiVersion: traefik.io/v1alpha1
-kind: Middleware
-metadata:
-  name: opensuite-auth-gate
-  namespace: ${NAMESPACE}
-spec:
-  forwardAuth:
-    address: http://opensuite-auth-gate.${NAMESPACE}.svc.cluster.local/auth
-    trustForwardHeader: true
-    authResponseHeaders:
-      - X-Open-Suite-User
-      - X-Open-Suite-Email
-      - X-Open-Suite-Name
----
 apiVersion: networking.k8s.io/v1
 kind: NetworkPolicy
 metadata:
@@ -264,7 +297,7 @@ spec:
                 name: opensuite-auth-gate
                 port:
                   name: http
-YAML
+WORKLOAD_YAML
 
 kubectl -n "${NAMESPACE}" rollout restart deploy/opensuite-auth-gate
 kubectl -n "${NAMESPACE}" rollout status deploy/opensuite-auth-gate --timeout=120s
