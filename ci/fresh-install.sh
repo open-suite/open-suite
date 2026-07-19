@@ -366,6 +366,8 @@ run_full_test() {
     exit 2
   fi
 
+  bash "${REPO}/ci/test-portal-header.sh"
+
   start_monitor
   trap finish_run EXIT
   trap 'exit 143' TERM
