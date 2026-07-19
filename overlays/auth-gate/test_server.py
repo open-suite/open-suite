@@ -488,6 +488,9 @@ class DeployScriptTests(unittest.TestCase):
         ):
             self.assertIn(f"      - {header}", middleware_stage)
         self.assertIn('[[ "${ACTUAL_TRUST_FORWARD_HEADER}" == "false" ]]', script)
+        self.assertIn(
+            "{range .spec.forwardAuth.authRequestHeaders[*]}{@}", script
+        )
         self.assertIn('[[ "${ACTUAL_AUTH_REQUEST_HEADERS}" == "${EXPECTED_AUTH_REQUEST_HEADERS}" ]]', script)
 
 
