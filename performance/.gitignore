@@ -1,2 +1,5 @@
 node_modules/
 *-result.json
+cluster-samples*.csv
+cluster-samples*-metadata.txt
+cluster-snapshot*.txt

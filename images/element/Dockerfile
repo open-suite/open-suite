@@ -16,9 +16,11 @@ COPY --from=upstream /etc/nginx/templates/default.conf.template /tmp/default.con
 COPY patch-verification-reminders.sh /tmp/patch-verification-reminders.sh
 COPY patch-startup-preload.sh /tmp/patch-startup-preload.sh
 COPY patch-mobile-web.sh /tmp/patch-mobile-web.sh
+COPY precompress-bundles.sh /tmp/precompress-bundles.sh
 RUN sh /tmp/patch-verification-reminders.sh /app \
     && sh /tmp/patch-startup-preload.sh /app \
-    && sh /tmp/patch-mobile-web.sh /tmp/default.conf.template
+    && sh /tmp/patch-mobile-web.sh /tmp/default.conf.template \
+    && sh /tmp/precompress-bundles.sh /app
 
 FROM ${ELEMENT_BASE}
 COPY --from=patcher /app /app

@@ -1,0 +1,24 @@
+# Element Web sha-a11ee66 startup resources discovered with Chromium 140.
+# Exact input for `npm run benchmark:http-assets`; paths are requested with
+# Accept-Encoding: gzip and six HTTP/1.1 sockets.
+/
+/bundles/551980ded8b2e300e6f2/bundle.css
+/bundles/551980ded8b2e300e6f2/e5ee191be150340246f5.wasm
+/bundles/551980ded8b2e300e6f2/bundle.js
+/bundles/551980ded8b2e300e6f2/styles.css
+/bundles/551980ded8b2e300e6f2/8609.js
+/bundles/551980ded8b2e300e6f2/styles.js
+/bundles/551980ded8b2e300e6f2/7345.js
+/bundles/551980ded8b2e300e6f2/9602.js
+/bundles/551980ded8b2e300e6f2/687.js
+/bundles/551980ded8b2e300e6f2/3912.js
+/bundles/551980ded8b2e300e6f2/8509.js
+/bundles/551980ded8b2e300e6f2/element-web-app.js
+/bundles/551980ded8b2e300e6f2/842.js
+/bundles/551980ded8b2e300e6f2/init.js
+/i18n/languages.json
+/bundles/551980ded8b2e300e6f2/theme-light.css
+/i18n/en_EN.05dcd5c.json
+/bundles/551980ded8b2e300e6f2/blurhash.worker.js
+/bundles/551980ded8b2e300e6f2/playback.worker.js
+/themes/element/img/logos/element-logo.svg

@@ -18,6 +18,36 @@ collaboration software), not a fork.
 reproduces the live demo (`https://bridge.demo.opensuite.online`). See
 **[docs/PLAN.md](docs/PLAN.md)** for the architecture.
 
+## Measured performance
+
+Performance changes are accepted only against a repeatable baseline with the
+same workload and environment. The versioned
+**[application benchmark ledger](APP-PERFORMANCE-BENCHMARK.md)** records sample
+counts, methodology, variance, correctness checks, accepted results, and
+rejected experiments; **[the harness guide](performance/README.md)** explains
+how to reproduce it. Credentials and bulky raw browser/cluster artifacts remain
+local.
+
+Latest accepted demo improvements (2026-07-11):
+
+| Change | Measured result | Interpretation |
+|---|---:|---|
+| Nextcloud shared-header compression | cold transfer 9,015 → 2,203 KiB (-76%) | network reduction; no latency improvement claimed |
+| Element static compression | cold transfer 15,315 → 4,719 KiB (-69%) | network reduction; startup remained initialization-bound |
+| Element crypto WASM preload | LCP 3,292 → 2,476 ms (-25%); spinner 1,171 → 619 ms (-47%) | startup gate overlaps with application boot; payload unchanged |
+| Synapse NAT login burst | 5/10 → 10/10 successful fresh logins | removed false shared-address throttling; per-account protections retained |
+
+Candidate measured locally, pending demo rollout:
+
+| Change | Measured result | Interpretation |
+|---|---:|---|
+| Element bundle precompression candidate | one-worker 21-resource origin p75 369.5 → 11.3 ms (-97%); bytes +0.1% | local CPU-isolation result; production uses auto workers, and demo/end-to-end confirmation is pending |
+
+The accepted demo browser runs used five samples; their original result schema
+did not retain IQR/MAD. New improvement claims use at least 10 baseline and 10
+candidate samples and report robust spread. The ledger is authoritative for the
+full environment and limitations.
+
 ## Deploy (single VPS, k3s)
 
 On a fresh Ubuntu 24.04 box (≥12 vCPU, ≥48 GiB RAM) with `*.DOMAIN` pointing at
