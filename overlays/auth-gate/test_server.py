@@ -220,7 +220,6 @@ class LogoutCallbackTests(unittest.TestCase):
             ("meet.example.test", "/api/v1.0/logout-callback/", "GET"),
             ("meet.example.test", "/api/v1.0/backchannel-logout/", "POST"),
             ("messages.example.test", "/api/v1.0/logout-callback/", "GET"),
-            ("messages.example.test", "/api/v1.0/backchannel-logout/", "POST"),
             (
                 "nextcloud.example.test",
                 "/index.php/apps/user_oidc/backchannel-logout/keycloak",
@@ -231,6 +230,14 @@ class LogoutCallbackTests(unittest.TestCase):
         for host, uri, method in callbacks:
             with self.subTest(host=host, method=method):
                 self.assertEqual(self.request_auth(host, uri, method), 204)
+
+    def test_messages_backchannel_logout_stays_protected_for_cache_sessions(self) -> None:
+        self.assertEqual(
+            self.request_auth(
+                "messages.example.test", "/api/v1.0/backchannel-logout/", "POST"
+            ),
+            302,
+        )
 
     def test_logout_path_on_wrong_host_stays_protected(self) -> None:
         self.assertEqual(self.request_auth("grist.example.test", "/api/v1.0/logout/"), 302)

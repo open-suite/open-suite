@@ -106,8 +106,8 @@ WOPI_ROUTES = (
 # session. In particular, back-channel logout is server-to-server and never
 # carries the browser's gate cookie. Keep this allowlist exact: only endpoints
 # whose sole purpose is clearing an application session bypass forwardAuth.
-# Docs v5.3.0 is intentionally frontchannel-only because it hard-codes cache
-# sessions. Meet is configured for cached_db; Messages uses database sessions.
+# Docs v5.3.0 and Messages v0.8.0 are intentionally frontchannel-only because
+# they hard-code cache sessions. Meet is explicitly configured for cached_db.
 LOGOUT_CALLBACKS = {
     f"bridge.{DOMAIN}": {"/api/v1/auth/logout": frozenset({"GET"})},
     f"docs.{DOMAIN}": {"/api/v1.0/logout-callback/": frozenset({"GET"})},
@@ -121,7 +121,6 @@ LOGOUT_CALLBACKS = {
     },
     f"messages.{DOMAIN}": {
         "/api/v1.0/logout-callback/": frozenset({"GET"}),
-        "/api/v1.0/backchannel-logout/": frozenset({"POST"}),
     },
     f"nextcloud.{DOMAIN}": {
         "/index.php/apps/user_oidc/backchannel-logout/keycloak": frozenset({"POST"}),
