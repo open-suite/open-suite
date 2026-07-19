@@ -39,11 +39,20 @@ kubectl exec -n mb-nextcloud deploy/nextcloud -c nextcloud -- php occ upgrade
 echo "==> Ensuring the Nextcloud Office app is enabled"
 kubectl exec -n mb-nextcloud deploy/nextcloud -c nextcloud -- php occ app:enable richdocuments
 
+# The chart's post-install configuration can run before the app is enabled on a
+# fresh install, leaving both Collabora URLs empty. Reconcile them after strict
+# enablement so activate-config has a discovery endpoint to fetch.
+DOMAIN="$(cat /etc/mijnbureau/domain)"
+echo "==> Configuring the Nextcloud Office endpoint"
+for key in wopi_url public_wopi_url; do
+  kubectl exec -n mb-nextcloud deploy/nextcloud -c nextcloud -- \
+    php occ config:app:set richdocuments "${key}" --value "https://collabora.${DOMAIN}"
+done
+
 # Self-signed deploys: Nextcloud's outbound HTTP client (richdocuments WOPI
 # discovery, user_oidc, meetcal) verifies TLS against Nextcloud's own cert
 # store. Import the local certs so every occ/app fetch below verifies.
 if [ "${OPEN_SUITE_TLS_MODE:-letsencrypt}" = "selfsigned" ]; then
-  DOMAIN="$(cat /etc/mijnbureau/domain)"
   # On a resource-constrained fresh install Traefik can still be failing its
   # readiness probe while application rollouts complete. openssl then receives
   # no certificate, so wait for the TLS endpoint before importing from it.
