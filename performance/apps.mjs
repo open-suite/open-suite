@@ -3,55 +3,54 @@ import { writeFile } from "node:fs/promises";
 
 import { chromium } from "playwright";
 
+import {
+  captureEnvironment,
+  parseNonNegativeNumber,
+  parsePositiveInteger,
+  sanitizeUrl,
+  summarizeRuns,
+} from "./reporting.mjs";
+
 const baseUrl =
   process.env.BENCHMARK_URL || "https://bridge.demo.opensuite.online";
 const username = process.env.BENCHMARK_USER;
 const password = process.env.BENCHMARK_PASS;
-const samples = Number(process.env.BENCHMARK_SAMPLES || 5);
-const pacingMs = Number(process.env.BENCHMARK_PACING_MS || 1000);
+const samples = parsePositiveInteger(
+  process.env.BENCHMARK_SAMPLES,
+  5,
+  "BENCHMARK_SAMPLES",
+);
+const pacingMs = parseNonNegativeNumber(
+  process.env.BENCHMARK_PACING_MS,
+  1000,
+  "BENCHMARK_PACING_MS",
+);
 const traceResources = process.env.BENCHMARK_TRACE_RESOURCES === "true";
 const output = process.env.BENCHMARK_OUTPUT || "app-benchmark-result.json";
 const label = process.env.BENCHMARK_LABEL || "unlabelled";
+const baseline = process.env.BENCHMARK_BASELINE || "unspecified";
+const deploymentRevision =
+  process.env.BENCHMARK_DEPLOYMENT_REVISION || "unspecified";
+const runnerLabel = process.env.BENCHMARK_RUNNER_LABEL || "unspecified";
+const runnerRegion = process.env.BENCHMARK_RUNNER_REGION || "unspecified";
+const startedAt = new Date().toISOString();
 const selectedApps = new Set(
-  (process.env.BENCHMARK_APPS || "nextcloud,element").split(","),
+  (process.env.BENCHMARK_APPS || "nextcloud,element")
+    .split(",")
+    .map((app) => app.trim())
+    .filter(Boolean),
 );
 
 if (!username || !password) {
   console.error("Set BENCHMARK_USER and BENCHMARK_PASS");
   process.exit(2);
 }
-
-const percentile = (values, fraction) => {
-  const sorted = values.filter(Number.isFinite).toSorted((a, b) => a - b);
-  if (!sorted.length) return null;
-  return sorted[Math.ceil(fraction * sorted.length) - 1];
-};
-
-const summarize = (runs) => {
-  const keys = [...new Set(runs.flatMap((run) => Object.keys(run.metrics)))];
-  return Object.fromEntries(
-    keys.map((key) => {
-      const values = runs
-        .map((run) => run.metrics[key])
-        .filter(Number.isFinite);
-      return [
-        key,
-        {
-          n: values.length,
-          p50: percentile(values, 0.5),
-          p75: percentile(values, 0.75),
-          p95: percentile(values, 0.95),
-          min: values.length ? Math.min(...values) : null,
-          max: values.length ? Math.max(...values) : null,
-        },
-      ];
-    }),
-  );
-};
+if (!selectedApps.size) throw new Error("BENCHMARK_APPS selected no apps");
 
 const appDefinitions = {
   nextcloud: {
     hostname: "nextcloud.",
+    workload: "portal-header-office-to-documents-result-count",
     async open(page) {
       const header = page.locator("#ko-portal-header");
       const office = header
@@ -70,6 +69,7 @@ const appDefinitions = {
   },
   element: {
     hostname: "element.",
+    workload: "portal-header-chat-to-first-room-list-item",
     async open(page) {
       await page
         .locator("#ko-portal-header")
@@ -213,21 +213,25 @@ const collectMetrics = async (page, journeyMs) =>
       style_encoded_kib: sum(styles, "encodedBodySize") / 1024,
     };
     if (includeResources) {
-      metrics.resources = resources.map((resource) => ({
-        url: resource.name,
-        initiator: resource.initiatorType,
-        start_ms: resource.startTime,
-        duration_ms: resource.duration,
-        response_end_ms: resource.responseEnd,
-        encoded_kib: resource.encodedBodySize / 1024,
-        decoded_kib: resource.decodedBodySize / 1024,
-      }));
+      metrics.resources = resources.map((resource) => {
+        const url = new URL(resource.name);
+        return {
+          url: `${url.origin}${url.pathname}`,
+          initiator: resource.initiatorType,
+          start_ms: resource.startTime,
+          duration_ms: resource.duration,
+          response_end_ms: resource.responseEnd,
+          encoded_kib: resource.encodedBodySize / 1024,
+          decoded_kib: resource.decodedBodySize / 1024,
+        };
+      });
     }
     return metrics;
   }, { measuredJourneyMs: journeyMs, includeResources: traceResources });
 
 const results = {};
 const sessionBootstrapMs = {};
+let incomplete = false;
 for (const [appName, definition] of Object.entries(appDefinitions)) {
   if (!selectedApps.has(appName)) continue;
   const coldRuns = [];
@@ -289,40 +293,60 @@ for (const [appName, definition] of Object.entries(appDefinitions)) {
         .then((body) => body.replace(/\s+/g, " ").slice(0, 160))
         .catch(() => "body unavailable");
       console.warn(
-        `discarded ${appName} attempt ${attempts}: ${error.message.split("\n")[0]} url=${page.url()} body=${diagnostic}`,
+        `discarded ${appName} attempt ${attempts}: ${error.message.split("\n")[0]} url=${sanitizeUrl(page.url())} body=${diagnostic}`,
       );
     }
     if (pacingMs > 0)
       await new Promise((resolve) => setTimeout(resolve, pacingMs));
   }
 
+  if (coldRuns.length !== samples) incomplete = true;
   results[appName] = {
+    workload: definition.workload,
+    requestedSamples: samples,
+    completedSamples: coldRuns.length,
+    attempts,
     discardedAttempts: attempts - coldRuns.length,
-    cold: { summary: summarize(coldRuns), runs: coldRuns },
-    warm: { summary: summarize(warmRuns), runs: warmRuns },
+    cold: { summary: summarizeRuns(coldRuns), runs: coldRuns },
+    warm: { summary: summarizeRuns(warmRuns), runs: warmRuns },
   };
   await context.close();
 }
 
+const browserVersion = await browser.version();
 const result = {
-  schemaVersion: 1,
-  label,
-  capturedAt: new Date().toISOString(),
-  target: baseUrl,
-  browser: await browser.version(),
-  profile: {
-    viewport: "1440x900",
+  schemaVersion: 2,
+  benchmark: {
+    name: "full-applications",
+    label,
+    baseline,
+    deploymentRevision,
+    startedAt,
+    finishedAt: new Date().toISOString(),
+    targetOrigin: new URL(baseUrl).origin,
+  },
+  sampling: {
+    requestedPerProfile: samples,
+    pacingMs,
+    complete: !incomplete,
+  },
+  environment: captureEnvironment({
+    browserVersion,
+    viewport: { width: 1440, height: 900 },
     locale: "en-US",
     timezone: "Europe/Amsterdam",
+    runnerLabel,
+    runnerRegion,
+  }),
+  profile: {
     cold: "cleared HTTP cache with established portal and application sessions; app origin is unloaded between samples",
     warm: "same-context reload after the app establishes its own session and cache",
   },
   sessionBootstrapMs,
-  samples,
-  pacingMs,
   apps: results,
 };
 
 await writeFile(output, `${JSON.stringify(result, null, 2)}\n`);
 console.log(JSON.stringify(result.apps, null, 2));
 await browser.close();
+if (incomplete) process.exitCode = 1;
