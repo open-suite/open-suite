@@ -355,6 +355,35 @@ index 0000000..7bfb47f
 +      secretName: {{ printf "%s-tls" .Values.ingress.hostname | quote }}
 +  {{- end }}
 +{{- end }}
+diff --git a/helmfile/apps/messages/charts/messages/templates/tls-secret.yaml b/helmfile/apps/messages/charts/messages/templates/tls-secret.yaml
+new file mode 100644
+index 0000000..a7125fb
+--- /dev/null
++++ b/helmfile/apps/messages/charts/messages/templates/tls-secret.yaml
+@@ -0,0 +1,23 @@
++{{- if and .Values.ingress.enabled .Values.ingress.tls .Values.ingress.selfSigned }}
++{{- $secretName := printf "%s-tls" .Values.ingress.hostname }}
++{{- $existingSecret := lookup "v1" "Secret" .Release.Namespace $secretName }}
++{{- $ca := genCA "messages-ca" 365 }}
++{{- $cert := genSignedCert .Values.ingress.hostname nil (list .Values.ingress.hostname) 365 $ca }}
++apiVersion: v1
++kind: Secret
++metadata:
++  name: {{ $secretName }}
++  namespace: {{ .Release.Namespace | quote }}
++  labels: {{- include "messages.labels" (dict "component" "frontend" "context" $) | nindent 4 }}
++type: kubernetes.io/tls
++data:
++  {{- if $existingSecret }}
++  tls.crt: {{ index $existingSecret.data "tls.crt" }}
++  tls.key: {{ index $existingSecret.data "tls.key" }}
++  ca.crt: {{ index $existingSecret.data "ca.crt" }}
++  {{- else }}
++  tls.crt: {{ $cert.Cert | b64enc }}
++  tls.key: {{ $cert.Key | b64enc }}
++  ca.crt: {{ $ca.Cert | b64enc }}
++  {{- end }}
++{{- end }}
 diff --git a/helmfile/apps/messages/charts/messages/templates/migrate-job.yaml b/helmfile/apps/messages/charts/messages/templates/migrate-job.yaml
 new file mode 100644
 index 0000000..9808302
@@ -759,10 +788,10 @@ index 0000000..280a606
 +          resources: {{ .Values.worker.resources | toYaml | nindent 12 }}
 diff --git a/helmfile/apps/messages/charts/messages/values.yaml b/helmfile/apps/messages/charts/messages/values.yaml
 new file mode 100644
-index 0000000..11ac44c
+index 0000000..04bdc99
 --- /dev/null
 +++ b/helmfile/apps/messages/charts/messages/values.yaml
-@@ -0,0 +1,82 @@
+@@ -0,0 +1,83 @@
 +# Default values for the messages chart. The deploy-time source of truth is
 +# ../../values.yaml.gotmpl (rendered by helmfile); these defaults only make
 +# `helm lint`/`helm template` work standalone and document the shape.
@@ -841,6 +870,7 @@ index 0000000..11ac44c
 +  ingressClassName: ""
 +  annotations: {}
 +  tls: true
++  selfSigned: false
 +
 +cluster:
 +  ingress:
@@ -1053,10 +1083,10 @@ index 0000000..33ce096
 +    size: {{ coalesce .Values.pvc.messages.redis.size .Values.pvc.default.size "1Gi" }}
 diff --git a/helmfile/apps/messages/values.yaml.gotmpl b/helmfile/apps/messages/values.yaml.gotmpl
 new file mode 100644
-index 0000000..136a8d8
+index 0000000..d172fae
 --- /dev/null
 +++ b/helmfile/apps/messages/values.yaml.gotmpl
-@@ -0,0 +1,149 @@
+@@ -0,0 +1,150 @@
 +{{- $releaseId := now | unixEpoch }}
 +{{- $hostname := printf "%s.%s" .Values.global.hostname.messages .Values.global.domain }}
 +{{- $sslPostfix := ternary "s" "" (.Values.global.tls.enabled | default true) }}
@@ -1206,6 +1236,7 @@ index 0000000..136a8d8
 +    traefik.ingress.kubernetes.io/router.middlewares: '{{ .Release.Namespace }}-hsts-header@kubernetescrd{{ if dig "opensuite" "authGate" "enabled" false .Values }},{{ .Values.application.bureaublad.namespace }}-opensuite-auth-gate@kubernetescrd{{ end }}'
 +    {{- end }}
 +  tls: {{ .Values.global.tls.enabled | default true }}
++  selfSigned: {{ and .Values.global.tls.enabled .Values.global.tls.selfSigned | default false }}
 diff --git a/helmfile/environments/default/application.yaml.gotmpl b/helmfile/environments/default/application.yaml.gotmpl
 index 66df91a..88b04bb 100644
 --- a/helmfile/environments/default/application.yaml.gotmpl

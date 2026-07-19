@@ -53,17 +53,40 @@ done
 # discovery, user_oidc, meetcal) verifies TLS against Nextcloud's own cert
 # store. Import the local certs so every occ/app fetch below verifies.
 if [ "${OPEN_SUITE_TLS_MODE:-letsencrypt}" = "selfsigned" ]; then
-  # On a resource-constrained fresh install Traefik can still be failing its
-  # readiness probe while application rollouts complete. openssl then receives
-  # no certificate, so wait for the TLS endpoint before importing from it.
-  echo "==> Waiting for Traefik before reading self-signed certificates"
-  kubectl rollout status deploy/traefik -n kube-system --timeout=300s
-  echo "==> Importing self-signed certs into Nextcloud's certificate store"
-  for h in id collabora meet nextcloud; do
-    kubectl exec -n mb-nextcloud deploy/nextcloud -c nextcloud -- sh -c "
-      echo | openssl s_client -connect ${h}.${DOMAIN}:443 -servername ${h}.${DOMAIN} 2>/dev/null \
-        | openssl x509 -outform PEM > /tmp/${h}.crt && php occ security:certificates:import /tmp/${h}.crt"
+  # Import the chart-generated CAs directly. Reading certificates through
+  # Traefik races its dynamic ingress configuration on a fresh deployment and
+  # can return no certificate even after the Traefik Deployment is Ready.
+  echo "==> Importing self-signed CAs into Nextcloud's certificate store"
+  cert_file="$(mktemp)"
+  trap 'rm -f "${cert_file}"' EXIT
+  for source in mb-keycloak:id mb-collabora:collabora mb-meet:meet mb-nextcloud:nextcloud; do
+    namespace="${source%%:*}"
+    h="${source#*:}"
+    secret="${h}.${DOMAIN}-tls"
+    imported=false
+    for _ in $(seq 1 30); do
+      : > "${cert_file}"
+      if kubectl get secret -n "${namespace}" "${secret}" -o jsonpath='{.data.ca\.crt}' \
+          | base64 -d > "${cert_file}" \
+          && [ -s "${cert_file}" ] \
+          && openssl x509 -in "${cert_file}" -noout -checkend 0 >/dev/null 2>&1 \
+          && kubectl exec -i -n mb-nextcloud deploy/nextcloud -c nextcloud -- sh -c \
+              "cat > /tmp/${h}-ca.crt && php occ security:certificates:import /tmp/${h}-ca.crt" \
+              < "${cert_file}"; then
+        imported=true
+        break
+      fi
+      sleep 5
+    done
+    if [ "${imported}" != true ]; then
+      echo "ERROR: ${namespace}/${secret} key ca.crt was not a current parseable certificate or could not be imported after 150 seconds" >&2
+      kubectl get ingress -n "${namespace}" -o wide >&2 || true
+      kubectl get secret -n "${namespace}" "${secret}" >&2 || true
+      exit 1
+    fi
   done
+  rm -f "${cert_file}"
+  trap - EXIT
 fi
 
 if [ "${OPEN_SUITE_TLS_MODE:-letsencrypt}" = "selfsigned" ]; then

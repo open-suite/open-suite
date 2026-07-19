@@ -374,16 +374,22 @@ run_full_test() {
   run_bounded first-deploy 55m "${REPO}/deploy.sh" "${DOMAIN}" ci@example.invalid
   set_phase first-conformance
   bash "${REPO}/ci/test-messages-install.sh" /root/mijn-bureau-infra
+  bash "${REPO}/ci/test-selfsigned-tls.sh" /root/mijn-bureau-infra "${DOMAIN}" \
+    "${ARTIFACT_DIR}/selfsigned-tls-fingerprints.sha256"
   local_conformance first-deploy
 
   # A second complete deploy proves host-state reuse and script idempotence.
   run_bounded second-deploy 55m "${REPO}/deploy.sh" "${DOMAIN}" ci@example.invalid
   set_phase second-conformance
+  bash "${REPO}/ci/test-selfsigned-tls.sh" /root/mijn-bureau-infra "${DOMAIN}" \
+    "${ARTIFACT_DIR}/selfsigned-tls-fingerprints.sha256"
   local_conformance second-deploy
 
   # Then exercise a raw Helmfile re-apply and verify procedural state heals.
   run_bounded helmfile-convergence 40m "${REPO}/ci/convergence-check.sh"
   set_phase final-conformance
+  bash "${REPO}/ci/test-selfsigned-tls.sh" /root/mijn-bureau-infra "${DOMAIN}" \
+    "${ARTIFACT_DIR}/selfsigned-tls-fingerprints.sha256"
   local_conformance final
 
   set_phase complete
