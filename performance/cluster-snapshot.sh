@@ -4,8 +4,16 @@ set -euo pipefail
 KUBECONFIG="${KUBECONFIG:-/etc/rancher/k3s/k3s.yaml}"
 export KUBECONFIG
 
-namespaces='^(mb-nextcloud|mb-element|mb-collabora|mb-docs|mb-meet|mb-grist|mb-livekit)'
+namespaces='^(mb-keycloak|mb-bureaublad|mb-nextcloud|mb-element|mb-collabora|mb-docs|mb-meet|mb-grist|mb-livekit|mb-messages)$'
 
+echo "# Benchmark support metadata"
+echo "captured_at=$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+echo "baseline=${BENCHMARK_BASELINE:-unspecified}"
+echo "workload=${BENCHMARK_WORKLOAD:-cluster-state-snapshot}"
+echo "environment=${BENCHMARK_ENVIRONMENT:-unspecified}"
+echo "deployment_revision=${BENCHMARK_DEPLOYMENT_REVISION:-unspecified}"
+
+echo
 echo "# Node"
 kubectl top node
 
