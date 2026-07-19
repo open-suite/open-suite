@@ -151,12 +151,23 @@ BASELINE_BROKEN="$(missing_from_snapshot "${BEFORE}")"
 [ -z "${BASELINE_BROKEN}" ] || echo "  PRE-EXISTING DRIFT:${BASELINE_BROKEN}"
 
 echo "== 2/5 Helmfile apply =="
-(
-  cd "${INFRA}" || exit
-  export MIJNBUREAU_MASTER_PASSWORD="${MASTER_PASSWORD}" MIJNBUREAU_CREATE_NAMESPACES=true
-  helmfile -e demo apply --skip-diff-on-install
-)
-APPLY_RC=$?
+APPLY_RC=1
+for attempt in 1 2 3; do
+  echo "  helmfile apply attempt ${attempt}/3"
+  (
+    cd "${INFRA}" || exit
+    export MIJNBUREAU_MASTER_PASSWORD="${MASTER_PASSWORD}" MIJNBUREAU_CREATE_NAMESPACES=true
+    helmfile -e demo apply --skip-diff-on-install
+  )
+  APPLY_RC=$?
+  if [ "${APPLY_RC}" -eq 0 ]; then
+    break
+  fi
+  if [ "${attempt}" -lt 3 ]; then
+    echo "  helmfile apply failed; retrying the idempotent convergence apply in 15s"
+    sleep 15
+  fi
+done
 echo "  helmfile apply exit=${APPLY_RC}"
 
 echo "== 3/5 post-apply snapshot =="
