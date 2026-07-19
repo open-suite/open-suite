@@ -68,6 +68,10 @@ configmaps = json.loads(
 deployments = json.loads(
     subprocess.check_output(["kubectl", "get", "deployment", "-A", "-o", "json"])
 )["items"]
+existing_configmaps = {
+    (configmap["metadata"]["namespace"], configmap["metadata"]["name"])
+    for configmap in configmaps
+}
 
 # Map each ConfigMap to the deployments that mount it. Only a mounted legacy
 # asset is a header target; this avoids rewriting unrelated historical data.
@@ -95,23 +99,57 @@ for deployment in deployments:
                     mount.get("subPath"),
                 ))
 
-targets = []
+# A sidecar ConfigMap is intentionally optional so Helm can install the apps
+# before this procedural publication step. On a genuinely fresh cluster that
+# means the mounted ConfigMap does not exist yet. Create only the exact standard
+# name referenced by a live volume; never materialize arbitrary missing refs.
+sidecar_configmaps = {
+    (namespace, name)
+    for namespace, name in live_mounts
+    if name == "opensuite-header-js"
+}
+for namespace, name in sorted(sidecar_configmaps - existing_configmaps):
+    manifest = {
+        "apiVersion": "v1",
+        "kind": "ConfigMap",
+        "metadata": {
+            "name": name,
+            "namespace": namespace,
+            "labels": {
+                "app.kubernetes.io/component": "opensuite-header",
+                "app.kubernetes.io/part-of": "open-suite",
+                "opensuite.online/shared-header": "true",
+            },
+        },
+    }
+    subprocess.run(
+        ["kubectl", "create", "-f", "-"],
+        input=json.dumps(manifest),
+        text=True,
+        check=True,
+    )
+    print(f"==> [{namespace}] created mounted ConfigMap {name}")
+
+targets = {
+    (namespace, name, "opensuite-header.js"): set()
+    for namespace, name in sidecar_configmaps
+}
 for configmap in configmaps:
     namespace = configmap["metadata"]["namespace"]
     name = configmap["metadata"]["name"]
     data = configmap.get("data") or {}
     mounted_by = consumers.get((namespace, name), set())
     if "opensuite-header.js" in data:
-        targets.append((namespace, name, "opensuite-header.js", set()))
+        targets[(namespace, name, "opensuite-header.js")] = set()
     elif "bureaublad-button.js" in data and mounted_by:
-        targets.append((namespace, name, "bureaublad-button.js", mounted_by))
+        targets[(namespace, name, "bureaublad-button.js")] = mounted_by
 
 if not targets:
     raise SystemExit("no shared-header ConfigMaps discovered")
 
 restarts = set()
 convergence_checks = set()
-for namespace, name, key, mounted_by in sorted(targets):
+for (namespace, name, key), mounted_by in sorted(targets.items()):
     patch = {
         "metadata": {"labels": {"opensuite.online/shared-header": "true"}},
         "data": {key: header},

@@ -2,7 +2,7 @@ diff --git a/helmfile/apps/keycloak/keycloak.yaml.gotmpl b/helmfile/apps/keycloa
 index 5e284cb..c2d36e4 100644
 --- a/helmfile/apps/keycloak/keycloak.yaml.gotmpl
 +++ b/helmfile/apps/keycloak/keycloak.yaml.gotmpl
-@@ -139,6 +139,26 @@ autoscaling:
+@@ -139,6 +139,30 @@ autoscaling:
  
  pdb: {{ .Values.pdb.keycloak | toYaml | nindent 2 }}
  
@@ -17,6 +17,10 @@ index 5e284cb..c2d36e4 100644
 +  - name: opensuite-keycloak-theme
 +    configMap:
 +      name: opensuite-keycloak-theme
++      # The supported deploy creates this dynamic configmap in step 10, after
++      # the initial Helm install. Let Keycloak bootstrap without it; step 10
++      # creates it, restarts Keycloak, and verifies every mounted theme file.
++      optional: true
 +      items:
 +        - { key: theme.properties, path: login/theme.properties }
 +        - { key: styles.css, path: login/resources/css/styles.css }

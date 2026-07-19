@@ -32,17 +32,61 @@ done
 echo "==> Applying pending Nextcloud/core app database upgrades"
 kubectl exec -n mb-nextcloud deploy/nextcloud -c nextcloud -- php occ upgrade
 
+# The chart's fresh-install hook treats app installation failures as warnings,
+# so the app source can exist while richdocuments remains disabled. Office
+# configuration below requires its command namespace: reconcile that state
+# strictly here and fail deployment if the app cannot be enabled.
+echo "==> Ensuring the Nextcloud Office app is enabled"
+kubectl exec -n mb-nextcloud deploy/nextcloud -c nextcloud -- php occ app:enable richdocuments
+
+# The chart's post-install configuration can run before the app is enabled on a
+# fresh install, leaving both Collabora URLs empty. Reconcile them after strict
+# enablement so activate-config has a discovery endpoint to fetch.
+DOMAIN="$(cat /etc/mijnbureau/domain)"
+echo "==> Configuring the Nextcloud Office endpoint"
+for key in wopi_url public_wopi_url; do
+  kubectl exec -n mb-nextcloud deploy/nextcloud -c nextcloud -- \
+    php occ config:app:set richdocuments "${key}" --value "https://collabora.${DOMAIN}"
+done
+
 # Self-signed deploys: Nextcloud's outbound HTTP client (richdocuments WOPI
 # discovery, user_oidc, meetcal) verifies TLS against Nextcloud's own cert
 # store. Import the local certs so every occ/app fetch below verifies.
 if [ "${OPEN_SUITE_TLS_MODE:-letsencrypt}" = "selfsigned" ]; then
-  DOMAIN="$(cat /etc/mijnbureau/domain)"
-  echo "==> Importing self-signed certs into Nextcloud's certificate store"
-  for h in id collabora meet nextcloud; do
-    kubectl exec -n mb-nextcloud deploy/nextcloud -c nextcloud -- sh -c "
-      echo | openssl s_client -connect ${h}.${DOMAIN}:443 -servername ${h}.${DOMAIN} 2>/dev/null \
-        | openssl x509 -outform PEM > /tmp/${h}.crt && php occ security:certificates:import /tmp/${h}.crt"
+  # Import the chart-generated CAs directly. Reading certificates through
+  # Traefik races its dynamic ingress configuration on a fresh deployment and
+  # can return no certificate even after the Traefik Deployment is Ready.
+  echo "==> Importing self-signed CAs into Nextcloud's certificate store"
+  cert_file="$(mktemp)"
+  trap 'rm -f "${cert_file}"' EXIT
+  for source in mb-keycloak:id mb-collabora:collabora mb-meet:meet mb-nextcloud:nextcloud; do
+    namespace="${source%%:*}"
+    h="${source#*:}"
+    secret="${h}.${DOMAIN}-tls"
+    imported=false
+    for _ in $(seq 1 30); do
+      : > "${cert_file}"
+      if kubectl get secret -n "${namespace}" "${secret}" -o jsonpath='{.data.ca\.crt}' \
+          | base64 -d > "${cert_file}" \
+          && [ -s "${cert_file}" ] \
+          && openssl x509 -in "${cert_file}" -noout -checkend 0 >/dev/null 2>&1 \
+          && kubectl exec -i -n mb-nextcloud deploy/nextcloud -c nextcloud -- sh -c \
+              "cat > /tmp/${h}-ca.crt && php occ security:certificates:import /tmp/${h}-ca.crt" \
+              < "${cert_file}"; then
+        imported=true
+        break
+      fi
+      sleep 5
+    done
+    if [ "${imported}" != true ]; then
+      echo "ERROR: ${namespace}/${secret} key ca.crt was not a current parseable certificate or could not be imported after 150 seconds" >&2
+      kubectl get ingress -n "${namespace}" -o wide >&2 || true
+      kubectl get secret -n "${namespace}" "${secret}" >&2 || true
+      exit 1
+    fi
   done
+  rm -f "${cert_file}"
+  trap - EXIT
 fi
 
 if [ "${OPEN_SUITE_TLS_MODE:-letsencrypt}" = "selfsigned" ]; then
@@ -53,10 +97,39 @@ if [ "${OPEN_SUITE_TLS_MODE:-letsencrypt}" = "selfsigned" ]; then
     php occ config:app:set richdocuments disable_certificate_verification --value yes
 fi
 
+echo "==> Waiting for Traefik before refreshing Collabora capabilities"
+if ! kubectl rollout status deploy/traefik -n kube-system --timeout=300s; then
+  echo "ERROR: Traefik did not become available within 5 minutes" >&2
+  kubectl get deploy,pod -n kube-system -l app.kubernetes.io/name=traefik -o wide >&2 || true
+  kubectl logs -n kube-system deploy/traefik --tail=200 >&2 || true
+  kubectl get events -A --sort-by=.lastTimestamp | tail -100 >&2 || true
+  exit 1
+fi
+
 echo "==> Refreshing Collabora capabilities cache"
 # activate-config re-fetches /hosting/discovery + /hosting/capabilities and
-# rewrites the cache. Idempotent: running it again just re-fetches.
-kubectl exec -n mb-nextcloud deploy/nextcloud -c nextcloud -- php occ richdocuments:activate-config
+# rewrites the cache. The free runner can restart Traefik under first-install
+# load just after its rollout became available, so retry the actual dependency
+# check rather than relying only on Kubernetes readiness.
+activated=false
+for attempt in $(seq 1 24); do
+  if timeout --signal=TERM --kill-after=5s 15s \
+      kubectl exec -n mb-nextcloud deploy/nextcloud -c nextcloud -- \
+        php occ richdocuments:activate-config; then
+    activated=true
+    break
+  fi
+  echo "  Collabora discovery not ready (${attempt}/24); retrying in 5 seconds"
+  [ "${attempt}" = 24 ] || sleep 5
+done
+if [ "${activated}" != true ]; then
+  echo "ERROR: Collabora discovery did not converge after bounded retries" >&2
+  kubectl get deploy,pod,svc,endpoints -n mb-collabora -o wide >&2 || true
+  kubectl get deploy,pod -n kube-system -l app.kubernetes.io/name=traefik -o wide >&2 || true
+  kubectl logs -n kube-system deploy/traefik --tail=200 >&2 || true
+  kubectl get events -A --sort-by=.lastTimestamp | tail -100 >&2 || true
+  exit 1
+fi
 
 echo ""
 echo "Done. Office files (xlsx/docx/etc.) should now open in Nextcloud."

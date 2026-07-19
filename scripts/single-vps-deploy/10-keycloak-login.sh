@@ -240,6 +240,13 @@ body#keycloak-bg {
 # configmap this script (re)created above.
 kubectl -n mb-keycloak rollout restart sts/keycloak-keycloak
 kubectl -n mb-keycloak rollout status sts/keycloak-keycloak --timeout=240s
+kubectl -n mb-keycloak exec keycloak-keycloak-0 -c keycloak -- sh -c '
+set -eu
+THEME=/opt/bitnami/keycloak/themes/opensuite/login
+test -f "$THEME/theme.properties"
+test -f "$THEME/resources/css/styles.css"
+test -f "$THEME/resources/js/opensuite-login.js"
+'
 
 # Realm displayName/displayNameHtml/loginTheme are owned declaratively by
 # patches/local/keycloak-realm-open-suite-branding.patch (config-cli import);

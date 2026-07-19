@@ -355,12 +355,41 @@ index 0000000..7bfb47f
 +      secretName: {{ printf "%s-tls" .Values.ingress.hostname | quote }}
 +  {{- end }}
 +{{- end }}
+diff --git a/helmfile/apps/messages/charts/messages/templates/tls-secret.yaml b/helmfile/apps/messages/charts/messages/templates/tls-secret.yaml
+new file mode 100644
+index 0000000..a7125fb
+--- /dev/null
++++ b/helmfile/apps/messages/charts/messages/templates/tls-secret.yaml
+@@ -0,0 +1,23 @@
++{{- if and .Values.ingress.enabled .Values.ingress.tls .Values.ingress.selfSigned }}
++{{- $secretName := printf "%s-tls" .Values.ingress.hostname }}
++{{- $existingSecret := lookup "v1" "Secret" .Release.Namespace $secretName }}
++{{- $ca := genCA "messages-ca" 365 }}
++{{- $cert := genSignedCert .Values.ingress.hostname nil (list .Values.ingress.hostname) 365 $ca }}
++apiVersion: v1
++kind: Secret
++metadata:
++  name: {{ $secretName }}
++  namespace: {{ .Release.Namespace | quote }}
++  labels: {{- include "messages.labels" (dict "component" "frontend" "context" $) | nindent 4 }}
++type: kubernetes.io/tls
++data:
++  {{- if $existingSecret }}
++  tls.crt: {{ index $existingSecret.data "tls.crt" }}
++  tls.key: {{ index $existingSecret.data "tls.key" }}
++  ca.crt: {{ index $existingSecret.data "ca.crt" }}
++  {{- else }}
++  tls.crt: {{ $cert.Cert | b64enc }}
++  tls.key: {{ $cert.Key | b64enc }}
++  ca.crt: {{ $ca.Cert | b64enc }}
++  {{- end }}
++{{- end }}
 diff --git a/helmfile/apps/messages/charts/messages/templates/migrate-job.yaml b/helmfile/apps/messages/charts/messages/templates/migrate-job.yaml
 new file mode 100644
-index 0000000..be1424f
+index 0000000..9808302
 --- /dev/null
 +++ b/helmfile/apps/messages/charts/messages/templates/migrate-job.yaml
-@@ -0,0 +1,24 @@
+@@ -0,0 +1,63 @@
 +# Django migrations, re-run on every helmfile apply (releaseSuffix changes per
 +# release render). Runs as a plain Job rather than a helm hook so a bare
 +# `helmfile apply` owns it and a failed migration surfaces in the release.
@@ -372,12 +401,51 @@ index 0000000..be1424f
 +  labels: {{- include "messages.labels" (dict "component" "migrate" "context" $) | nindent 4 }}
 +spec:
 +  backoffLimit: 3
++  activeDeadlineSeconds: 1200
 +  ttlSecondsAfterFinished: 3600
 +  template:
 +    metadata:
 +      labels: {{- include "messages.labels" (dict "component" "migrate" "context" $) | nindent 8 }}
 +    spec:
 +      restartPolicy: Never
++      # A release dependency only orders Helm operations; it does not prove a
++      # new database stayed up. Require six successful connections over 30s
++      # before migrating so first initialization cannot race a probe restart.
++      initContainers:
++        - name: wait-for-postgresql
++          image: {{ include "messages.image" (dict "component" "backend" "context" $) }}
++          command: ["python", "-c"]
++          args:
++            - |
++              import os
++              import time
++
++              import psycopg
++
++              deadline = time.monotonic() + 600
++              stable = 0
++              while time.monotonic() < deadline:
++                  try:
++                      with psycopg.connect(
++                          host=os.environ["DB_HOST"],
++                          port=os.environ["DB_PORT"],
++                          dbname=os.environ["DB_NAME"],
++                          user=os.environ["DB_USER"],
++                          password=os.environ["DB_PASSWORD"],
++                          connect_timeout=5,
++                      ) as connection:
++                          connection.execute("SELECT 1")
++                      stable += 1
++                      if stable >= 6:
++                          break
++                  except psycopg.OperationalError:
++                      stable = 0
++                  time.sleep(5)
++              else:
++                  raise SystemExit("PostgreSQL did not stay ready for 30 seconds within 10 minutes")
++          envFrom:
++            - secretRef:
++                name: {{ .Release.Name }}-backend-env
 +      containers:
 +        - name: migrate
 +          image: {{ include "messages.image" (dict "component" "backend" "context" $) }}
@@ -720,10 +788,10 @@ index 0000000..280a606
 +          resources: {{ .Values.worker.resources | toYaml | nindent 12 }}
 diff --git a/helmfile/apps/messages/charts/messages/values.yaml b/helmfile/apps/messages/charts/messages/values.yaml
 new file mode 100644
-index 0000000..11ac44c
+index 0000000..04bdc99
 --- /dev/null
 +++ b/helmfile/apps/messages/charts/messages/values.yaml
-@@ -0,0 +1,82 @@
+@@ -0,0 +1,83 @@
 +# Default values for the messages chart. The deploy-time source of truth is
 +# ../../values.yaml.gotmpl (rendered by helmfile); these defaults only make
 +# `helm lint`/`helm template` work standalone and document the shape.
@@ -802,6 +870,7 @@ index 0000000..11ac44c
 +  ingressClassName: ""
 +  annotations: {}
 +  tls: true
++  selfSigned: false
 +
 +cluster:
 +  ingress:
@@ -912,10 +981,10 @@ index 0000000..f9cf01e
 +  enabled: false
 diff --git a/helmfile/apps/messages/values-postgresql.yaml.gotmpl b/helmfile/apps/messages/values-postgresql.yaml.gotmpl
 new file mode 100644
-index 0000000..5513846
+index 0000000..4fa0889
 --- /dev/null
 +++ b/helmfile/apps/messages/values-postgresql.yaml.gotmpl
-@@ -0,0 +1,46 @@
+@@ -0,0 +1,57 @@
 +# Overrides for the shared Bitnami PostgreSQL chart (../common/charts/postgresql).
 +# Unlike the older apps this is a minimal override file, not a full copy of the
 +# chart's values.yaml — the chart's own defaults cover everything else.
@@ -956,6 +1025,17 @@ index 0000000..5513846
 +
 +primary:
 +  resourcesPreset: {{ .Values.global.resourcesPreset | quote }}
++  resources: {{ .Values.resource.messages.postgresql | default dict | toYaml | nindent 4 }}
++  # First initialization took four minutes under measured standard-runner
++  # load. Suppress liveness until PostgreSQL has actually started instead of
++  # carrying pre-start failures into the migration window.
++  startupProbe:
++    enabled: true
++    initialDelaySeconds: 0
++    periodSeconds: 10
++    timeoutSeconds: 5
++    failureThreshold: 60
++    successThreshold: 1
 +  podSecurityContext: {{ .Values.security.default.podSecurityContext | toYaml | nindent 4 }}
 +  containerSecurityContext: {{ .Values.security.default.containerSecurityContext | toYaml | nindent 4 }}
 +  persistence:
@@ -1003,10 +1083,10 @@ index 0000000..33ce096
 +    size: {{ coalesce .Values.pvc.messages.redis.size .Values.pvc.default.size "1Gi" }}
 diff --git a/helmfile/apps/messages/values.yaml.gotmpl b/helmfile/apps/messages/values.yaml.gotmpl
 new file mode 100644
-index 0000000..136a8d8
+index 0000000..d172fae
 --- /dev/null
 +++ b/helmfile/apps/messages/values.yaml.gotmpl
-@@ -0,0 +1,149 @@
+@@ -0,0 +1,150 @@
 +{{- $releaseId := now | unixEpoch }}
 +{{- $hostname := printf "%s.%s" .Values.global.hostname.messages .Values.global.domain }}
 +{{- $sslPostfix := ternary "s" "" (.Values.global.tls.enabled | default true) }}
@@ -1156,6 +1236,7 @@ index 0000000..136a8d8
 +    traefik.ingress.kubernetes.io/router.middlewares: '{{ .Release.Namespace }}-hsts-header@kubernetescrd{{ if dig "opensuite" "authGate" "enabled" false .Values }},{{ .Values.application.bureaublad.namespace }}-opensuite-auth-gate@kubernetescrd{{ end }}'
 +    {{- end }}
 +  tls: {{ .Values.global.tls.enabled | default true }}
++  selfSigned: {{ and .Values.global.tls.enabled .Values.global.tls.selfSigned | default false }}
 diff --git a/helmfile/environments/default/application.yaml.gotmpl b/helmfile/environments/default/application.yaml.gotmpl
 index 66df91a..88b04bb 100644
 --- a/helmfile/environments/default/application.yaml.gotmpl
