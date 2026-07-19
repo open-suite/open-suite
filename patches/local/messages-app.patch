@@ -357,10 +357,10 @@ index 0000000..7bfb47f
 +{{- end }}
 diff --git a/helmfile/apps/messages/charts/messages/templates/migrate-job.yaml b/helmfile/apps/messages/charts/messages/templates/migrate-job.yaml
 new file mode 100644
-index 0000000..be1424f
+index 0000000..9808302
 --- /dev/null
 +++ b/helmfile/apps/messages/charts/messages/templates/migrate-job.yaml
-@@ -0,0 +1,24 @@
+@@ -0,0 +1,63 @@
 +# Django migrations, re-run on every helmfile apply (releaseSuffix changes per
 +# release render). Runs as a plain Job rather than a helm hook so a bare
 +# `helmfile apply` owns it and a failed migration surfaces in the release.
@@ -372,12 +372,51 @@ index 0000000..be1424f
 +  labels: {{- include "messages.labels" (dict "component" "migrate" "context" $) | nindent 4 }}
 +spec:
 +  backoffLimit: 3
++  activeDeadlineSeconds: 1200
 +  ttlSecondsAfterFinished: 3600
 +  template:
 +    metadata:
 +      labels: {{- include "messages.labels" (dict "component" "migrate" "context" $) | nindent 8 }}
 +    spec:
 +      restartPolicy: Never
++      # A release dependency only orders Helm operations; it does not prove a
++      # new database stayed up. Require six successful connections over 30s
++      # before migrating so first initialization cannot race a probe restart.
++      initContainers:
++        - name: wait-for-postgresql
++          image: {{ include "messages.image" (dict "component" "backend" "context" $) }}
++          command: ["python", "-c"]
++          args:
++            - |
++              import os
++              import time
++
++              import psycopg
++
++              deadline = time.monotonic() + 600
++              stable = 0
++              while time.monotonic() < deadline:
++                  try:
++                      with psycopg.connect(
++                          host=os.environ["DB_HOST"],
++                          port=os.environ["DB_PORT"],
++                          dbname=os.environ["DB_NAME"],
++                          user=os.environ["DB_USER"],
++                          password=os.environ["DB_PASSWORD"],
++                          connect_timeout=5,
++                      ) as connection:
++                          connection.execute("SELECT 1")
++                      stable += 1
++                      if stable >= 6:
++                          break
++                  except psycopg.OperationalError:
++                      stable = 0
++                  time.sleep(5)
++              else:
++                  raise SystemExit("PostgreSQL did not stay ready for 30 seconds within 10 minutes")
++          envFrom:
++            - secretRef:
++                name: {{ .Release.Name }}-backend-env
 +      containers:
 +        - name: migrate
 +          image: {{ include "messages.image" (dict "component" "backend" "context" $) }}
@@ -912,10 +951,10 @@ index 0000000..f9cf01e
 +  enabled: false
 diff --git a/helmfile/apps/messages/values-postgresql.yaml.gotmpl b/helmfile/apps/messages/values-postgresql.yaml.gotmpl
 new file mode 100644
-index 0000000..5513846
+index 0000000..4fa0889
 --- /dev/null
 +++ b/helmfile/apps/messages/values-postgresql.yaml.gotmpl
-@@ -0,0 +1,46 @@
+@@ -0,0 +1,57 @@
 +# Overrides for the shared Bitnami PostgreSQL chart (../common/charts/postgresql).
 +# Unlike the older apps this is a minimal override file, not a full copy of the
 +# chart's values.yaml — the chart's own defaults cover everything else.
@@ -956,6 +995,17 @@ index 0000000..5513846
 +
 +primary:
 +  resourcesPreset: {{ .Values.global.resourcesPreset | quote }}
++  resources: {{ .Values.resource.messages.postgresql | default dict | toYaml | nindent 4 }}
++  # First initialization took four minutes under measured standard-runner
++  # load. Suppress liveness until PostgreSQL has actually started instead of
++  # carrying pre-start failures into the migration window.
++  startupProbe:
++    enabled: true
++    initialDelaySeconds: 0
++    periodSeconds: 10
++    timeoutSeconds: 5
++    failureThreshold: 60
++    successThreshold: 1
 +  podSecurityContext: {{ .Values.security.default.podSecurityContext | toYaml | nindent 4 }}
 +  containerSecurityContext: {{ .Values.security.default.containerSecurityContext | toYaml | nindent 4 }}
 +  persistence:

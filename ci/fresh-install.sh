@@ -214,11 +214,19 @@ for pod in json.load(sys.stdin).get("items", []):
 }
 
 cluster_status() {
-  kubectl get deployment,statefulset,daemonset,pod -A -o json | python3 -c '
+  kubectl get deployment,statefulset,daemonset,pod,job -A -o json | python3 -c '
 import json, sys
 
 items = json.load(sys.stdin).get("items", [])
 pending = []
+completed_jobs = {
+    (item["metadata"]["namespace"], item["metadata"]["name"])
+    for item in items
+    if item["kind"] == "Job" and any(
+        condition.get("type") == "Complete" and condition.get("status") == "True"
+        for condition in item.get("status", {}).get("conditions", [])
+    )
+}
 for item in items:
     kind = item["kind"]
     metadata = item["metadata"]
@@ -248,10 +256,30 @@ for item in items:
                 or ready != desired
                 or status.get("updatedNumberScheduled", 0) != desired):
             pending.append(f"{name}: {ready}/{desired} ready")
+    elif kind == "Job":
+        # Scheduled maintenance is incidental to install convergence; its pods
+        # retain their existing checks, but a TTL-cleaned historical CronJob
+        # must not leave the fresh-install gate permanently red.
+        if any(owner.get("kind") == "CronJob" for owner in metadata.get("ownerReferences", [])):
+            continue
+        if (namespace, object_name) not in completed_jobs:
+            failed = any(
+                condition.get("type") == "Failed" and condition.get("status") == "True"
+                for condition in status.get("conditions", [])
+            )
+            state = "failed" if failed else "not complete"
+            pending.append(f"{name}: {state}")
     elif kind == "Pod" and status.get("phase") != "Succeeded":
         containers = status.get("containerStatuses", [])
         phase = status.get("phase", "Unknown")
         ready = sum(bool(container.get("ready")) for container in containers)
+        owner_jobs = {
+            (namespace, owner.get("name"))
+            for owner in metadata.get("ownerReferences", [])
+            if owner.get("kind") == "Job"
+        }
+        if phase == "Failed" and owner_jobs & completed_jobs:
+            continue
         if phase != "Running" or not containers or ready != len(containers):
             pending.append(f"{name}: {phase}, {ready}/{len(containers)} containers ready")
 
@@ -345,6 +373,7 @@ run_full_test() {
 
   run_bounded first-deploy 55m "${REPO}/deploy.sh" "${DOMAIN}" ci@example.invalid
   set_phase first-conformance
+  bash "${REPO}/ci/test-messages-install.sh" /root/mijn-bureau-infra
   local_conformance first-deploy
 
   # A second complete deploy proves host-state reuse and script idempotence.

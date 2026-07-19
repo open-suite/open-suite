@@ -88,6 +88,8 @@ resource:
   livekit:
     livekit: { requests: { cpu: 25m, memory: 64Mi } }
     redis: { requests: { cpu: 25m, memory: 16Mi } }
+  messages:
+    postgresql: { requests: { cpu: 100m, memory: 128Mi } }
 
 autoscaling:
   horizontal:
