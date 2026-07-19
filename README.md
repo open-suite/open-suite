@@ -41,7 +41,7 @@ Candidate measured locally, pending demo rollout:
 
 | Change | Measured result | Interpretation |
 |---|---:|---|
-| Element bundle precompression candidate | one-worker 21-resource origin p75 367.8 → 10.7 ms (-97%); bytes +0.1% | local CPU-isolation result; production uses auto workers, and demo/end-to-end confirmation is pending |
+| Element bundle precompression candidate | one-worker 21-resource origin p75 369.5 → 11.3 ms (-97%); bytes +0.1% | local CPU-isolation result; production uses auto workers, and demo/end-to-end confirmation is pending |
 
 The accepted demo browser runs used five samples; their original result schema
 did not retain IQR/MAD. New improvement claims use at least 10 baseline and 10

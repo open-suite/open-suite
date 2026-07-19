@@ -166,8 +166,8 @@ claim.
 
 | 21-resource origin workload | Baseline | Candidate | Change |
 | --------------------------- | -------: | --------: | -----: |
-| Elapsed p50 (IQR) | 366.9 ms (1.5 ms) | 10.3 ms (0.6 ms) | -97.2% |
-| Elapsed p75 | 367.8 ms | 10.7 ms | -97.1% |
+| Elapsed p50 (IQR) | 368.2 ms (1.7 ms) | 10.8 ms (0.8 ms) | -97.1% |
+| Elapsed p75 | 369.5 ms | 11.3 ms | -96.9% |
 | Encoded bytes | 4,159,588 | 4,163,958 | +0.1% |
 | Gzip responses | 21/21 | 21/21 | 0 |
 
@@ -178,7 +178,8 @@ published image. The benchmark forced one nginx worker and fetched the 21
 startup textual resources in `performance/element-startup-resources.txt` over
 HTTP/1.1 with six keep-alive sockets and `Accept-Encoding: gzip`. After five
 warmups, 30 samples per variant ran in alternating order on the same 16-vCPU
-x86_64 Amp orb. The manifest SHA-256 was
+x86_64 Amp orb. The final run used clean revision `2efeadb`; the manifest
+SHA-256 was
 `1449b81f7d41b8884f3567e7b0d546fbfd598672a15b292006ee3e3be5a2fd42`.
 Baseline used dynamic gzip level 5; candidate used level-5 build-time gzip for
 the hashed `bundles/` directory plus `gzip_static on`. Non-bundle responses
