@@ -16,9 +16,9 @@ CLIENT_ID="opensuite-auth-gate"
 NAMESPACE="mb-bureaublad"
 # Prebuilt in CI and pulled from GHCR (ticket 3.1). Pinned to a specific build
 # (not floating :main) so a redeploy is reproducible; bump this when the gate
-# changes. sha-55ae927 = the #187 build with browser-session-aligned auth.
+# changes. sha-9cdeba7 = the #196 trust-boundary hardening build.
 # Override AUTH_GATE_IMAGE to test another tag.
-IMAGE="${AUTH_GATE_IMAGE:-ghcr.io/open-suite/auth-gate:sha-55ae927}"
+IMAGE="${AUTH_GATE_IMAGE:-ghcr.io/open-suite/auth-gate:sha-9cdeba7}"
 OPEN_SUITE_TLS_MODE="${OPEN_SUITE_TLS_MODE:-letsencrypt}"
 
 echo "==> [1/5] Ensuring auth-gate secrets"

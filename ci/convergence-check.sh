@@ -12,7 +12,7 @@ export KUBECONFIG="${KUBECONFIG:-/etc/rancher/k3s/k3s.yaml}"
 REPO="$(cd "$(dirname "$0")/.." && pwd)"
 INFRA="${INFRA_DIR:-/root/mijn-bureau-infra}"
 DIR="${REPO}/scripts/single-vps-deploy"
-EXPECTED_AUTH_GATE_IMAGE="${AUTH_GATE_IMAGE:-ghcr.io/open-suite/auth-gate:sha-55ae927}"
+EXPECTED_AUTH_GATE_IMAGE="${AUTH_GATE_IMAGE:-ghcr.io/open-suite/auth-gate:sha-9cdeba7}"
 source "${REPO}/scripts/lib/state.sh"
 
 MASTER_PASSWORD="$(opensuite_read_master_password)" || exit 2
