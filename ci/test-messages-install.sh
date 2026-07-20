@@ -37,3 +37,9 @@ require_literal "${MIGRATE_JOB}" 'if stable >= 6:'
 require_literal "${MIGRATE_JOB}" 'command: ["python", "manage.py", "migrate", "--no-input"]'
 
 echo "Messages PostgreSQL startup and migration contracts verified"
+
+if [ -n "${FRESH_INSTALL_ARTIFACT_DIR:-}" ]; then
+  bash "${REPO}/ci/messages-install-benchmark.sh" \
+    "${FRESH_INSTALL_ARTIFACT_DIR}/messages-benchmark" \
+    "${FRESH_INSTALL_DOMAIN:-127.0.0.1.sslip.io}"
+fi
