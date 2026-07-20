@@ -1,0 +1,13 @@
+diff --git a/helmfile/apps/keycloak/keycloak.yaml.gotmpl b/helmfile/apps/keycloak/keycloak.yaml.gotmpl
+index 5e284cb..e5f5c4d 100644
+--- a/helmfile/apps/keycloak/keycloak.yaml.gotmpl
++++ b/helmfile/apps/keycloak/keycloak.yaml.gotmpl
+@@ -694,7 +694,7 @@ keycloakConfigCli:
+           {{- end }}
+         ],
+         {{- end }}
+-        "internationalizationEnabled": true,
++        "internationalizationEnabled": false,
+         "eventsEnabled": true,
+         "eventsExpiration": 86400,
+         "adminEventsEnabled": true,

@@ -355,35 +355,6 @@ index 0000000..7bfb47f
 +      secretName: {{ printf "%s-tls" .Values.ingress.hostname | quote }}
 +  {{- end }}
 +{{- end }}
-diff --git a/helmfile/apps/messages/charts/messages/templates/tls-secret.yaml b/helmfile/apps/messages/charts/messages/templates/tls-secret.yaml
-new file mode 100644
-index 0000000..a7125fb
---- /dev/null
-+++ b/helmfile/apps/messages/charts/messages/templates/tls-secret.yaml
-@@ -0,0 +1,23 @@
-+{{- if and .Values.ingress.enabled .Values.ingress.tls .Values.ingress.selfSigned }}
-+{{- $secretName := printf "%s-tls" .Values.ingress.hostname }}
-+{{- $existingSecret := lookup "v1" "Secret" .Release.Namespace $secretName }}
-+{{- $ca := genCA "messages-ca" 365 }}
-+{{- $cert := genSignedCert .Values.ingress.hostname nil (list .Values.ingress.hostname) 365 $ca }}
-+apiVersion: v1
-+kind: Secret
-+metadata:
-+  name: {{ $secretName }}
-+  namespace: {{ .Release.Namespace | quote }}
-+  labels: {{- include "messages.labels" (dict "component" "frontend" "context" $) | nindent 4 }}
-+type: kubernetes.io/tls
-+data:
-+  {{- if $existingSecret }}
-+  tls.crt: {{ index $existingSecret.data "tls.crt" }}
-+  tls.key: {{ index $existingSecret.data "tls.key" }}
-+  ca.crt: {{ index $existingSecret.data "ca.crt" }}
-+  {{- else }}
-+  tls.crt: {{ $cert.Cert | b64enc }}
-+  tls.key: {{ $cert.Key | b64enc }}
-+  ca.crt: {{ $ca.Cert | b64enc }}
-+  {{- end }}
-+{{- end }}
 diff --git a/helmfile/apps/messages/charts/messages/templates/migrate-job.yaml b/helmfile/apps/messages/charts/messages/templates/migrate-job.yaml
 new file mode 100644
 index 0000000..9808302
@@ -736,6 +707,35 @@ index 0000000..54c02d9
 +        resources:
 +          requests:
 +            storage: {{ .Values.opensearch.persistence.size | quote }}
+diff --git a/helmfile/apps/messages/charts/messages/templates/tls-secret.yaml b/helmfile/apps/messages/charts/messages/templates/tls-secret.yaml
+new file mode 100644
+index 0000000..a7125fb
+--- /dev/null
++++ b/helmfile/apps/messages/charts/messages/templates/tls-secret.yaml
+@@ -0,0 +1,23 @@
++{{- if and .Values.ingress.enabled .Values.ingress.tls .Values.ingress.selfSigned }}
++{{- $secretName := printf "%s-tls" .Values.ingress.hostname }}
++{{- $existingSecret := lookup "v1" "Secret" .Release.Namespace $secretName }}
++{{- $ca := genCA "messages-ca" 365 }}
++{{- $cert := genSignedCert .Values.ingress.hostname nil (list .Values.ingress.hostname) 365 $ca }}
++apiVersion: v1
++kind: Secret
++metadata:
++  name: {{ $secretName }}
++  namespace: {{ .Release.Namespace | quote }}
++  labels: {{- include "messages.labels" (dict "component" "frontend" "context" $) | nindent 4 }}
++type: kubernetes.io/tls
++data:
++  {{- if $existingSecret }}
++  tls.crt: {{ index $existingSecret.data "tls.crt" }}
++  tls.key: {{ index $existingSecret.data "tls.key" }}
++  ca.crt: {{ index $existingSecret.data "ca.crt" }}
++  {{- else }}
++  tls.crt: {{ $cert.Cert | b64enc }}
++  tls.key: {{ $cert.Key | b64enc }}
++  ca.crt: {{ $ca.Cert | b64enc }}
++  {{- end }}
++{{- end }}
 diff --git a/helmfile/apps/messages/charts/messages/templates/traefik-middleware.yaml b/helmfile/apps/messages/charts/messages/templates/traefik-middleware.yaml
 new file mode 100644
 index 0000000..acfb124
@@ -1083,10 +1083,10 @@ index 0000000..33ce096
 +    size: {{ coalesce .Values.pvc.messages.redis.size .Values.pvc.default.size "1Gi" }}
 diff --git a/helmfile/apps/messages/values.yaml.gotmpl b/helmfile/apps/messages/values.yaml.gotmpl
 new file mode 100644
-index 0000000..d172fae
+index 0000000..423080c
 --- /dev/null
 +++ b/helmfile/apps/messages/values.yaml.gotmpl
-@@ -0,0 +1,150 @@
+@@ -0,0 +1,152 @@
 +{{- $releaseId := now | unixEpoch }}
 +{{- $hostname := printf "%s.%s" .Values.global.hostname.messages .Values.global.domain }}
 +{{- $sslPostfix := ternary "s" "" (.Values.global.tls.enabled | default true) }}
@@ -1137,6 +1137,8 @@ index 0000000..d172fae
 +    DJANGO_CSRF_TRUSTED_ORIGINS: {{ $baseUrl | quote }}
 +    SALT_KEY: {{ .Values.application.messages.saltKey | quote }}
 +    LANGUAGE_CODE: "en-us"
++    # English-only for now; hides the in-app language switch.
++    FRONTEND_FORCED_DEFAULT_LANGUAGE: "en"
 +    FRONTEND_SILENT_LOGIN_ENABLED: "true"
 +    LOGGING_LEVEL_HANDLERS_CONSOLE: "INFO"
 +    LOGGING_LEVEL_LOGGERS_APP: "INFO"
@@ -1310,7 +1312,7 @@ index be0dfca..b60e686 100644
      host: "drive-redis-master"
      port: 6379
 diff --git a/helmfile/environments/default/container.yaml.gotmpl b/helmfile/environments/default/container.yaml.gotmpl
-index 469bd00..3ba14ba 100644
+index 469bd00..58c39fa 100644
 --- a/helmfile/environments/default/container.yaml.gotmpl
 +++ b/helmfile/environments/default/container.yaml.gotmpl
 @@ -152,6 +152,25 @@ container:
