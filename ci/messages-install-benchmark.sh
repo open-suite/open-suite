@@ -198,7 +198,7 @@ SH
 # Browser installation happens after all infrastructure timestamps were
 # captured, so it cannot influence the startup distribution.
 npm install --no-save --no-package-lock playwright@1.61.1
-npx playwright install --with-deps chromium
+npx playwright install chromium
 MESSAGES_BENCHMARK_DOMAIN="${DOMAIN}" \
 MESSAGES_BENCHMARK_USER="messages-benchmark" \
 MESSAGES_BENCHMARK_PASSWORD="messagesBenchmarkPassword123" \

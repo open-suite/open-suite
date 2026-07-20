@@ -44,8 +44,14 @@ grep -Fq 'path: /_cluster/health' <<<"${OPENSEARCH_STARTUP_PROBE}"
 grep -Fq 'periodSeconds: 10' <<<"${OPENSEARCH_STARTUP_PROBE}"
 grep -Fq 'timeoutSeconds: 5' <<<"${OPENSEARCH_STARTUP_PROBE}"
 grep -Fq 'failureThreshold: 60' <<<"${OPENSEARCH_STARTUP_PROBE}"
-require_literal "${OPENSEARCH_STATEFULSET}" '          readinessProbe:'
-require_literal "${OPENSEARCH_STATEFULSET}" '          livenessProbe:'
+OPENSEARCH_READINESS_PROBE="$(sed -n '/^          readinessProbe:/,/^            periodSeconds:/p' "${OPENSEARCH_STATEFULSET}")"
+grep -Fq 'path: /_cluster/health' <<<"${OPENSEARCH_READINESS_PROBE}"
+grep -Fq 'initialDelaySeconds: 20' <<<"${OPENSEARCH_READINESS_PROBE}"
+grep -Fq 'periodSeconds: 10' <<<"${OPENSEARCH_READINESS_PROBE}"
+OPENSEARCH_LIVENESS_PROBE="$(sed -n '/^          livenessProbe:/,/^            periodSeconds:/p' "${OPENSEARCH_STATEFULSET}")"
+grep -Fq 'tcpSocket:' <<<"${OPENSEARCH_LIVENESS_PROBE}"
+grep -Fq 'initialDelaySeconds: 60' <<<"${OPENSEARCH_LIVENESS_PROBE}"
+grep -Fq 'periodSeconds: 20' <<<"${OPENSEARCH_LIVENESS_PROBE}"
 
 echo "Messages PostgreSQL, migration, and OpenSearch probe contracts verified"
 
