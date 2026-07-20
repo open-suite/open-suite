@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Regression guards for the startup ordering and measured PHP settings.
+# Fast source-shape checks; benchmark-startup.sh validates the built artifact.
 set -euo pipefail
 
 image_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -25,4 +25,4 @@ require_literal "${dockerfile}" 'ln -s /usr/local/bin/opensuite-sync-apps'
 require_literal "${php_patch}" '+    opcache.jit=disable'
 require_literal "${php_patch}" '+    opcache.jit_buffer_size=0'
 
-echo "Nextcloud performance guards passed"
+echo "Nextcloud source-shape checks passed"
