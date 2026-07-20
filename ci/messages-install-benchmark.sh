@@ -31,14 +31,16 @@ kubectl -n mb-messages get jobs -o json > "${ARTIFACT_DIR}/jobs.json"
 kubectl -n mb-messages get events --sort-by=.lastTimestamp \
   > "${ARTIFACT_DIR}/events.txt"
 
+FRONTEND_IP="$(kubectl -n mb-messages get service messages-frontend \
+  -o jsonpath='{.spec.clusterIP}')"
+FRONTEND_PORT="$(kubectl -n mb-messages get service messages-frontend \
+  -o jsonpath='{.spec.ports[?(@.name=="http")].port}')"
+FRONTEND_URL="http://${FRONTEND_IP}:${FRONTEND_PORT}"
+curl --fail --silent --show-error --max-time 15 "${FRONTEND_URL}/" >/dev/null
 PAGE_OBSERVED_AT="$(date --utc '+%Y-%m-%dT%H:%M:%S.%3NZ')"
-kubectl get --raw \
-  '/api/v1/namespaces/mb-messages/services/http:messages-frontend:8080/proxy/' \
-  >/dev/null
+curl --fail --silent --show-error --max-time 15 \
+  "${FRONTEND_URL}/api/v1.0/config/" >/dev/null
 CONFIG_OBSERVED_AT="$(date --utc '+%Y-%m-%dT%H:%M:%S.%3NZ')"
-kubectl get --raw \
-  '/api/v1/namespaces/mb-messages/services/http:messages-frontend:8080/proxy/api/v1.0/config/' \
-  >/dev/null
 
 python3 - "${ARTIFACT_DIR}/pods.json" "${ARTIFACT_DIR}/jobs.json" \
   "${CSV}" "${PAGE_OBSERVED_AT}" "${CONFIG_OBSERVED_AT}" <<'PY'
