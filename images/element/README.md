@@ -90,6 +90,20 @@ owner and SHA-256. The baseline alone had 160 entries, all under the old
 served the preload and 73 valid static-gzip files, and used the same non-root
 runtime contract and health request.
 
+The release build pins that verified multi-arch Element runtime as
+`v1.12.24-rc.1@sha256:a72c9310c08ebc7c4cb4fb91911b1363e529834e031468130eb75cea90027064`
+and the Perl patcher as
+`5-slim@sha256:d9e618def9ecf01ac2aafdf1ee39e6ea42833ae84a947b9feb44a677382f3f81`.
+The image workflow builds and loads the final amd64 and arm64 images before it
+may publish the multi-arch result. For each platform it compares Env,
+Entrypoint, Cmd, User, WorkingDir, ExposedPorts, StopSignal and Volumes with the
+pinned upstream config; checks the exact re-declared Healthcheck; requires all
+upstream labels (allowing Open Suite OCI metadata); and executes one-bundle,
+symlink and gzip-integrity guards. The amd64 candidate additionally must pass
+`nginx -t`, the image's unchanged `config.json` health request and JSON parsing
+of the served config. This guards the filesystem/config coupling introduced by
+flattening rather than relying only on Dockerfile text assertions.
+
 ### Browser parse/load
 
 Ten samples each launched a fresh Chromium process and context against the

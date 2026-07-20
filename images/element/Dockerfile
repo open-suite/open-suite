@@ -6,7 +6,8 @@
 # whose package manager differs by base distro/arch. So patch a copy of /app in
 # a perl image, then copy the result back into the pristine upstream image — the
 # final image differs only by the patched bundle and nginx performance template.
-ARG ELEMENT_BASE=registry-1.docker.io/vectorim/element-web:v1.12.24-rc.1
+ARG ELEMENT_BASE=registry-1.docker.io/vectorim/element-web:v1.12.24-rc.1@sha256:a72c9310c08ebc7c4cb4fb91911b1363e529834e031468130eb75cea90027064
+ARG PATCHER_BASE=registry-1.docker.io/library/perl:5-slim@sha256:d9e618def9ecf01ac2aafdf1ee39e6ea42833ae84a947b9feb44a677382f3f81
 
 FROM ${ELEMENT_BASE} AS upstream
 
@@ -20,7 +21,7 @@ FROM upstream AS runtime-files
 USER root
 RUN rm -rf /app
 
-FROM registry-1.docker.io/library/perl:5-slim AS patcher
+FROM ${PATCHER_BASE} AS patcher
 COPY --from=upstream /app /app
 COPY --from=upstream /etc/nginx/templates/default.conf.template /tmp/default.conf.template
 COPY patch-verification-reminders.sh /tmp/patch-verification-reminders.sh
@@ -49,6 +50,7 @@ ENV PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin \
     PKG_RELEASE=1 \
     DYNPKG_RELEASE=1 \
     ELEMENT_WEB_PORT=80
+LABEL maintainer="NGINX Docker Maintainers <docker-maint@nginx.com>"
 EXPOSE 8080
 STOPSIGNAL SIGQUIT
 WORKDIR /
