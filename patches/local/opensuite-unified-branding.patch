@@ -84,10 +84,10 @@ index 29b3f89..aef41c1 100644
        discover: false
        issuer: {{ .Values.authentication.oidc.issuer | quote }}
 diff --git a/helmfile/apps/nextcloud/charts/nextcloud/templates/configmap-script-post-install.yaml b/helmfile/apps/nextcloud/charts/nextcloud/templates/configmap-script-post-install.yaml
-index 5b9cd96..31dde41 100644
+index 5b9cd96..0a07aab 100644
 --- a/helmfile/apps/nextcloud/charts/nextcloud/templates/configmap-script-post-install.yaml
 +++ b/helmfile/apps/nextcloud/charts/nextcloud/templates/configmap-script-post-install.yaml
-@@ -45,14 +45,20 @@ data:
+@@ -45,14 +45,24 @@ data:
      php /var/www/html/occ config:app:set sharebymail replyToInitiator --value=no
  
      php /var/www/html/occ config:app:set files_downloadlimit download --value=10
@@ -102,9 +102,14 @@ index 5b9cd96..31dde41 100644
      php /var/www/html/occ config:app:set theming primary_color --value=#3E3A3A
      php /var/www/html/occ config:app:set theming background_color --value=#F8F7F7
      php /var/www/html/occ config:app:set theming disable-user-theming --value=yes
- 
+-
 -    # Enable the bureaublad button app (files are mounted from a ConfigMap at custom_apps/bureaublad_button)
 -    php /var/www/html/occ app:enable bureaublad_button || echo "WARNING: Failed to enable bureaublad_button"
++    # English-only for now (translations stay available for later). force_language
++    # pins every user to English and hides the per-user language picker.
++    php /var/www/html/occ config:system:set force_language --value=en
++    php /var/www/html/occ config:system:set default_language --value=en
++
 +    # Open Suite: the floating "back to portal" button is redundant (the shared
 +    # header nav is injected on every page) and carried MijnBureau branding.
 +    php /var/www/html/occ app:disable bureaublad_button || true
