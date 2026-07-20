@@ -1,0 +1,28 @@
+diff --git a/helmfile/apps/collabora/values-collabora.yaml.gotmpl b/helmfile/apps/collabora/values-collabora.yaml.gotmpl
+index 7398f68..5274160 100644
+--- a/helmfile/apps/collabora/values-collabora.yaml.gotmpl
++++ b/helmfile/apps/collabora/values-collabora.yaml.gotmpl
+@@ -68,4 +68,8 @@ collabora:
+   # Password used for authenticating with the Collabora service (default: "admin" if not provided in secrets)
+   password: {{ .Values.secret.collabora.credentials.password | quote }}
+-
++
++  # Only preload writing aids used by Open Suite. The chart default "en"
++  # expands to every English regional dictionary; fonts remain unchanged.
++  dictionaries: "en_GB nl"
++
+   # The hostname that Collabora will use to identify itself (usually matches the external DNS name)
+@@ -80,5 +84,12 @@ collabora:
+   aliasgroups:
+     - host: "{{ .Values.global.hostname.nextcloud | default "nextcloud" }}.{{ .Values.global.domain | default "example.com"  }}"
+     - host: "{{ .Values.global.hostname.drive | default "drive" }}.{{ .Values.global.domain | default "example.com"  }}"
+-
++
++# TLS is terminated by the ingress (ssl.enable=false above). The CODE image
++# otherwise generates an unused CA, RSA key and leaf certificate on every pod
++# start before coolwsd can initialize.
++extraEnvVars:
++  - name: DONT_GEN_SSL_CERT
++    value: "true"
++
+ containerPorts:
