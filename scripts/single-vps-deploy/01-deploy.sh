@@ -16,14 +16,14 @@ OPEN_SUITE_DEMO_PASSWORD="${OPEN_SUITE_DEMO_PASSWORD:-myStrongPassword123}"
 OPEN_SUITE_DEMO_ADMIN_USERNAME="${OPEN_SUITE_DEMO_ADMIN_USERNAME:-demoadmin}"
 # Pinned open-suite-portal commit: selects the CI-built portal images
 # (ghcr.io/open-suite/portal-{api,frontend}:sha-<short>). Bump deliberately.
-PORTAL_REF="${PORTAL_REF:-ab3ccaffe4d026a079cc0de8119eca49904c4f61}"
+PORTAL_REF="${PORTAL_REF:-80d7e2fb6093c055c27feb015e4bc7069b6aea71}"
 # Pinned Open Suite build of the v1.20.0-based Meet frontend.
 MEET_TAG="${MEET_TAG:-sha-d1cd4d2}"
 # Pinned Open Suite Nextcloud build (upstream base + meetcal + patched user_oidc).
 NEXTCLOUD_TAG="${NEXTCLOUD_TAG:-sha-03c989f}"
 # Open Suite Element Web image tag: pinned immutable build with verification
 # reminders removed and textual assets compressed.
-ELEMENT_TAG="${ELEMENT_TAG:-sha-985f709}"
+ELEMENT_TAG="${ELEMENT_TAG:-sha-253492c}"
 # TLS mode: letsencrypt (default; needs public DNS + ports) or selfsigned
 # (local VMs: every chart generates its own cert, no cert-manager, no ACME).
 OPEN_SUITE_TLS_MODE="${OPEN_SUITE_TLS_MODE:-letsencrypt}"
