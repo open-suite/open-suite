@@ -17,11 +17,13 @@ COPY patch-verification-reminders.sh /tmp/patch-verification-reminders.sh
 COPY patch-startup-preload.sh /tmp/patch-startup-preload.sh
 COPY patch-mobile-web.sh /tmp/patch-mobile-web.sh
 COPY patch-session-lock.sh /tmp/patch-session-lock.sh
+COPY patch-cache-bust.sh /tmp/patch-cache-bust.sh
 COPY precompress-bundles.sh /tmp/precompress-bundles.sh
 RUN sh /tmp/patch-verification-reminders.sh /app \
     && sh /tmp/patch-startup-preload.sh /app \
     && sh /tmp/patch-mobile-web.sh /tmp/default.conf.template \
     && sh /tmp/patch-session-lock.sh /app \
+    && sh /tmp/patch-cache-bust.sh /app \
     && sh /tmp/precompress-bundles.sh /app
 
 FROM ${ELEMENT_BASE}
