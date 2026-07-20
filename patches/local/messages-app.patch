@@ -381,7 +381,7 @@ index 0000000..9808302
 +      restartPolicy: Never
 +      # A release dependency only orders Helm operations; it does not prove a
 +      # new database stayed up. Require six successful connections over 30s
-+      # before migrating so first initialization cannot race a probe restart.
++      # before migrating; this fixed durability gate is not a performance knob.
 +      initContainers:
 +        - name: wait-for-postgresql
 +          image: {{ include "messages.image" (dict "component" "backend" "context" $) }}
