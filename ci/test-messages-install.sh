@@ -7,6 +7,7 @@ INFRA="${1:?Usage: $0 <patched-infra-dir>}"
 REPO="$(cd "$(dirname "$0")/.." && pwd)"
 POSTGRES_VALUES="${INFRA}/helmfile/apps/messages/values-postgresql.yaml.gotmpl"
 MIGRATE_JOB="${INFRA}/helmfile/apps/messages/charts/messages/templates/migrate-job.yaml"
+OPENSEARCH_STATEFULSET="${INFRA}/helmfile/apps/messages/charts/messages/templates/opensearch-statefulset.yaml"
 DEMO_VALUES="${REPO}/helmfile/demo-values.yaml.tmpl"
 
 require_literal() {
@@ -36,7 +37,17 @@ require_literal "${MIGRATE_JOB}" 'deadline = time.monotonic() + 600'
 require_literal "${MIGRATE_JOB}" 'if stable >= 6:'
 require_literal "${MIGRATE_JOB}" 'command: ["python", "manage.py", "migrate", "--no-input"]'
 
-echo "Messages PostgreSQL startup and migration contracts verified"
+# A startup probe prevents liveness from repeatedly restarting a healthy cold
+# start. Readiness and liveness remain as strict as before startup succeeds.
+OPENSEARCH_STARTUP_PROBE="$(sed -n '/^          startupProbe:/,/^            failureThreshold:/p' "${OPENSEARCH_STATEFULSET}")"
+grep -Fq 'path: /_cluster/health' <<<"${OPENSEARCH_STARTUP_PROBE}"
+grep -Fq 'periodSeconds: 10' <<<"${OPENSEARCH_STARTUP_PROBE}"
+grep -Fq 'timeoutSeconds: 5' <<<"${OPENSEARCH_STARTUP_PROBE}"
+grep -Fq 'failureThreshold: 60' <<<"${OPENSEARCH_STARTUP_PROBE}"
+require_literal "${OPENSEARCH_STATEFULSET}" '          readinessProbe:'
+require_literal "${OPENSEARCH_STATEFULSET}" '          livenessProbe:'
+
+echo "Messages PostgreSQL, migration, and OpenSearch probe contracts verified"
 
 if [ -n "${FRESH_INSTALL_ARTIFACT_DIR:-}" ]; then
   bash "${REPO}/ci/messages-install-benchmark.sh" \

@@ -36,9 +36,11 @@ FRONTEND_IP="$(kubectl -n mb-messages get service messages-frontend \
 FRONTEND_PORT="$(kubectl -n mb-messages get service messages-frontend \
   -o jsonpath='{.spec.ports[?(@.name=="http")].port}')"
 FRONTEND_URL="http://${FRONTEND_IP}:${FRONTEND_PORT}"
-curl --fail --silent --show-error --max-time 15 "${FRONTEND_URL}/" >/dev/null
+curl --fail --silent --show-error --max-time 15 \
+  --header "Host: messages.${DOMAIN}" "${FRONTEND_URL}/" >/dev/null
 PAGE_OBSERVED_AT="$(date --utc '+%Y-%m-%dT%H:%M:%S.%3NZ')"
 curl --fail --silent --show-error --max-time 15 \
+  --header "Host: messages.${DOMAIN}" \
   "${FRONTEND_URL}/api/v1.0/config/" >/dev/null
 CONFIG_OBSERVED_AT="$(date --utc '+%Y-%m-%dT%H:%M:%S.%3NZ')"
 

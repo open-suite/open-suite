@@ -635,10 +635,10 @@ index 0000000..69043be
 +      protocol: TCP
 diff --git a/helmfile/apps/messages/charts/messages/templates/opensearch-statefulset.yaml b/helmfile/apps/messages/charts/messages/templates/opensearch-statefulset.yaml
 new file mode 100644
-index 0000000..54c02d9
+index 0000000..fd52a5e
 --- /dev/null
 +++ b/helmfile/apps/messages/charts/messages/templates/opensearch-statefulset.yaml
-@@ -0,0 +1,68 @@
+@@ -0,0 +1,79 @@
 +# Single-node OpenSearch for message search. The vendored infra carries no
 +# OpenSearch chart, and at single-VPS scale one node with the security plugin
 +# disabled (cluster-internal traffic only) is the honest deployment.
@@ -684,6 +684,17 @@ index 0000000..54c02d9
 +          volumeMounts:
 +            - name: data
 +              mountPath: /usr/share/opensearch/data
++          # OpenSearch can take several minutes to cold-start on the minimum
++          # supported host. Do not let liveness restart that valid startup;
++          # after cluster health succeeds, the existing probes are unchanged.
++          startupProbe:
++            # Plain HTTP matches the disabled security plugin above.
++            httpGet:
++              path: /_cluster/health
++              port: http
++            periodSeconds: 10
++            timeoutSeconds: 5
++            failureThreshold: 60
 +          readinessProbe:
 +            httpGet:
 +              path: /_cluster/health
