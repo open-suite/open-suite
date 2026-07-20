@@ -127,6 +127,35 @@ kubectl -n mb-nextcloud exec nextcloud-cluster-rw-0 -c postgresql -- \
   -c "DELETE FROM oc_activity WHERE file ~ '/Document( \\(\\d+\\))?\\.docx$'" >/dev/null || \
   echo "    !! activity purge failed (non-fatal)"
 
+# Remove the junk "Document*.docx" the smoke test leaves in johndoe's files so
+# the portal Files widget shows only curated demo files (Q3-themed). Object
+# storage is keyed by fileid, so dropping the filecache row is enough; a
+# curated "Q3 planning notes.docx" / "Q3 Deck.docx" remain.
+echo "==> Removing smoke-test Document*.docx from Files"
+kubectl -n mb-nextcloud exec nextcloud-cluster-rw-0 -c postgresql -- \
+  env PGPASSWORD="${NC_DB_PASS}" psql -qAt -h 127.0.0.1 -U "${NC_DB_USER}" -d nextcloud \
+  -c "DELETE FROM oc_filecache WHERE path ~ '^files/Document( \\(\\d+\\))?\\.docx$'" >/dev/null || \
+  echo "    !! file purge failed (non-fatal)"
+
+# La Suite Docs: give any untitled doc a Q3-themed name so the portal Docs
+# widget never shows "Untitled Document". Deterministic per row so re-runs are
+# stable. (Docs stores the title in impress_document.title.)
+echo "==> Titling untitled Docs (Q3 theme)"
+DOCS_DB_PASS=$(kubectl -n mb-docs get secret docs-cluster-rw -o jsonpath='{.data.password}' | base64 -d)
+kubectl -n mb-docs exec -i docs-cluster-rw-0 -c postgresql -- \
+  env PGPASSWORD="${DOCS_DB_PASS}" psql -qAt -h 127.0.0.1 -U docs -d docs <<'SQL' >/dev/null 2>&1 || echo "    !! docs titling failed (non-fatal)"
+WITH untitled AS (
+  SELECT id, row_number() OVER (ORDER BY updated_at DESC) AS rn
+  FROM impress_document WHERE title IS NULL OR title = ''
+)
+UPDATE impress_document d SET title = CASE u.rn
+    WHEN 1 THEN 'Q3 Deck — Outline'
+    WHEN 2 THEN 'Q3 Deck — Financials'
+    WHEN 3 THEN 'Q3 Deck — Speaker Notes'
+    ELSE 'Q3 Deck — Draft ' || u.rn END
+FROM untitled u WHERE d.id = u.id;
+SQL
+
 echo "==> [1/4] Calendar — upcoming events (each with a Meet link)"
 # Meet is OIDC-native; mint johndoe a token (direct-access grant on the meet
 # client) so we can create a room per event. Its URL goes in the event location,
@@ -464,6 +493,43 @@ fi
 # invalid or an extra room was retired above.
 curl -fsS -X PUT "$B/_matrix/client/v3/user/$JOHN/account_data/m.direct" -H "$AT" -H "Content-Type: application/json" -d "{\"$JANE\":[\"$RID\"]}" >/dev/null
 curl -fsS -X PUT "$B/_matrix/client/v3/user/$JANE/account_data/m.direct" -H "Authorization: Bearer $JT" -H "Content-Type: application/json" -d "{\"$JOHN\":[\"$RID\"]}" >/dev/null
+
+# --- Team channel: a public room both users are in, with a fresh unread message
+# each reset so the portal Chat widget always shows a channel alongside the DM.
+TALIAS="%23team:$SERVER"   # #team:<server>, URL-encoded '#'
+TRID=$(curl -s "$B/_matrix/client/v3/directory/room/$TALIAS" -H "$AT" | python3 -c "import json,sys
+try: print(json.load(sys.stdin).get('room_id',''))
+except Exception: print('')")
+if [ -z "$TRID" ]; then
+  TRID=$(curl -fsS -X POST "$B/_matrix/client/v3/createRoom" -H "$AT" -H "Content-Type: application/json" \
+    -d "{\"preset\":\"public_chat\",\"name\":\"Team\",\"room_alias_name\":\"team\",\"invite\":[\"$JANE\"]}" \
+    | python3 -c "import json,sys;print(json.load(sys.stdin)[\"room_id\"])")
+  curl -fsS -X POST "$B/_matrix/client/v3/rooms/$TRID/join" -H "Authorization: Bearer $JT" >/dev/null
+  echo "    + created #team channel"
+else
+  # Ensure both are joined (idempotent), then purge history so it stays a clean
+  # single fresh message, matching the DM's reset behaviour.
+  curl -fsS -X POST "$B/_synapse/admin/v1/join/$TRID" -H "$AAT" -H "Content-Type: application/json" -d "{\"user_id\":\"$JOHN\"}" >/dev/null || true
+  curl -fsS -X POST "$B/_synapse/admin/v1/join/$TRID" -H "$AAT" -H "Content-Type: application/json" -d "{\"user_id\":\"$JANE\"}" >/dev/null || true
+  TPID=$(curl -s -X POST "$B/_synapse/admin/v1/purge_history/$TRID" -H "$AAT" -H "Content-Type: application/json" \
+    -d "{\"purge_up_to_ts\": $(($(date +%s000) - 1000)), \"delete_local_events\": true}" \
+    | python3 -c "import json,sys
+try: print(json.load(sys.stdin).get('purge_id',''))
+except Exception: print('')")
+  if [ -n "$TPID" ]; then
+    for _ in $(seq 1 30); do
+      TPS=$(curl -s "$B/_synapse/admin/v1/purge_history_status/$TPID" -H "$AAT" | python3 -c "import json,sys
+try: print(json.load(sys.stdin).get('status',''))
+except Exception: print('')")
+      [ "$TPS" = complete ] && break; [ "$TPS" = failed ] && break; sleep 1
+    done
+  fi
+  echo "    + reset #team channel"
+fi
+# Fresh unread message from Jane (John has not read it -> shows in the widget).
+curl -fsS -X PUT "$B/_matrix/client/v3/rooms/$TRID/send/m.room.message/team$(date +%s)" \
+  -H "Authorization: Bearer $JT" -H "Content-Type: application/json" \
+  -d "{\"msgtype\":\"m.text\",\"body\":\"Reminder: Q3 deck review at 4pm today. Please add your slides.\"}" >/dev/null
 SH
 
 echo "==> Demo reset complete."
