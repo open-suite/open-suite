@@ -1,0 +1,193 @@
+diff --git a/src/frontend/src/features/rooms/livekit/components/blur/BackgroundCustomProcessor.ts b/src/frontend/src/features/rooms/livekit/components/blur/BackgroundCustomProcessor.ts
+index d13b047..920175f 100644
+--- a/src/frontend/src/features/rooms/livekit/components/blur/BackgroundCustomProcessor.ts
++++ b/src/frontend/src/features/rooms/livekit/components/blur/BackgroundCustomProcessor.ts
+@@ -1,7 +1,6 @@
+ import type { ProcessorOptions, Track } from 'livekit-client'
+ import posthog from 'posthog-js'
+-import {
+-  FilesetResolver,
++import type {
+   ImageSegmenter,
+   ImageSegmenterResult,
+ } from '@mediapipe/tasks-vision'
+@@ -153,6 +152,9 @@ export class BackgroundCustomProcessor implements BackgroundProcessorInterface {
+   }
+ 
+   async initSegmenter() {
++    const { FilesetResolver, ImageSegmenter } = await import(
++      '@mediapipe/tasks-vision'
++    )
+     const vision = await FilesetResolver.forVisionTasks(
+       'https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision/wasm'
+     )
+diff --git a/src/frontend/src/features/rooms/livekit/components/blur/FaceLandmarksProcessor.ts b/src/frontend/src/features/rooms/livekit/components/blur/FaceLandmarksProcessor.ts
+index 7299ae4..ede8f9e 100644
+--- a/src/frontend/src/features/rooms/livekit/components/blur/FaceLandmarksProcessor.ts
++++ b/src/frontend/src/features/rooms/livekit/components/blur/FaceLandmarksProcessor.ts
+@@ -1,7 +1,6 @@
+ import type { ProcessorOptions, Track, TrackProcessor } from 'livekit-client'
+ import posthog from 'posthog-js'
+-import {
+-  FilesetResolver,
++import type {
+   FaceLandmarker,
+   FaceLandmarkerResult,
+ } from '@mediapipe/tasks-vision'
+@@ -128,6 +127,9 @@ export class FaceLandmarksProcessor implements TrackProcessor<Track.Kind> {
+   }
+ 
+   async initFaceLandmarker() {
++    const { FilesetResolver, FaceLandmarker } = await import(
++      '@mediapipe/tasks-vision'
++    )
+     const vision = await FilesetResolver.forVisionTasks(
+       'https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision/wasm'
+     )
+diff --git a/src/frontend/src/features/rooms/livekit/components/blur/OpenSuiteBackgroundProcessor.ts b/src/frontend/src/features/rooms/livekit/components/blur/OpenSuiteBackgroundProcessor.ts
+index eeef587..5f5f842 100644
+--- a/src/frontend/src/features/rooms/livekit/components/blur/OpenSuiteBackgroundProcessor.ts
++++ b/src/frontend/src/features/rooms/livekit/components/blur/OpenSuiteBackgroundProcessor.ts
+@@ -1,6 +1,5 @@
+ import type { ProcessorOptions, Track } from 'livekit-client'
+-import {
+-  FilesetResolver,
++import type {
+   ImageSegmenter,
+   ImageSegmenterResult,
+ } from '@mediapipe/tasks-vision'
+@@ -211,6 +210,9 @@ export class OpenSuiteBackgroundProcessor
+     if (!tracks.length) throw new Error('No tracks produced by processor canvas')
+     this.processedTrack = tracks[0]
+ 
++    const { FilesetResolver, ImageSegmenter } = await import(
++      '@mediapipe/tasks-vision'
++    )
+     const vision = await FilesetResolver.forVisionTasks(WASM_PATH)
+     this.segmenter = await ImageSegmenter.createFromOptions(vision, {
+       baseOptions: { modelAssetPath: MODEL_PATH, delegate: 'GPU' },
+diff --git a/src/frontend/src/features/rooms/livekit/components/blur/index.ts b/src/frontend/src/features/rooms/livekit/components/blur/index.ts
+index e0123db..7edbf63 100644
+--- a/src/frontend/src/features/rooms/livekit/components/blur/index.ts
++++ b/src/frontend/src/features/rooms/livekit/components/blur/index.ts
+@@ -1,9 +1,7 @@
+-import { ProcessorWrapper } from '@livekit/track-processors'
+-import type { Track, TrackProcessor } from 'livekit-client'
++import type { ProcessorOptions, Track, TrackProcessor } from 'livekit-client'
+ import { BackgroundCustomProcessor } from './BackgroundCustomProcessor'
+ import { OpenSuiteBackgroundProcessor } from './OpenSuiteBackgroundProcessor'
+-import { UnifiedBackgroundTrackProcessor } from './UnifiedBackgroundTrackProcessor'
+-import { FaceLandmarksOptions } from './FaceLandmarksProcessor'
++import type { FaceLandmarksOptions } from './FaceLandmarksProcessor'
+ 
+ export enum ProcessorType {
+   BLUR = 'blur',
+@@ -21,15 +19,71 @@ export interface BackgroundProcessorInterface extends TrackProcessor<Track.Kind>
+   options: ProcessorConfig
+ }
+ 
++const hasModernProcessorSupport = () =>
++  'MediaStreamTrackGenerator' in globalThis &&
++  'MediaStreamTrackProcessor' in globalThis
++
++const hasProcessorSupport = () =>
++  hasModernProcessorSupport() ||
++  (typeof HTMLCanvasElement !== 'undefined' &&
++    typeof VideoFrame !== 'undefined' &&
++    'captureStream' in HTMLCanvasElement.prototype)
++
++class LazyUnifiedBackgroundTrackProcessor
++  implements BackgroundProcessorInterface
++{
++  options: ProcessorConfig
++  name: string
++  private processor?: BackgroundProcessorInterface
++
++  constructor(options: ProcessorConfig) {
++    this.options = options
++    this.name =
++      options.type === ProcessorType.VIRTUAL
++        ? 'virtual-background'
++        : 'background-blur'
++  }
++
++  get processedTrack() {
++    return this.processor?.processedTrack
++  }
++
++  async init(opts: ProcessorOptions<Track.Kind>) {
++    const { UnifiedBackgroundTrackProcessor } = await import(
++      './UnifiedBackgroundTrackProcessor'
++    )
++    this.processor = new UnifiedBackgroundTrackProcessor(this.options)
++    await this.processor.init(opts)
++  }
++
++  async restart(opts: ProcessorOptions<Track.Kind>) {
++    if (!this.processor) return this.init(opts)
++    await this.processor.restart(opts)
++  }
++
++  async destroy() {
++    await this.processor?.destroy()
++  }
++
++  async update(opts: ProcessorConfig) {
++    this.options = opts
++    this.name =
++      opts.type === ProcessorType.VIRTUAL
++        ? 'virtual-background'
++        : 'background-blur'
++    await this.processor?.update(opts)
++  }
++}
++
+ export class BackgroundProcessorFactory {
+   static hasModernApiSupport() {
+-    return ProcessorWrapper.hasModernApiSupport
++    return hasModernProcessorSupport()
+   }
+ 
+   static isSupported() {
+     return (
+       OpenSuiteBackgroundProcessor.isSupported ||
+-      ProcessorWrapper.isSupported ||
++      hasProcessorSupport() ||
+       BackgroundCustomProcessor.isSupported
+     )
+   }
+@@ -48,8 +102,8 @@ export class BackgroundProcessorFactory {
+       return new OpenSuiteBackgroundProcessor(config)
+     }
+ 
+-    if (ProcessorWrapper.isSupported) {
+-      return new UnifiedBackgroundTrackProcessor(config)
++    if (hasProcessorSupport()) {
++      return new LazyUnifiedBackgroundTrackProcessor(config)
+     }
+ 
+     if (BackgroundCustomProcessor.isSupported) {
+diff --git a/src/frontend/vite.config.ts b/src/frontend/vite.config.ts
+index f58ef7b..efe5f67 100644
+--- a/src/frontend/vite.config.ts
++++ b/src/frontend/vite.config.ts
+@@ -26,6 +26,19 @@ export default defineConfig(({ mode }) => {
+     },
+     build: {
+       sourcemap: env.VITE_BUILD_SOURCEMAP === 'true',
++      modulePreload: {
++        // Keep optional background processors out of the room route's
++        // recursive preloads. Their own dynamic imports retain all preloads.
++        resolveDependencies: (filename, deps) =>
++          /vision_bundle|UnifiedBackgroundTrackProcessor/.test(filename)
++            ? deps
++            : deps.filter(
++                (dependency) =>
++                  !/vision_bundle|UnifiedBackgroundTrackProcessor/.test(
++                    dependency
++                  )
++              ),
++      },
+     },
+     server: {
+       port: parseInt(env.VITE_PORT) || 3000,
