@@ -2,12 +2,31 @@ diff --git a/helmfile/apps/grist/values.yaml.gotmpl b/helmfile/apps/grist/values
 index 0d489aa..4c14cb6 100644
 --- a/helmfile/apps/grist/values.yaml.gotmpl
 +++ b/helmfile/apps/grist/values.yaml.gotmpl
-@@ -197,8 +197,14 @@ persistence:
+@@ -197,8 +197,33 @@ persistence:
  # page. Served by the grist-static nginx release, which sets the matching CORS
  # header.
++# Without RestartShell, the direct server binds /status before its internal
++# ready flag is set. Keep liveness on /status, but do not send user traffic
++# until migrations and full application initialization have completed.
++customReadinessProbe:
++  httpGet:
++    path: /status?ready=1
++    port: 8484
++    scheme: HTTP
++  initialDelaySeconds: 5
++  periodSeconds: 1
++  timeoutSeconds: 5
++  failureThreshold: 3
++  successThreshold: 1
++
  extraEnvVars:
 -  - name: GRIST_INCLUDE_CUSTOM_SCRIPT_URL
 -    value: 'https://{{ index .Values.global.hostname "grist-static" }}.{{ .Values.global.domain }}/bureaublad-button.js'
++  # Kubernetes owns process restart and readiness. Grist's Linux-default
++  # RestartShell starts a second Node process only to support in-process admin
++  # restarts; disabling it removes duplicate startup without weakening /status.
++  - name: GRIST_RESTART_SHELL
++    value: "false"
 +  {{- if .Values.global.tls.selfSigned }}
 +  # Local/dev only: grist's OIDC discovery against the self-signed id. host
 +  # cannot verify TLS and crashloops the pod.
