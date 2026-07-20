@@ -33,6 +33,35 @@
   var base = host.indexOf(".") === -1 ? host : host.slice(host.indexOf(".") + 1);
   var origin = function (sub) { return window.location.protocol + "//" + sub + "." + base; };
 
+  // Prewarm the apps the user is most likely to open next, so the first click
+  // skips DNS + TLS + TCP + HTTP/2 setup (typically 100-300ms on a cold
+  // cross-subdomain hop) and the app's ingress/pod is already awake.
+  //
+  // Only preconnect: a single idle keep-alive socket per origin, which the
+  // browser reaps on its own — no bytes fetched, no measurable cost if the
+  // user never navigates. We deliberately do NOT prerender the pages: that
+  // would download and boot each SPA in the background (a real cost the user
+  // would feel), and cross-subdomain prerender needs a per-app
+  // Supports-Loading-Mode opt-in header and still can't pre-establish each
+  // app's own OIDC session (SameSite=Lax blocks setting it from here). So the
+  // login round-trip is unavoidable cross-origin; preconnect shaves the
+  // connection setup off it. Portal page only.
+  if (host.indexOf("bridge.") === 0) {
+    var prewarm = function () {
+      // Mail and Chat first (the ask); then the other subdomains a portal user
+      // commonly jumps to. Keycloak too — every app's login round-trips it.
+      ["messages", "element", "nextcloud", "meet", "docs", "grist", "id"].forEach(function (sub) {
+        var l = document.createElement("link");
+        l.rel = "preconnect";
+        l.href = origin(sub);
+        l.crossOrigin = "use-credentials"; // match the credentialed app navigations
+        document.head.appendChild(l);
+      });
+    };
+    if (window.requestIdleCallback) window.requestIdleCallback(prewarm, { timeout: 3000 });
+    else setTimeout(prewarm, 1500);
+  }
+
   // Demo resets used to delete and recreate the seeded direct-message room.
   // Element can retain those purged rooms in its local sync database even
   // after Synapse no longer returns them. 09-portal-header.sh enables this
