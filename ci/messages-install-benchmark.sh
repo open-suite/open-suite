@@ -12,6 +12,20 @@ FIRST_USE="${ARTIFACT_DIR}/first-use.json"
 export KUBECONFIG="${KUBECONFIG:-/etc/rancher/k3s/k3s.yaml}"
 
 install -d -m 0755 "${ARTIFACT_DIR}"
+kubectl -n mb-messages wait --for=condition=Ready pod/messages-cluster-rw-0 \
+  --timeout=1200s
+kubectl -n mb-messages wait --for=condition=Ready pod/messages-opensearch-0 \
+  --timeout=1200s
+kubectl -n mb-messages wait --for=condition=Ready pod \
+  -l app.kubernetes.io/name=messages,app.kubernetes.io/component=backend \
+  --timeout=1200s
+kubectl -n mb-messages wait --for=condition=Ready pod \
+  -l app.kubernetes.io/name=messages,app.kubernetes.io/component=frontend \
+  --timeout=1200s
+kubectl -n mb-messages wait --for=condition=Complete job \
+  -l app.kubernetes.io/name=messages,app.kubernetes.io/component=migrate \
+  --timeout=1200s
+
 kubectl -n mb-messages get pods -o json > "${ARTIFACT_DIR}/pods.json"
 kubectl -n mb-messages get jobs -o json > "${ARTIFACT_DIR}/jobs.json"
 kubectl -n mb-messages get events --sort-by=.lastTimestamp \
