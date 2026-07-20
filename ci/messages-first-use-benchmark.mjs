@@ -20,20 +20,50 @@ const results = {};
 
 try {
   const mailStarted = performance.now();
-  await page.goto(`https://messages.${domain}/`, { waitUntil: "domcontentloaded" });
-  if (page.url().includes(`id.${domain}`)) {
-    await page.fill("#username", username);
-    await page.fill("#password", password);
-    await page.click("#kc-login");
-  }
-  await page.waitForURL(new RegExp(`^https://messages\\.${domain.replaceAll(".", "\\.")}/mailbox/`), {
-    timeout: 60_000,
+  const mailboxUrl = new RegExp(
+    `^https://messages\\.${domain.replaceAll(".", "\\.")}/mailbox/`
+  );
+  const authenticationUrl = new RegExp(
+    `^https://(?:id|messages)\\.${domain.replaceAll(".", "\\.")}/(?:realms/[^/]+/protocol/openid-connect/auth|api/v1\\.0/callback/)`
+  );
+  const callbackStatuses = [];
+  page.on("response", (response) => {
+    if (response.url().includes(`messages.${domain}/api/v1.0/callback/`)) {
+      callbackStatuses.push(response.status());
+    }
   });
+
+  let mailAttempts = 0;
+  while (!mailboxUrl.test(page.url()) && mailAttempts < 3) {
+    mailAttempts += 1;
+    await page.goto(`https://messages.${domain}/`, { waitUntil: "domcontentloaded" });
+    await page.waitForURL(new RegExp(`${mailboxUrl.source}|${authenticationUrl.source}`), {
+      timeout: 30_000,
+    });
+    if (page.url().includes(`id.${domain}`)) {
+      const login = page.locator("#kc-login");
+      if (await login.isVisible()) {
+        await page.fill("#username", username);
+        await page.fill("#password", password);
+        await login.click();
+      }
+      await page.waitForURL(new RegExp(`${mailboxUrl.source}|messages\\.${domain.replaceAll(".", "\\.")}/api/v1\\.0/callback/`), {
+        timeout: 30_000,
+      });
+    }
+  }
+  if (!mailboxUrl.test(page.url())) {
+    throw new Error(
+      `Mail did not become usable after ${mailAttempts} OIDC attempts; callback statuses: ${callbackStatuses.join(", ") || "none"}`
+    );
+  }
   await page.getByText("Inbox", { exact: true }).first().waitFor({
     state: "visible",
     timeout: 30_000,
   });
   results.mail_first_usable_ms = Math.round(performance.now() - mailStarted);
+  results.mail_oidc_attempts = mailAttempts;
+  results.mail_oidc_callback_statuses = callbackStatuses;
 
   const cookies = await context.cookies();
   const gateCookie = cookies.find((cookie) => cookie.name === "opensuite_auth");

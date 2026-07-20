@@ -61,6 +61,7 @@ lines += [
     "## First use from a clean browser",
     "",
     f"- Mail inbox usable: **{first_use['mail_first_usable_ms'] / 1000:.3f}s**",
+    f"- Mail OIDC attempts: **{first_use['mail_oidc_attempts']}**",
     f"- First Matrix sync from Element navigation: **{first_use['matrix_first_sync_from_navigation_ms'] / 1000:.3f}s**",
     f"- First Matrix sync request: **{first_use['matrix_first_sync_request_ms'] / 1000:.3f}s**",
     f"- Session security checks: **{'pass' if first_use['session_security_verified'] else 'fail'}**",
