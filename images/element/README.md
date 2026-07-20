@@ -92,6 +92,8 @@ runtime contract and health request.
 
 The release build pins that verified multi-arch Element runtime as
 `v1.12.24-rc.1@sha256:a72c9310c08ebc7c4cb4fb91911b1363e529834e031468130eb75cea90027064`
+(`amd64@sha256:a26bdc3bec8cad42ad3fafa180386706f99d8a6be41e6f1d775292b820a2597b`,
+`arm64@sha256:ceb899e0face56a6ad8196e458c9c45ad7e8446235b623df1893cd653611bd50`)
 and the Perl patcher as
 `5-slim@sha256:d9e618def9ecf01ac2aafdf1ee39e6ea42833ae84a947b9feb44a677382f3f81`.
 The image workflow builds and loads the final amd64 and arm64 images before it

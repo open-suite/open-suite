@@ -10,6 +10,12 @@ const imageWorkflow = fs.readFileSync(
 );
 const elementRuntime =
     "registry-1.docker.io/vectorim/element-web:v1.12.24-rc.1@sha256:a72c9310c08ebc7c4cb4fb91911b1363e529834e031468130eb75cea90027064";
+const elementRuntimePlatforms = {
+    "linux/amd64":
+        "registry-1.docker.io/vectorim/element-web@sha256:a26bdc3bec8cad42ad3fafa180386706f99d8a6be41e6f1d775292b820a2597b",
+    "linux/arm64":
+        "registry-1.docker.io/vectorim/element-web@sha256:ceb899e0face56a6ad8196e458c9c45ad7e8446235b623df1893cd653611bd50",
+};
 const patcherRuntime =
     "registry-1.docker.io/library/perl:5-slim@sha256:d9e618def9ecf01ac2aafdf1ee39e6ea42833ae84a947b9feb44a677382f3f81";
 
@@ -314,8 +320,9 @@ async function verifyFinalImages(runtime, amd64Candidate, arm64Candidate) {
         ["linux/amd64", "amd64", amd64Candidate],
         ["linux/arm64", "arm64", arm64Candidate],
     ]) {
-        runContainerEngine(["pull", "--platform", platform, runtime]);
-        const upstream = inspectImage(runtime);
+        const platformRuntime = elementRuntimePlatforms[platform];
+        runContainerEngine(["pull", "--platform", platform, platformRuntime]);
+        const upstream = inspectImage(platformRuntime);
         assert.equal(
             upstream.Architecture,
             architecture,
