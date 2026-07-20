@@ -430,11 +430,34 @@ if [ -z "$RID" ]; then
   snd "Authorization: Bearer $JT" "Works for me, see you at 10."
   echo "    + created demo DM thread"
 else
-  TXN="reset-$(date +%s)-$(openssl rand -hex 4)"
-  curl -fsS -X PUT "$B/_matrix/client/v3/rooms/$RID/send/m.room.message/$TXN" \
-    -H "Authorization: Bearer $JT" -H "Content-Type: application/json" \
-    -d '{"msgtype":"m.text","body":"Morning John, I left a new comment on the Q3 deck."}' >/dev/null
-  echo "    + refreshed existing demo DM thread"
+  # Wipe the thread's message history before re-seeding, otherwise every daily
+  # reset appends another line and the room fills with duplicate "Morning John"
+  # messages. purge_history removes events older than the timestamp; purge up to
+  # now, then post a fresh short thread so the demo always shows the same clean
+  # 1-2 unread messages. The purge is async — poll it to completion so the new
+  # messages (sent after) are never caught by it.
+  PURGE_ID=$(curl -s -X POST "$B/_synapse/admin/v1/purge_history/$RID" \
+    -H "$AAT" -H "Content-Type: application/json" \
+    -d "{\"purge_up_to_ts\": $(($(date +%s000) - 1000)), \"delete_local_events\": true}" \
+    | python3 -c "import json,sys
+try: print(json.load(sys.stdin).get('purge_id',''))
+except Exception: print('')")
+  if [ -n "$PURGE_ID" ]; then
+    for _ in $(seq 1 30); do
+      PS=$(curl -s "$B/_synapse/admin/v1/purge_history_status/$PURGE_ID" -H "$AAT" \
+        | python3 -c "import json,sys
+try: print(json.load(sys.stdin).get('status',''))
+except Exception: print('')")
+      [ "$PS" = complete ] && break
+      [ "$PS" = failed ] && { echo "!! seed-demo: chat history purge failed" >&2; break; }
+      sleep 1
+    done
+  fi
+  i=0
+  snd(){ i=$((i+1)); curl -fsS -X PUT "$B/_matrix/client/v3/rooms/$RID/send/m.room.message/reset$(date +%s)-$i" -H "$1" -H "Content-Type: application/json" -d "{\"msgtype\":\"m.text\",\"body\":\"$2\"}" >/dev/null; }
+  snd "$AT" "Morning Jane, ready for standup?"
+  snd "Authorization: Bearer $JT" "Morning John, I left a new comment on the Q3 deck."
+  echo "    + reset demo DM thread (purged history, posted fresh)"
 fi
 
 # Keep both users' direct-room metadata canonical even if an old entry was
