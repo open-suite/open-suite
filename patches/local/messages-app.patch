@@ -111,6 +111,37 @@ index 0000000..492e65c
 +            initialDelaySeconds: 10
 +            periodSeconds: 10
 +          resources: {{ .Values.backend.resources | toYaml | nindent 12 }}
+diff --git a/helmfile/apps/messages/charts/messages/templates/backend-keycloak-networkpolicy.yaml b/helmfile/apps/messages/charts/messages/templates/backend-keycloak-networkpolicy.yaml
+new file mode 100644
+index 0000000..8bea444
+--- /dev/null
++++ b/helmfile/apps/messages/charts/messages/templates/backend-keycloak-networkpolicy.yaml
+@@ -0,0 +1,25 @@
++# The single-VPS namespace egress whitelist deliberately blocks cross-namespace
++# traffic. Permit only the backend's OIDC/admin calls to Keycloak's HTTP port.
++apiVersion: networking.k8s.io/v1
++kind: NetworkPolicy
++metadata:
++  name: {{ .Release.Name }}-backend-keycloak-egress
++  namespace: {{ .Release.Namespace | quote }}
++  labels: {{- include "messages.labels" (dict "component" "backend" "context" $) | nindent 4 }}
++spec:
++  podSelector:
++    matchLabels: {{- include "messages.selectorLabels" (dict "component" "backend" "context" $) | nindent 6 }}
++  policyTypes: [Egress]
++  egress:
++    - to:
++        - namespaceSelector:
++            matchLabels:
++              kubernetes.io/metadata.name: {{ .Values.backend.keycloakNamespace | quote }}
++          podSelector:
++            matchLabels:
++              app.kubernetes.io/name: keycloak
++              app.kubernetes.io/component: keycloak
++      ports:
++        # NetworkPolicy evaluates the Service's post-DNAT container port.
++        - port: 8080
++          protocol: TCP
 diff --git a/helmfile/apps/messages/charts/messages/templates/backend-secret.yaml b/helmfile/apps/messages/charts/messages/templates/backend-secret.yaml
 new file mode 100644
 index 0000000..23accc7
@@ -799,10 +830,10 @@ index 0000000..280a606
 +          resources: {{ .Values.worker.resources | toYaml | nindent 12 }}
 diff --git a/helmfile/apps/messages/charts/messages/values.yaml b/helmfile/apps/messages/charts/messages/values.yaml
 new file mode 100644
-index 0000000..04bdc99
+index 0000000..a20e790
 --- /dev/null
 +++ b/helmfile/apps/messages/charts/messages/values.yaml
-@@ -0,0 +1,83 @@
+@@ -0,0 +1,84 @@
 +# Default values for the messages chart. The deploy-time source of truth is
 +# ../../values.yaml.gotmpl (rendered by helmfile); these defaults only make
 +# `helm lint`/`helm template` work standalone and document the shape.
@@ -834,6 +865,7 @@ index 0000000..04bdc99
 +
 +backend:
 +  replicaCount: 1
++  keycloakNamespace: "mb-keycloak"
 +  # Full Django environment (secrets included) — stored in one Secret that the
 +  # backend, worker and migrate job all envFrom.
 +  envVars: {}
@@ -1094,10 +1126,10 @@ index 0000000..33ce096
 +    size: {{ coalesce .Values.pvc.messages.redis.size .Values.pvc.default.size "1Gi" }}
 diff --git a/helmfile/apps/messages/values.yaml.gotmpl b/helmfile/apps/messages/values.yaml.gotmpl
 new file mode 100644
-index 0000000..423080c
+index 0000000..bd224bd
 --- /dev/null
 +++ b/helmfile/apps/messages/values.yaml.gotmpl
-@@ -0,0 +1,152 @@
+@@ -0,0 +1,153 @@
 +{{- $releaseId := now | unixEpoch }}
 +{{- $hostname := printf "%s.%s" .Values.global.hostname.messages .Values.global.domain }}
 +{{- $sslPostfix := ternary "s" "" (.Values.global.tls.enabled | default true) }}
@@ -1138,6 +1170,7 @@ index 0000000..423080c
 +  releaseSuffix: {{ $releaseId | quote }}
 +
 +backend:
++  keycloakNamespace: {{ .Values.application.keycloak.namespace | quote }}
 +  envVars:
 +    # Django core
 +    DJANGO_CONFIGURATION: "Production"

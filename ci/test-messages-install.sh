@@ -8,6 +8,7 @@ REPO="$(cd "$(dirname "$0")/.." && pwd)"
 POSTGRES_VALUES="${INFRA}/helmfile/apps/messages/values-postgresql.yaml.gotmpl"
 MIGRATE_JOB="${INFRA}/helmfile/apps/messages/charts/messages/templates/migrate-job.yaml"
 OPENSEARCH_STATEFULSET="${INFRA}/helmfile/apps/messages/charts/messages/templates/opensearch-statefulset.yaml"
+KEYCLOAK_EGRESS="${INFRA}/helmfile/apps/messages/charts/messages/templates/backend-keycloak-networkpolicy.yaml"
 DEMO_VALUES="${REPO}/helmfile/demo-values.yaml.tmpl"
 
 require_literal() {
@@ -36,6 +37,14 @@ require_literal "${MIGRATE_JOB}" 'name: wait-for-postgresql'
 require_literal "${MIGRATE_JOB}" 'deadline = time.monotonic() + 600'
 require_literal "${MIGRATE_JOB}" 'if stable >= 6:'
 require_literal "${MIGRATE_JOB}" 'command: ["python", "manage.py", "migrate", "--no-input"]'
+
+# The namespace-wide egress whitelist must not break OIDC token exchange.
+# Keep the exception scoped to the backend, Keycloak pods, and their HTTP port.
+require_literal "${KEYCLOAK_EGRESS}" 'component" "backend"'
+require_literal "${KEYCLOAK_EGRESS}" 'kubernetes.io/metadata.name: {{ .Values.backend.keycloakNamespace | quote }}'
+require_literal "${KEYCLOAK_EGRESS}" 'app.kubernetes.io/name: keycloak'
+require_literal "${KEYCLOAK_EGRESS}" 'app.kubernetes.io/component: keycloak'
+require_literal "${KEYCLOAK_EGRESS}" 'port: 8080'
 
 # A startup probe prevents liveness from repeatedly restarting a healthy cold
 # start. Readiness and liveness remain as strict as before startup succeeds.
