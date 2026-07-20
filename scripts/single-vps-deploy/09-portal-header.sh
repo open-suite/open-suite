@@ -42,7 +42,7 @@ fi
 # Element's browser-side sync database. Production deployments never ran that
 # reset, so scope the one-time resync to clusters carrying the demo seed.
 if kubectl get secret -n mb-bureaublad demo-seed >/dev/null 2>&1; then
-  sed -i 's/var ELEMENT_SYNC_MIGRATION = "";/var ELEMENT_SYNC_MIGRATION = "stable-demo-dm-v1";/' "${HEADER_JS}"
+  sed -i 's/var ELEMENT_SYNC_MIGRATION = "";/var ELEMENT_SYNC_MIGRATION = "purge-dupes-v2";/' "${HEADER_JS}"
   echo "==> demo seed detected — enabling the one-time Element sync migration"
 fi
 
