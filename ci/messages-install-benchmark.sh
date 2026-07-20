@@ -31,11 +31,11 @@ kubectl -n mb-messages get jobs -o json > "${ARTIFACT_DIR}/jobs.json"
 kubectl -n mb-messages get events --sort-by=.lastTimestamp \
   > "${ARTIFACT_DIR}/events.txt"
 
-PAGE_OBSERVED_AT="$(date --utc --iso-8601=milliseconds)"
+PAGE_OBSERVED_AT="$(date --utc '+%Y-%m-%dT%H:%M:%S.%3NZ')"
 kubectl get --raw \
   '/api/v1/namespaces/mb-messages/services/http:messages-frontend:8080/proxy/' \
   >/dev/null
-CONFIG_OBSERVED_AT="$(date --utc --iso-8601=milliseconds)"
+CONFIG_OBSERVED_AT="$(date --utc '+%Y-%m-%dT%H:%M:%S.%3NZ')"
 kubectl get --raw \
   '/api/v1/namespaces/mb-messages/services/http:messages-frontend:8080/proxy/api/v1.0/config/' \
   >/dev/null
