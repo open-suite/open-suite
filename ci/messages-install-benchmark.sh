@@ -165,7 +165,9 @@ ADMIN_PASSWORD="$(cat "$KC_BOOTSTRAP_ADMIN_PASSWORD_FILE")"
 "$KC" config credentials --config "$CFG" --server http://localhost:8080/ \
   --realm master --user admin --password "$ADMIN_PASSWORD" >/dev/null
 USER_ID="$("$KC" get users --config "$CFG" -r mijnbureau -q "username=${USERNAME}" \
-  -q exact=true --fields id --format csv --noquotes | tail -1)"
+  -q exact=true --fields id \
+  | sed -n 's/.*"id"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p' \
+  | head -1)"
 if [ -z "${USER_ID}" ]; then
   USER_ID="$("$KC" create users --config "$CFG" -r mijnbureau -i \
     -s "username=${USERNAME}" -s "email=${EMAIL}" -s emailVerified=true \
