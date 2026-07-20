@@ -1,5 +1,5 @@
 diff --git a/src/frontend/src/features/rooms/livekit/components/blur/BackgroundCustomProcessor.ts b/src/frontend/src/features/rooms/livekit/components/blur/BackgroundCustomProcessor.ts
-index d13b047..920175f 100644
+index d13b047..4b4f255 100644
 --- a/src/frontend/src/features/rooms/livekit/components/blur/BackgroundCustomProcessor.ts
 +++ b/src/frontend/src/features/rooms/livekit/components/blur/BackgroundCustomProcessor.ts
 @@ -1,7 +1,6 @@
@@ -11,18 +11,40 @@ index d13b047..920175f 100644
    ImageSegmenter,
    ImageSegmenterResult,
  } from '@mediapipe/tasks-vision'
-@@ -153,6 +152,9 @@ export class BackgroundCustomProcessor implements BackgroundProcessorInterface {
-   }
+@@ -79,6 +78,10 @@ export class BackgroundCustomProcessor implements BackgroundProcessorInterface {
+       throw new Error('Element is required for processing')
+     }
  
-   async initSegmenter() {
 +    const { FilesetResolver, ImageSegmenter } = await import(
 +      '@mediapipe/tasks-vision'
 +    )
++
+     this.source = opts.track as MediaStreamTrack
+     this.sourceSettings = this.source!.getSettings()
+     this.videoElement = opts.element as HTMLVideoElement
+@@ -95,7 +98,7 @@ export class BackgroundCustomProcessor implements BackgroundProcessorInterface {
+     this.processedTrack = tracks[0]
+
+     this.segmentationMask = new ImageData(PROCESSING_WIDTH, PROCESSING_HEIGHT)
+-    await this.initSegmenter()
++    await this.initSegmenter(FilesetResolver, ImageSegmenter)
+     this._initWorker()
+
+     posthog.capture('firefox-blurring-init')
+@@ -152,7 +155,10 @@ export class BackgroundCustomProcessor implements BackgroundProcessorInterface {
+     }
+   }
+
+-  async initSegmenter() {
++  async initSegmenter(
++    FilesetResolver: typeof import('@mediapipe/tasks-vision').FilesetResolver,
++    ImageSegmenter: typeof import('@mediapipe/tasks-vision').ImageSegmenter
++  ) {
      const vision = await FilesetResolver.forVisionTasks(
        'https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision/wasm'
      )
 diff --git a/src/frontend/src/features/rooms/livekit/components/blur/FaceLandmarksProcessor.ts b/src/frontend/src/features/rooms/livekit/components/blur/FaceLandmarksProcessor.ts
-index 7299ae4..ede8f9e 100644
+index 7299ae4..561d919 100644
 --- a/src/frontend/src/features/rooms/livekit/components/blur/FaceLandmarksProcessor.ts
 +++ b/src/frontend/src/features/rooms/livekit/components/blur/FaceLandmarksProcessor.ts
 @@ -1,7 +1,6 @@
@@ -34,18 +56,53 @@ index 7299ae4..ede8f9e 100644
    FaceLandmarker,
    FaceLandmarkerResult,
  } from '@mediapipe/tasks-vision'
-@@ -128,6 +127,9 @@ export class FaceLandmarksProcessor implements TrackProcessor<Track.Kind> {
+@@ -55,7 +54,6 @@ export class FaceLandmarksProcessor implements TrackProcessor<Track.Kind> {
+     this.name = 'face_landmarks'
+     this.options = opts
+     this.type = ProcessorType.FACE_LANDMARKS
+-    this._initEffectImages()
    }
  
-   async initFaceLandmarker() {
+   private _initEffectImages() {
+@@ -81,10 +79,15 @@ export class FaceLandmarksProcessor implements TrackProcessor<Track.Kind> {
+       throw new Error('Element is required for processing')
+     }
+
 +    const { FilesetResolver, FaceLandmarker } = await import(
 +      '@mediapipe/tasks-vision'
 +    )
++
+     this.source = opts.track as MediaStreamTrack
+     this.sourceSettings = this.source!.getSettings()
+     this.videoElement = opts.element as HTMLVideoElement
+
++    this._initEffectImages()
+     this._createMainCanvas()
+
+     const stream = this.outputCanvas!.captureStream()
+@@ -94,7 +97,7 @@ export class FaceLandmarksProcessor implements TrackProcessor<Track.Kind> {
+     }
+     this.processedTrack = tracks[0]
+
+-    await this.initFaceLandmarker()
++    await this.initFaceLandmarker(FilesetResolver, FaceLandmarker)
+     this._initWorker()
+
+     posthog.capture('face-landmarks-init')
+@@ -127,7 +130,10 @@ export class FaceLandmarksProcessor implements TrackProcessor<Track.Kind> {
+     }
+   }
+
+-  async initFaceLandmarker() {
++  async initFaceLandmarker(
++    FilesetResolver: typeof import('@mediapipe/tasks-vision').FilesetResolver,
++    FaceLandmarker: typeof import('@mediapipe/tasks-vision').FaceLandmarker
++  ) {
      const vision = await FilesetResolver.forVisionTasks(
        'https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision/wasm'
      )
 diff --git a/src/frontend/src/features/rooms/livekit/components/blur/OpenSuiteBackgroundProcessor.ts b/src/frontend/src/features/rooms/livekit/components/blur/OpenSuiteBackgroundProcessor.ts
-index eeef587..5f5f842 100644
+index eeef587..a5d718e 100644
 --- a/src/frontend/src/features/rooms/livekit/components/blur/OpenSuiteBackgroundProcessor.ts
 +++ b/src/frontend/src/features/rooms/livekit/components/blur/OpenSuiteBackgroundProcessor.ts
 @@ -1,6 +1,5 @@
@@ -56,16 +113,17 @@ index eeef587..5f5f842 100644
    ImageSegmenter,
    ImageSegmenterResult,
  } from '@mediapipe/tasks-vision'
-@@ -211,6 +210,9 @@ export class OpenSuiteBackgroundProcessor
-     if (!tracks.length) throw new Error('No tracks produced by processor canvas')
-     this.processedTrack = tracks[0]
+@@ -193,6 +192,10 @@ export class OpenSuiteBackgroundProcessor
  
+   async init(opts: ProcessorOptions<Track.Kind>) {
+     if (!opts.element) throw new Error('Element is required for processing')
 +    const { FilesetResolver, ImageSegmenter } = await import(
 +      '@mediapipe/tasks-vision'
 +    )
-     const vision = await FilesetResolver.forVisionTasks(WASM_PATH)
-     this.segmenter = await ImageSegmenter.createFromOptions(vision, {
-       baseOptions: { modelAssetPath: MODEL_PATH, delegate: 'GPU' },
++
+     this.source = opts.track as MediaStreamTrack
+     this.videoElement = opts.element as HTMLVideoElement
+
 diff --git a/src/frontend/src/features/rooms/livekit/components/blur/index.ts b/src/frontend/src/features/rooms/livekit/components/blur/index.ts
 index e0123db..7edbf63 100644
 --- a/src/frontend/src/features/rooms/livekit/components/blur/index.ts

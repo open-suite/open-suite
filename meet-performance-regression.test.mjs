@@ -31,42 +31,132 @@ test("Meet workflow remains pinned to the measured upstream", async () => {
     "utf8",
   );
   assert.match(workflow, /^  MEET_REF: v1\.20\.0$/m);
+  assert.match(
+    workflow,
+    /^          MEET_SOURCE_DIR: \$\{\{ github\.workspace \}\}\/meet-src$/m,
+  );
+  assert.match(workflow, /node --test meet-performance-regression\.test\.mjs/);
 });
 
-test(
-  "patched Meet source has no eager MediaPipe value imports",
-  { skip: !process.env.MEET_SOURCE_DIR },
-  async () => {
-    const blurDirectory = path.join(
-      process.env.MEET_SOURCE_DIR,
-      "src/frontend/src/features/rooms/livekit/components/blur",
-    );
-    for (const file of [
-      "BackgroundCustomProcessor.ts",
-      "FaceLandmarksProcessor.ts",
-      "OpenSuiteBackgroundProcessor.ts",
-    ]) {
-      const source = await readFile(path.join(blurDirectory, file), "utf8");
-      assert.doesNotMatch(
-        source,
-        /import\s*\{[^}]+\}\s*from '@mediapipe\/tasks-vision'/s,
-        `${file} has an eager MediaPipe value import`,
-      );
-      assert.match(source, /await import\(\s*'@mediapipe\/tasks-vision'\s*\)/);
-    }
+test("patched Meet source loads MediaPipe before allocating resources", async () => {
+  assert.ok(
+    process.env.MEET_SOURCE_DIR,
+    "MEET_SOURCE_DIR must point to an assembled, patched Meet checkout",
+  );
+  const blurDirectory = path.join(
+    process.env.MEET_SOURCE_DIR,
+    "src/frontend/src/features/rooms/livekit/components/blur",
+  );
+  const processors = [
+    {
+      file: "BackgroundCustomProcessor.ts",
+      importedValues: "FilesetResolver, ImageSegmenter",
+      allocations: [
+        "this.source = opts.track",
+        "this._initVirtualBackgroundImage()",
+        "this._createMainCanvas()",
+        "this._createMaskCanvas()",
+        "this.outputCanvas!.captureStream()",
+        "this.processedTrack =",
+        "new ImageData(",
+      ],
+      initializerCall: "this.initSegmenter(FilesetResolver, ImageSegmenter)",
+    },
+    {
+      file: "FaceLandmarksProcessor.ts",
+      importedValues: "FilesetResolver, FaceLandmarker",
+      allocations: [
+        "this.source = opts.track",
+        "this._initEffectImages()",
+        "this._createMainCanvas()",
+        "this.outputCanvas!.captureStream()",
+        "this.processedTrack =",
+      ],
+      forbiddenBeforeInit: "this._initEffectImages()",
+      initializerCall:
+        "this.initFaceLandmarker(FilesetResolver, FaceLandmarker)",
+    },
+    {
+      file: "OpenSuiteBackgroundProcessor.ts",
+      importedValues: "FilesetResolver, ImageSegmenter",
+      allocations: [
+        "this.source = opts.track",
+        "document.createElement('canvas')",
+        "this._initGL()",
+        "this._loadBackground()",
+        "this.canvas.captureStream(FPS)",
+        "this.processedTrack =",
+      ],
+    },
+  ];
 
-    const factory = await readFile(path.join(blurDirectory, "index.ts"), "utf8");
+  for (const {
+    file,
+    importedValues,
+    allocations,
+    forbiddenBeforeInit,
+    initializerCall,
+  } of processors) {
+    const source = await readFile(path.join(blurDirectory, file), "utf8");
     assert.doesNotMatch(
-      factory,
-      /^import \{ UnifiedBackgroundTrackProcessor \}/m,
+      source,
+      /import\s*\{[^}]+\}\s*from '@mediapipe\/tasks-vision'/s,
+      `${file} has an eager MediaPipe value import`,
     );
-    assert.doesNotMatch(
-      factory,
-      /import\s*\{[^}]+\}\s*from '@livekit\/track-processors'/s,
+
+    const initStart = source.indexOf("async init(opts:");
+    assert.notEqual(initStart, -1, `${file} has no init method`);
+    if (forbiddenBeforeInit) {
+      assert.ok(
+        !source.slice(0, initStart).includes(forbiddenBeforeInit),
+        `${file} allocates resources before init can load MediaPipe`,
+      );
+    }
+    const initSource = source.slice(initStart);
+    const importPattern = new RegExp(
+      `if \\(!opts\\.element\\)(?: \\{)?\\s*` +
+        `throw new Error\\('Element is required for processing'\\)\\s*` +
+        `\\}?\\s*const \\{ ${importedValues} \\} = await import\\(` +
+        `\\s*'@mediapipe/tasks-vision'\\s*\\)`,
     );
-    assert.match(factory, /class LazyUnifiedBackgroundTrackProcessor/);
-  },
-);
+    assert.match(
+      initSource,
+      importPattern,
+      `${file} must load MediaPipe immediately after validating opts.element`,
+    );
+
+    const importIndex = initSource.indexOf("await import(");
+    for (const allocation of allocations) {
+      const allocationIndex = initSource.indexOf(allocation);
+      assert.notEqual(
+        allocationIndex,
+        -1,
+        `${file} no longer contains expected allocation: ${allocation}`,
+      );
+      assert.ok(
+        importIndex < allocationIndex,
+        `${file} allocates ${allocation} before loading MediaPipe`,
+      );
+    }
+    if (initializerCall) {
+      assert.ok(
+        initSource.includes(`await ${initializerCall}`),
+        `${file} does not pass the imported values to its initializer`,
+      );
+    }
+  }
+
+  const factory = await readFile(path.join(blurDirectory, "index.ts"), "utf8");
+  assert.doesNotMatch(
+    factory,
+    /^import \{ UnifiedBackgroundTrackProcessor \}/m,
+  );
+  assert.doesNotMatch(
+    factory,
+    /import\s*\{[^}]+\}\s*from '@livekit\/track-processors'/s,
+  );
+  assert.match(factory, /class LazyUnifiedBackgroundTrackProcessor/);
+});
 
 test(
   "candidate build keeps MediaPipe in a separate optional chunk",
