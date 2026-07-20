@@ -38,13 +38,13 @@ if kubectl get deploy -n mb-messages messages-frontend >/dev/null 2>&1; then
   echo "==> messages app detected — enabling the Mail nav item"
 fi
 
-# The old demo reset recreated Matrix rooms, leaving now-purged room copies in
-# Element's browser-side sync database. Production deployments never ran that
-# reset, so scope the one-time resync to clusters carrying the demo seed.
-if kubectl get secret -n mb-bureaublad demo-seed >/dev/null 2>&1; then
-  sed -i 's/var ELEMENT_SYNC_MIGRATION = "";/var ELEMENT_SYNC_MIGRATION = "purge-dupes-v2";/' "${HEADER_JS}"
-  echo "==> demo seed detected — enabling the one-time Element sync migration"
-fi
+# NOTE: the Element sync-cache migration is intentionally left OFF. It deleted
+# Element's browser-side sync database on load, which forces a full re-sync
+# ("Connecting to chat" splash + a reload + a slow first load) for every
+# returning user each time the id was bumped — too heavy a cost for the demo.
+# The seed no longer recreates rooms (it purges history in a stable room), so
+# clients reconcile normally. Anyone who cached pre-purge duplicates can clear
+# them once via Element's own Settings → Help & About → Clear cache and reload.
 
 # Stamp the generated deployment-specific asset. The runtime uses this hash to
 # replace a stale header that an old app image may have mounted first.
