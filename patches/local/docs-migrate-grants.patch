@@ -2,7 +2,7 @@ diff --git a/helmfile/apps/docs/charts/docs/values.yaml b/helmfile/apps/docs/cha
 index 98c0ec4..0d6b164 100644
 --- a/helmfile/apps/docs/charts/docs/values.yaml
 +++ b/helmfile/apps/docs/charts/docs/values.yaml
-@@ -586,6 +586,25 @@ backend:
+@@ -586,6 +586,35 @@ backend:
              echo "Database is ready"
  
              python manage.py migrate --no-input
@@ -11,19 +11,29 @@ index 98c0ec4..0d6b164 100644
 +            # migrateDbCredentials), so the app role gets no privileges on
 +            # the tables they create and login 500s. Grant them to the
 +            # database owner (the app role) right after migrating.
-+            python manage.py shell << 'GRANTS'
-+            from django.db import connection
-+            cur = connection.cursor()
-+            cur.execute("SELECT pg_get_userbyid(datdba) FROM pg_database WHERE datname = current_database()")
-+            role = cur.fetchone()[0]
-+            for stmt in (
-+                'GRANT ALL ON ALL TABLES IN SCHEMA public TO "{r}"',
-+                'GRANT ALL ON ALL SEQUENCES IN SCHEMA public TO "{r}"',
-+                'ALTER DEFAULT PRIVILEGES IN SCHEMA public GRANT ALL ON TABLES TO "{r}"',
-+                'ALTER DEFAULT PRIVILEGES IN SCHEMA public GRANT ALL ON SEQUENCES TO "{r}"',
-+            ):
-+                cur.execute(stmt.format(r=role))
-+            print("granted table/sequence privileges to", role)
++            # Use the image's psycopg dependency directly instead of starting
++            # a second Django process after migrate. psycopg.sql.Identifier
++            # preserves support for non-trivial database-owner names.
++            python - << 'GRANTS'
++            import os
++            import psycopg
++            from psycopg import sql
++
++            with psycopg.connect(
++                dbname=os.environ["DB_NAME"], user=os.environ["DB_USER"],
++                password=os.environ["DB_PASSWORD"], host=os.environ["DB_HOST"],
++                port=os.environ["DB_PORT"],
++            ) as connection, connection.cursor() as cursor:
++                cursor.execute("SELECT pg_get_userbyid(datdba) FROM pg_database WHERE datname = current_database()")
++                owner_role = cursor.fetchone()[0]
++                for statement in (
++                    "GRANT ALL ON ALL TABLES IN SCHEMA public TO {}",
++                    "GRANT ALL ON ALL SEQUENCES IN SCHEMA public TO {}",
++                    "ALTER DEFAULT PRIVILEGES IN SCHEMA public GRANT ALL ON TABLES TO {}",
++                    "ALTER DEFAULT PRIVILEGES IN SCHEMA public GRANT ALL ON SEQUENCES TO {}",
++                ):
++                    cursor.execute(sql.SQL(statement).format(sql.Identifier(owner_role)))
++            print("granted table/sequence privileges to", owner_role)
 +            GRANTS
          restartPolicy: OnFailure
        - name: createSuperUser

@@ -1,0 +1,62 @@
+diff --git a/helmfile/apps/docs/values.yaml.gotmpl b/helmfile/apps/docs/values.yaml.gotmpl
+index bf84ae2..693216b 100644
+--- a/helmfile/apps/docs/values.yaml.gotmpl
++++ b/helmfile/apps/docs/values.yaml.gotmpl
+@@ -21,6 +21,19 @@ backend:
+     repository: {{ .Values.container.docs.backend.repository | quote }}
+     tag: {{ .Values.container.docs.backend.tag | quote }}
+   replicaCount: 1
++  # Open Suite: probe actual startup instead of withholding a healthy pod for
++  # the chart's fixed 10-second readiness delay. The endpoint is unchanged;
++  # startupProbe also prevents liveness from killing a legitimately slow boot.
++  startupProbe:
++    enabled: true
++    initialDelaySeconds: 0
++    periodSeconds: 1
++    timeoutSeconds: 5
++    failureThreshold: 30
++    successThreshold: 1
++  readinessProbe:
++    initialDelaySeconds: 0
++    periodSeconds: 1
+   resourcesPreset: {{ coalesce .Values.global.resourcesPresetPerApp.docs.backend .Values.global.resourcesPreset | quote }}
+   resources: {{ .Values.resource.docs.backend | toYaml | nindent 4 }}
+   podSecurityContext: {{ .Values.security.default.podSecurityContext | toYaml | nindent 4 }}
+@@ -417,6 +430,18 @@ frontend:
+     repository: {{ .Values.container.docs.frontend.repository | quote }}
+     tag: {{ .Values.container.docs.frontend.tag | quote }}
+   replicaCount: 1
++  # The static nginx is normally healthy in well under a second. Keep the
++  # same GET / semantics while allowing Kubernetes to observe it immediately.
++  startupProbe:
++    enabled: true
++    initialDelaySeconds: 0
++    periodSeconds: 1
++    timeoutSeconds: 1
++    failureThreshold: 30
++    successThreshold: 1
++  readinessProbe:
++    initialDelaySeconds: 0
++    periodSeconds: 1
+   resourcesPreset: {{ coalesce .Values.global.resourcesPresetPerApp.docs.frontend .Values.global.resourcesPreset | quote }}
+   resources: {{ .Values.resource.docs.frontend | toYaml | nindent 4 }}
+   podSecurityContext: {{ .Values.security.default.podSecurityContext | toYaml | nindent 4 }}
+@@ -456,6 +480,18 @@ yProvider:
+     repository: {{ .Values.container.docs.yProvider.repository | quote }}
+     tag: {{ .Values.container.docs.yProvider.tag | quote }}
+   replicaCount: 1
++  # Probe the existing /ping endpoint during startup rather than sleeping for
++  # ten seconds before the first readiness check.
++  startupProbe:
++    enabled: true
++    initialDelaySeconds: 0
++    periodSeconds: 1
++    timeoutSeconds: 1
++    failureThreshold: 30
++    successThreshold: 1
++  readinessProbe:
++    initialDelaySeconds: 0
++    periodSeconds: 1
+   resourcesPreset: {{ coalesce .Values.global.resourcesPresetPerApp.docs.yProvider .Values.global.resourcesPreset | quote }}
+   resources: {{ .Values.resource.docs.yProvider | toYaml | nindent 4 }}
+   podSecurityContext: {{ .Values.security.default.podSecurityContext | toYaml | nindent 4 }}
