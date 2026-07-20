@@ -37,7 +37,11 @@ try {
 
   const cookies = await context.cookies();
   const gateCookie = cookies.find((cookie) => cookie.name === "opensuite_auth");
-  const mailSession = cookies.find((cookie) => cookie.name === "st_messages_sessionid");
+  const mailSession = cookies.find(
+    (cookie) =>
+      cookie.domain.replace(/^\./, "") === `messages.${domain}` &&
+      /sessionid$/.test(cookie.name)
+  );
   if (gateCookie?.expires !== -1) {
     throw new Error("edge gate cookie is not scoped to the browser session");
   }
