@@ -2,7 +2,7 @@ diff --git a/helmfile/apps/nextcloud/values.yaml.gotmpl b/helmfile/apps/nextclou
 index 706e9e2..7c39362 100644
 --- a/helmfile/apps/nextcloud/values.yaml.gotmpl
 +++ b/helmfile/apps/nextcloud/values.yaml.gotmpl
-@@ -202,6 +202,24 @@ externalMinio:
+@@ -202,6 +202,29 @@ externalMinio:
  
  phpUploadLimit: {{ .Values.application.nextcloud.uploadLimit | quote }}
  
@@ -23,6 +23,11 @@ index 706e9e2..7c39362 100644
 +    opcache.validate_timestamps=0
 +    opcache.revalidate_freq=0
 +    opcache.save_comments=1
++    ; PHP 8.4's upstream image enables tracing JIT (1255, 8M). Nextcloud's
++    ; branch-heavy request bootstrap pays its compilation cost without a
++    ; steady-state gain; measured methodology is in images/nextcloud/README.md.
++    opcache.jit=disable
++    opcache.jit_buffer_size=0
 +
  externalDatabase:
    database: {{ .Values.database.nextcloud.name | quote }}
