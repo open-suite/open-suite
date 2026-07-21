@@ -63,3 +63,7 @@ assert.equal(storage.get("opensuite.element.sync-migration"), "stable-demo-dm-v1
 storage.set("mx_user_id", "@johndoe:matrix.demo.example.test");
 assert.deepEqual(await run(enabledSource, storage), []);
 assert.equal(storage.get("mx_user_id"), "@johndoe:matrix.demo.example.test");
+
+// The validate workflow already owns the Element static-test entry point. Keep
+// the image/runtime contract guard on that path without broadening workflows.
+await import("./test-element-image-runtime.mjs");
