@@ -90,6 +90,8 @@ require_literal "${OIDC_RESTART_SCRIPT}" 'kubectl -n mb-keycloak get secret "id.
 require_literal "${OIDC_RESTART_SCRIPT}" "-o jsonpath='{.data.ca\\.crt}'"
 require_literal "${OIDC_RESTART_SCRIPT}" 'openssl x509 -in "${ca_file}" -noout -checkend 0'
 require_literal "${OIDC_RESTART_SCRIPT}" 'kubectl -n mb-element create configmap synapse-keycloak-oidc-ca'
+require_literal "${OIDC_RESTART_SCRIPT}" 'kubectl rollout status deploy/coredns -n kube-system --timeout=300s'
+require_literal "${OIDC_RESTART_SCRIPT}" 'kubectl rollout status deploy/traefik -n kube-system --timeout=300s'
 require_literal "${OIDC_RESTART_SCRIPT}" 'kubectl rollout status deploy/synapse -n mb-element --timeout=300s'
 
 if [ -z "${DOMAIN}" ]; then
@@ -197,15 +199,35 @@ redirect_url = "https://element.{}/".format(domain)
 sso_url = "http://127.0.0.1:8448/_matrix/client/v3/login/sso/redirect?" + urllib.parse.urlencode(
     {"redirectUrl": redirect_url}
 )
+request = urllib.request.Request(
+    sso_url,
+    headers={
+        "Host": f"matrix.{domain}",
+        "X-Forwarded-For": "127.0.0.1",
+        "X-Forwarded-Proto": "https",
+    },
+)
 opener = urllib.request.build_opener(NoRedirect())
 try:
-    opener.open(sso_url, timeout=15)
+    opener.open(request, timeout=15)
 except urllib.error.HTTPError as error:
     if error.code != 302:
         raise
     location = error.headers.get("Location", "")
-    if not location.startswith(expected["authorization_endpoint"] + "?"):
+    target = urllib.parse.urlparse(location)
+    authorization = urllib.parse.urlparse(expected["authorization_endpoint"])
+    params = urllib.parse.parse_qs(target.query)
+    if (target.scheme, target.netloc, target.path) != (
+        authorization.scheme,
+        authorization.netloc,
+        authorization.path,
+    ):
         raise SystemExit("Synapse SSO redirect did not target Keycloak HTTPS")
+    if params.get("client_id") != ["synapse"] or params.get("response_type") != ["code"]:
+        raise SystemExit("Synapse SSO redirect did not preserve the OIDC authorization flow")
+    callback = f"https://matrix.{domain}/_synapse/client/oidc/callback"
+    if params.get("redirect_uri") != [callback]:
+        raise SystemExit("Synapse SSO redirect did not use its canonical HTTPS callback")
 else:
     raise SystemExit("Synapse SSO endpoint did not return a redirect")
 PY

@@ -42,6 +42,12 @@ if [ "${OPEN_SUITE_TLS_MODE:-letsencrypt}" = "selfsigned" ]; then
     | kubectl apply -f -
 fi
 
+# Step 02 restarts CoreDNS, and Traefik can still be converging after the
+# initial Helmfile apply. Synapse caches an OIDC preload failure, so do not
+# restart it until the complete HTTPS hairpin path is ready.
+kubectl rollout status deploy/coredns -n kube-system --timeout=300s
+kubectl rollout status deploy/traefik -n kube-system --timeout=300s
+
 echo "==> [6h] Restarting OIDC apps so they re-read discovery"
 kubectl rollout restart deploy/grist -n mb-grist
 kubectl rollout restart deploy/docs-backend -n mb-docs
