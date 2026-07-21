@@ -9,11 +9,13 @@ on:
     branches: [main]
     paths:
       - "images/element/**"
+      - "ci/test-element-image-runtime.mjs"
       - ".github/workflows/element-image.yaml"
   pull_request:
     branches: [main]
     paths:
       - "images/element/**"
+      - "ci/test-element-image-runtime.mjs"
       - ".github/workflows/element-image.yaml"
   workflow_dispatch:
 
@@ -23,6 +25,7 @@ permissions:
 
 env:
   ELEMENT_TAG: v1.12.24-rc.1
+  ELEMENT_BASE: registry-1.docker.io/vectorim/element-web:v1.12.24-rc.1@sha256:a72c9310c08ebc7c4cb4fb91911b1363e529834e031468130eb75cea90027064
 
 jobs:
   build:
@@ -43,11 +46,40 @@ jobs:
           tags: |
             type=raw,value=${{ env.ELEMENT_TAG }},enable=${{ github.ref == 'refs/heads/main' }}
             type=sha
-      - uses: docker/build-push-action@v6
+      - name: Build amd64 contract candidate
+        uses: docker/build-push-action@v6
         with:
           context: ./images/element
           build-args: |
-            ELEMENT_BASE=registry-1.docker.io/vectorim/element-web:${{ env.ELEMENT_TAG }}
+            ELEMENT_BASE=${{ env.ELEMENT_BASE }}
+          load: true
+          tags: local/element-web-contract:amd64
+          labels: ${{ steps.meta.outputs.labels }}
+          platforms: linux/amd64
+          provenance: false
+      - name: Build arm64 contract candidate
+        uses: docker/build-push-action@v6
+        with:
+          context: ./images/element
+          build-args: |
+            ELEMENT_BASE=${{ env.ELEMENT_BASE }}
+          load: true
+          tags: local/element-web-contract:arm64
+          labels: ${{ steps.meta.outputs.labels }}
+          platforms: linux/arm64
+          provenance: false
+      - name: Verify final images on both platforms
+        run: >-
+          node ci/test-element-image-runtime.mjs --verify-final-images
+          "${ELEMENT_BASE}"
+          local/element-web-contract:amd64
+          local/element-web-contract:arm64
+      - name: Build multi-arch release image
+        uses: docker/build-push-action@v6
+        with:
+          context: ./images/element
+          build-args: |
+            ELEMENT_BASE=${{ env.ELEMENT_BASE }}
           # Only push from the canonical repo (main / dispatch), never PRs. The
           # patch script's grep assertions run during the build, so a PR build
           # still fails loudly if the bundle drifted.
