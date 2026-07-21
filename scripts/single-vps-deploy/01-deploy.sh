@@ -20,7 +20,7 @@ PORTAL_REF="${PORTAL_REF:-80d7e2fb6093c055c27feb015e4bc7069b6aea71}"
 # Pinned Open Suite build of the v1.20.0-based Meet frontend.
 MEET_TAG="${MEET_TAG:-sha-d1cd4d2}"
 # Pinned Open Suite Nextcloud build (upstream base + meetcal + patched user_oidc).
-NEXTCLOUD_TAG="${NEXTCLOUD_TAG:-sha-03c989f}"
+NEXTCLOUD_TAG="${NEXTCLOUD_TAG:-sha-b1b6909}"
 # Open Suite Element Web image tag: pinned immutable build with verification
 # reminders removed and textual assets compressed.
 ELEMENT_TAG="${ELEMENT_TAG:-sha-253492c}"
