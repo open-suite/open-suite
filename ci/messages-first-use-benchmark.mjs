@@ -17,10 +17,11 @@ const browser = await chromium.launch();
 const context = await browser.newContext({ ignoreHTTPSErrors: true });
 const page = await context.newPage();
 const results = {};
+let mailboxThreadsLoaded;
 
 try {
   const mailStarted = performance.now();
-  const mailboxThreadsLoaded = page.waitForResponse((response) => {
+  mailboxThreadsLoaded = page.waitForResponse((response) => {
     const url = new URL(response.url());
     return (
       url.hostname === `messages.${domain}` &&
@@ -177,5 +178,10 @@ try {
   fs.writeFileSync(output, `${JSON.stringify(results, null, 2)}\n`);
   console.log(JSON.stringify(results));
 } finally {
+  // If an earlier navigation or login assertion fails, settle the response
+  // waiter while closing the browser so its rejection cannot hide the actual
+  // error that caused the benchmark to abort.
+  const pendingMailboxResponse = mailboxThreadsLoaded?.catch(() => null);
   await browser.close();
+  await pendingMailboxResponse;
 }
