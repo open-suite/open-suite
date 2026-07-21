@@ -1,0 +1,32 @@
+diff --git a/helmfile/apps/keycloak/keycloak.yaml.gotmpl b/helmfile/apps/keycloak/keycloak.yaml.gotmpl
+index 5e284cb..ba959b1 100644
+--- a/helmfile/apps/keycloak/keycloak.yaml.gotmpl
++++ b/helmfile/apps/keycloak/keycloak.yaml.gotmpl
+@@ -93,5 +93,26 @@
+ resources: {{ .Values.resource.keycloak.keycloak | default dict | toYaml | nindent 2 }}
+-
++
++# Keycloak serves the readiness target well before the chart default's first
++# check at 30s. Probe it promptly without reducing startup protection: the
++# startup probe retains a 120s failure budget, and readiness still requires the
++# master-realm endpoint. The shorter readiness period also removes an unhealthy
++# pod from service faster after startup.
++startupProbe:
++  enabled: true
++  initialDelaySeconds: 0
++  periodSeconds: 2
++  timeoutSeconds: 1
++  failureThreshold: 60
++  successThreshold: 1
++
++readinessProbe:
++  enabled: true
++  initialDelaySeconds: 0
++  periodSeconds: 2
++  timeoutSeconds: 1
++  failureThreshold: 3
++  successThreshold: 1
++
+ ingress:
+   enabled: true
+   ingressClassName: {{.Values.cluster.ingress.className | quote }}
