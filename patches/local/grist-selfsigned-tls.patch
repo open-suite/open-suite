@@ -2,12 +2,45 @@ diff --git a/helmfile/apps/grist/values.yaml.gotmpl b/helmfile/apps/grist/values
 index 0d489aa..4c14cb6 100644
 --- a/helmfile/apps/grist/values.yaml.gotmpl
 +++ b/helmfile/apps/grist/values.yaml.gotmpl
-@@ -197,8 +197,14 @@ persistence:
+@@ -197,8 +197,47 @@ persistence:
  # page. Served by the grist-static nginx release, which sets the matching CORS
  # header.
++# Without RestartShell, the direct server binds /status before its internal
++# ready flag is set. Keep liveness on /status, but do not send user traffic
++# until migrations and full application initialization have completed.
++customReadinessProbe:
++  httpGet:
++    path: /status?ready=1
++    port: 8484
++    scheme: HTTP
++  initialDelaySeconds: 5
++  periodSeconds: 1
++  timeoutSeconds: 5
++  failureThreshold: 3
++  successThreshold: 1
++
++# Restore RestartShell's bounded initialization failure behavior. A direct
++# server that never becomes ready must be restarted rather than remaining live
++# but permanently unavailable.
++customStartupProbe:
++  httpGet:
++    path: /status?ready=1
++    port: 8484
++    scheme: HTTP
++  initialDelaySeconds: 5
++  periodSeconds: 1
++  timeoutSeconds: 1
++  failureThreshold: 45
++  successThreshold: 1
++
  extraEnvVars:
 -  - name: GRIST_INCLUDE_CUSTOM_SCRIPT_URL
 -    value: 'https://{{ index .Values.global.hostname "grist-static" }}.{{ .Values.global.domain }}/bureaublad-button.js'
++  # Kubernetes owns process restart and readiness. Grist's Linux-default
++  # RestartShell starts a second Node process only to support in-process admin
++  # restarts; disabling it removes duplicate startup without weakening /status.
++  - name: GRIST_RESTART_SHELL
++    value: "false"
 +  {{- if .Values.global.tls.selfSigned }}
 +  # Local/dev only: grist's OIDC discovery against the self-signed id. host
 +  # cannot verify TLS and crashloops the pod.
@@ -19,3 +52,17 @@ index 0d489aa..4c14cb6 100644
  
  customCss:
    enabled: true
+
+diff --git a/helmfile/apps/grist/charts/grist/values.yaml b/helmfile/apps/grist/charts/grist/values.yaml
+index 901e4e1..2c26769 100644
+--- a/helmfile/apps/grist/charts/grist/values.yaml
++++ b/helmfile/apps/grist/charts/grist/values.yaml
+@@ -88,7 +88,7 @@ image:
+   registry: registry-1.docker.io
+   repository: gristlabs/grist
+   tag: "1.7.15"
+-  digest: "sha256:d9d35c82799bfa2e0438bb60385fb0b550465dabde2a6e0ceca8afec1aae3305"
++  digest: "sha256:0263064906e2fa88063129d1b84a6ae3d33acb090062e510b32f87b7a1c84917"
+   ## Specify a imagePullPolicy
+   ## ref: https://kubernetes.io/docs/concepts/containers/images/#pre-pulled-images
+   ##
