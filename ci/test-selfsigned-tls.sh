@@ -92,6 +92,7 @@ require_literal "${OIDC_RESTART_SCRIPT}" 'openssl x509 -in "${ca_file}" -noout -
 require_literal "${OIDC_RESTART_SCRIPT}" 'kubectl -n mb-element create configmap synapse-keycloak-oidc-ca'
 require_literal "${OIDC_RESTART_SCRIPT}" 'kubectl rollout status deploy/coredns -n kube-system --timeout=300s'
 require_literal "${OIDC_RESTART_SCRIPT}" 'kubectl rollout status deploy/traefik -n kube-system --timeout=300s'
+require_literal "${OIDC_RESTART_SCRIPT}" 'kubectl -n mb-element exec -i "${synapse_pod}" -c synapse --'
 require_literal "${OIDC_RESTART_SCRIPT}" 'ssl.create_default_context(cafile="/synapse/oidc-ca/ca.crt")'
 require_literal "${OIDC_RESTART_SCRIPT}" 'with urllib.request.urlopen(url, context=context, timeout=10) as response:'
 require_literal "${OIDC_RESTART_SCRIPT}" 'if [ "${jwks_ready}" != true ]; then'

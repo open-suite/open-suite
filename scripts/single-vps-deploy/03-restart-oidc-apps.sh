@@ -60,7 +60,7 @@ if [ "${OPEN_SUITE_TLS_MODE:-letsencrypt}" = "selfsigned" ]; then
       --field-selector=status.phase=Running \
       -o jsonpath='{.items[0].metadata.name}' 2>/dev/null || true)"
     if [ -n "${synapse_pod}" ] && timeout --signal=TERM --kill-after=5s 15s \
-        kubectl -n mb-element exec "${synapse_pod}" -c synapse -- \
+        kubectl -n mb-element exec -i "${synapse_pod}" -c synapse -- \
           python - "${DOMAIN}" <<'PY'
 import json
 import ssl
