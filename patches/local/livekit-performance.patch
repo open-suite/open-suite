@@ -1,0 +1,15 @@
+diff --git a/helmfile/apps/livekit/values-redis.yaml.gotmpl b/helmfile/apps/livekit/values-redis.yaml.gotmpl
+index ccb6f8d..0b3ebf6 100644
+--- a/helmfile/apps/livekit/values-redis.yaml.gotmpl
++++ b/helmfile/apps/livekit/values-redis.yaml.gotmpl
+@@ -301,7 +301,9 @@ master:
+   ##
+   readinessProbe:
+     enabled: true
+-    initialDelaySeconds: 20
++    # Helmfile orders this release before LiveKit. Probe Redis promptly;
++    # failed readiness checks remain non-destructive until Redis is usable.
++    initialDelaySeconds: 1
+     periodSeconds: 5
+     timeoutSeconds: 1
+     successThreshold: 1

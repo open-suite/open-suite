@@ -375,6 +375,7 @@ run_full_test() {
 
   run_bounded first-deploy 55m "${REPO}/deploy.sh" "${DOMAIN}" ci@example.invalid
   set_phase first-conformance
+  bash "${REPO}/ci/test-livekit-performance.sh" /root/mijn-bureau-infra
   bash "${REPO}/ci/test-messages-install.sh" /root/mijn-bureau-infra
   bash "${REPO}/ci/test-selfsigned-tls.sh" /root/mijn-bureau-infra "${DOMAIN}" \
     "${ARTIFACT_DIR}/selfsigned-tls-fingerprints.sha256"
