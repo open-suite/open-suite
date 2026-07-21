@@ -247,7 +247,7 @@ def main() -> None:
         "iterations": args.iterations,
         "model": {
             "before_initial_delay_ms": {"redis": 20_000, "livekit": 10_000},
-            "after_initial_delay_ms": {"redis": 1_000, "livekit": 1_000},
+            "after_initial_delay_ms": {"redis": 1_000, "livekit": 10_000},
             "note": "initialDelaySeconds is a lower bound, not an exact kubelet probe timestamp",
             "excludes": ["image pull", "pod scheduling", "ingress/TLS", "real ICE/media path"],
         },

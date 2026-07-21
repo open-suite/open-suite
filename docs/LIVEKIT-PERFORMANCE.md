@@ -6,26 +6,31 @@ workload sizing or general performance policy.
 
 ## Finding and fix
 
-The chart configured readiness initial delays much larger than measured process
+Redis configured a readiness initial delay much larger than measured process
 initialization:
 
 1. The demo Helmfile orders LiveKit's private Redis release before LiveKit, but
    does not wait for Redis pod readiness.
 2. Redis configured a 20-second readiness initial delay.
-3. LiveKit configured a 10-second readiness initial delay.
 
 Redis readiness also controls whether its pod is an eligible Service endpoint.
 Because LiveKit v1.13.1 connects to Redis synchronously and exits when it is
 unavailable, the old 20-second delay can expose a startup race and restart
 backoff. That Kubernetes path has not been measured on the demo cluster.
 
-Both probes are meaningful health checks. Redis runs its authenticated ping
-script; LiveKit `/` returns `406` until node statistics are current. The fix in
-`patches/local/livekit-performance.patch` changes only the first readiness
-probe time to one second for each process. `initialDelaySeconds` is only a
-lower bound; kubelet does not guarantee a probe at that exact timestamp. The
-fix does not remove, replace, or make either check less strict, and it preserves
-Helmfile's release ordering.
+Redis runs a meaningful authenticated readiness ping. The fix in
+`patches/local/livekit-performance.patch` changes only its first readiness
+probe opportunity to one second. `initialDelaySeconds` is a lower bound;
+kubelet does not guarantee a probe at that exact timestamp. The fix does not
+remove, replace, or make the check less strict, and it preserves Helmfile's
+release ordering.
+
+LiveKit keeps its chart-default 10-second readiness delay. A fresh Helm render
+starts with placeholder `NODE_IP=1.3.5.7`; the demo's post-Helm networking step
+then writes the validated public IP and restarts LiveKit. Because LiveKit `/`
+does not validate the advertised IP, reducing that delay could let a
+placeholder-configured replacement pod become Ready earlier than the corrected
+old pod. Public-IP discovery is therefore deliberately out of scope here.
 
 ## Measured intrinsic distribution
 
@@ -51,16 +56,14 @@ media-path measurements and not expected to change.
 | Readiness probe | Before initial delay | After initial delay | Period (unchanged) |
 |---|---:|---:|---:|
 | Authenticated Redis | 20s | 1s | 5s |
-| LiveKit `/` | 10s | 1s | 10s |
+| LiveKit `/` | 10s | 10s | 10s |
 
-All 30 measured starts became usable before one second. The patch therefore
-removes 19 seconds and 9 seconds respectively from the configured **earliest
-probe opportunities**. These are not deployment distributions and must not be
-added together: Helmfile orders the releases but does not wait for Redis pod
-readiness, and kubelet probe scheduling is not exact. Cluster-level before/after
-startup distributions remain unmeasured because this change was not deployed.
-If initialization takes longer, the same probes continue to fail closed and
-retry at their unchanged periods.
+All 30 measured Redis starts became usable before one second. The patch removes
+19 seconds from its configured **earliest probe opportunity**. This is not a
+deployment distribution: Helmfile orders the releases but does not wait for
+Redis pod readiness, and kubelet probe scheduling is not exact. If
+initialization takes longer, the same probe continues to fail closed and retry
+at its unchanged period.
 
 ## Reproduction
 
@@ -105,9 +108,10 @@ bash ci/test-livekit-performance.sh /path/to/patched-mijn-bureau-infra
 
 ## Risks and unverified real-network assumptions
 
-- This was not deployed, by design. Kubernetes event timing on the demo VPS is
-  not included; pod scheduling, image pulls, PVC attachment/AOF replay, DNS,
-  Traefik, TLS, and WAN RTT can add variance.
+- This was not deployed to the demo VPS. GitHub's ephemeral self-signed fresh
+  install exercises the patched deployment, but does not collect the
+  before/after event distribution. Demo scheduling, image pulls, PVC
+  attachment/AOF replay, DNS, Traefik, TLS, and WAN RTT can add variance.
 - The WebSocket metric ends at HTTP `101`. It validates authentication and
   signaling session setup through the upgrade locally, not receipt of the
   initial LiveKit join message or full browser room join.

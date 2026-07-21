@@ -13,18 +13,3 @@ index ccb6f8d..0b3ebf6 100644
      periodSeconds: 5
      timeoutSeconds: 1
      successThreshold: 1
-diff --git a/helmfile/apps/livekit/values.yaml.gotmpl b/helmfile/apps/livekit/values.yaml.gotmpl
-index 3d4952e..44bcd2c 100644
---- a/helmfile/apps/livekit/values.yaml.gotmpl
-+++ b/helmfile/apps/livekit/values.yaml.gotmpl
-@@ -27,6 +27,10 @@ livekit:
- 
-   resourcesPreset: {{ coalesce .Values.global.resourcesPresetPerApp.livekit .Values.global.resourcesPreset | quote }}
-   resources: {{ .Values.resource.livekit.livekit | default dict | toYaml | nindent 4 }}
-+  # The endpoint is a real LiveKit readiness check (it returns 406 until node
-+  # stats are current), so probe promptly instead of adding a fixed 10s gate.
-+  readinessProbe:
-+    initialDelaySeconds: 1
-   podSecurityContext: {{ .Values.security.default.podSecurityContext | toYaml | nindent 4 }}
-   containerSecurityContext:  {{ .Values.security.default.containerSecurityContext | toYaml | nindent 4 }}
-   autoscaling:

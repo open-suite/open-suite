@@ -15,10 +15,13 @@ extract_block() {
   sed -n "/${start}/,/${end}/p" "${file}"
 }
 
-# Readiness probes run promptly, but remain enabled and retain their real
-# authenticated Redis/HTTP health checks.
-LIVEKIT_PROBE="$(extract_block "${LIVEKIT_VALUES}" '^  readinessProbe:' '^  podSecurityContext:')"
-grep -Fq 'initialDelaySeconds: 1' <<<"${LIVEKIT_PROBE}"
+# Redis readiness runs promptly but retains its authenticated health check.
+# LiveKit must keep the chart's 10-second default until node_ip is declarative:
+# its `/` check does not reject the initial 1.3.5.7 placeholder.
+if grep -q '^  readinessProbe:' "${LIVEKIT_VALUES}"; then
+  echo "ERROR: LiveKit readiness override bypasses the node_ip cutover buffer" >&2
+  exit 1
+fi
 REDIS_MASTER="$(extract_block "${REDIS_VALUES}" '^master:' '^replica:')"
 REDIS_LIVENESS="$(sed -n '/^  livenessProbe:/,/^  readinessProbe:/p' <<<"${REDIS_MASTER}")"
 REDIS_PROBE="$(sed -n '/^  readinessProbe:/,/^  customStartupProbe:/p' <<<"${REDIS_MASTER}")"
@@ -34,6 +37,7 @@ CHART_LIVENESS="$(sed -n '/^  livenessProbe:/,/^  readinessProbe:/p' "${CHART_VA
 CHART_READINESS="$(sed -n '/^  readinessProbe:/,/^  startupProbe:/p' "${CHART_VALUES}")"
 grep -Fq 'enabled: true' <<<"${CHART_LIVENESS}"
 grep -Fq 'enabled: true' <<<"${CHART_READINESS}"
+grep -Fq 'initialDelaySeconds: 10' <<<"${CHART_READINESS}"
 
 # Guard the constraints this performance change must not weaken.
 REDIS_AUTH="$(extract_block "${REDIS_VALUES}" '^auth:' '^commonConfiguration:')"
