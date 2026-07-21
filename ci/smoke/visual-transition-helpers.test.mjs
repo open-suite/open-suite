@@ -3,7 +3,7 @@ import { mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { test } from "node:test";
-import { classifyFile, chooseCandidate, contractOutcome, enforceArtifactBudget, parseMode, sameDeepLink, sanitizeUrl } from "./visual-transition-helpers.mjs";
+import { assessElementHome, classifyFile, chooseCandidate, contractOutcome, enforceArtifactBudget, parseMode, sameDeepLink, sanitizeUrl } from "./visual-transition-helpers.mjs";
 
 test("mode only enables an explicit enforce contract", () => {
   assert.equal(parseMode("enforce"), "enforce");
@@ -21,6 +21,19 @@ test("file candidates are deterministic and correctly classified", () => {
   assert.equal(classifyFile("Plan.DOCX"), "office");
   assert.equal(chooseCandidate(["z.docx", "a.odt"], "", "office"), "a.odt");
   assert.equal(chooseCandidate(["a.odt"], "missing.docx", "office"), null);
+});
+test("Element home marker requires authenticated home and visible room navigation", () => {
+  const bodyText = "Welcome John Doe\nNow, let's help you get started\nSend a Direct Message";
+  assert.deepEqual(assessElementHome({ bodyText, visibleRoomLabels: ["Jane Doe", "Team"] }), {
+    ok: true,
+    authenticatedHome: true,
+    roomNavigation: true,
+    forbidden: [],
+  });
+  assert.equal(assessElementHome({ bodyText, visibleRoomLabels: [] }).ok, false);
+  assert.equal(assessElementHome({ bodyText: `${bodyText}\nConnecting to chat`, visibleRoomLabels: ["Jane Doe"] }).ok, false);
+  assert.equal(assessElementHome({ bodyText: `${bodyText}\nFailed to load`, visibleRoomLabels: ["Jane Doe"] }).ok, false);
+  assert.equal(assessElementHome({ bodyText: "Welcome to Element\nSign in", visibleRoomLabels: ["Team"] }).ok, false);
 });
 test("baseline reports contract observations without passing them", () => {
   const item = { ok: false };

@@ -5,6 +5,7 @@ import { mkdir, rm, writeFile } from "node:fs/promises";
 import path from "node:path";
 import { chromium } from "playwright";
 import {
+  assessElementHome,
   chooseCandidate,
   contractOutcome,
   enforceArtifactBudget,
@@ -269,7 +270,12 @@ async function sameTab({ page, rawDocumentRequests, portalHeaderVersion, check, 
 const chat = {
   label: "Chat",
   hostname: `element.${domain}`,
-  room: (page) => page.locator(".mx_RoomListItemView").first(),
+  roomLabels: ["Jane Doe", "Team", `#welkom:matrix.${domain}`],
+  room(page) {
+    // The daily demo seed guarantees this direct room and the authenticated
+    // failure evidence confirms it is visible in Element's sidebar.
+    return page.getByText("Jane Doe", { exact: true }).first();
+  },
   composer: (page) => page.locator('[contenteditable="true"][role="textbox"], textarea').first(),
   async interact(page) {
     const room = this.room(page);
@@ -279,7 +285,17 @@ const chat = {
     const editable = await this.composer(page).isEditable().catch(() => false);
     if (!editable) throw new Error("Chat composer is not editable");
   },
-  async ready(page) { await this.room(page).waitFor({ state: "visible", timeout: 45_000 }); },
+  async ready(page) {
+    await page.getByText("Send a Direct Message", { exact: true }).waitFor({ state: "visible", timeout: 45_000 });
+    await this.room(page).waitFor({ state: "visible", timeout: 45_000 });
+    const bodyText = await page.locator("body").innerText();
+    const visibleRoomLabels = [];
+    for (const label of this.roomLabels) {
+      if (await page.getByText(label, { exact: true }).first().isVisible().catch(() => false)) visibleRoomLabels.push(label);
+    }
+    const marker = assessElementHome({ bodyText, visibleRoomLabels });
+    if (!marker.ok) throw new Error("authenticated Element home marker not satisfied");
+  },
 };
 const calendar = {
   label: "Calendar",

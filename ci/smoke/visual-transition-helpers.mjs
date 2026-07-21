@@ -32,6 +32,31 @@ export function sameDeepLink(actual, expected, base) {
   }
 }
 
+const elementHomeActions = ["Send a Direct Message", "Explore Public Rooms", "Create a Group Chat"];
+const elementForbiddenSurfaces = [
+  ["login", /\bSign in\b|Continue with Open Suite SSO|Open Suite SSO/i],
+  ["splash", /Welcome to Element|desktop site does not work on mobile/i],
+  ["connecting", /Connecting to chat/i],
+  ["session", /session has expired|signed out/i],
+  ["error", /Something went wrong|Unable to load|Failed to load|There was an error|Access denied|Network error/i],
+];
+
+export function assessElementHome({ bodyText = "", visibleRoomLabels = [] } = {}) {
+  const forbidden = elementForbiddenSurfaces
+    .filter(([, pattern]) => pattern.test(bodyText))
+    .map(([name]) => name);
+  const authenticatedHome = /Welcome John Doe/i.test(bodyText)
+    && elementHomeActions.some((label) => bodyText.includes(label));
+  const roomNavigation = visibleRoomLabels.some((label) =>
+    label === "Jane Doe" || label === "Team" || /^#welkom:matrix\./.test(label));
+  return {
+    ok: authenticatedHome && roomNavigation && forbidden.length === 0,
+    authenticatedHome,
+    roomNavigation,
+    forbidden,
+  };
+}
+
 const whiteboard = /\.(whiteboard|drawio)$/i;
 const office = /\.(docx?|xlsx?|pptx?|odt|ods|odp)$/i;
 export const classifyFile = (name = "") => whiteboard.test(name) ? "whiteboard" : office.test(name) ? "office" : "other";
