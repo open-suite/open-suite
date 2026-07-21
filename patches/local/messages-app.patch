@@ -111,6 +111,37 @@ index 0000000..492e65c
 +            initialDelaySeconds: 10
 +            periodSeconds: 10
 +          resources: {{ .Values.backend.resources | toYaml | nindent 12 }}
+diff --git a/helmfile/apps/messages/charts/messages/templates/backend-keycloak-networkpolicy.yaml b/helmfile/apps/messages/charts/messages/templates/backend-keycloak-networkpolicy.yaml
+new file mode 100644
+index 0000000..8bea444
+--- /dev/null
++++ b/helmfile/apps/messages/charts/messages/templates/backend-keycloak-networkpolicy.yaml
+@@ -0,0 +1,25 @@
++# The single-VPS namespace egress whitelist deliberately blocks cross-namespace
++# traffic. Permit only the backend's OIDC/admin calls to Keycloak's HTTP port.
++apiVersion: networking.k8s.io/v1
++kind: NetworkPolicy
++metadata:
++  name: {{ .Release.Name }}-backend-keycloak-egress
++  namespace: {{ .Release.Namespace | quote }}
++  labels: {{- include "messages.labels" (dict "component" "backend" "context" $) | nindent 4 }}
++spec:
++  podSelector:
++    matchLabels: {{- include "messages.selectorLabels" (dict "component" "backend" "context" $) | nindent 6 }}
++  policyTypes: [Egress]
++  egress:
++    - to:
++        - namespaceSelector:
++            matchLabels:
++              kubernetes.io/metadata.name: {{ .Values.backend.keycloakNamespace | quote }}
++          podSelector:
++            matchLabels:
++              app.kubernetes.io/name: keycloak
++              app.kubernetes.io/component: keycloak
++      ports:
++        # NetworkPolicy evaluates the Service's post-DNAT container port.
++        - port: 8080
++          protocol: TCP
 diff --git a/helmfile/apps/messages/charts/messages/templates/backend-secret.yaml b/helmfile/apps/messages/charts/messages/templates/backend-secret.yaml
 new file mode 100644
 index 0000000..23accc7
@@ -381,7 +412,7 @@ index 0000000..9808302
 +      restartPolicy: Never
 +      # A release dependency only orders Helm operations; it does not prove a
 +      # new database stayed up. Require six successful connections over 30s
-+      # before migrating so first initialization cannot race a probe restart.
++      # before migrating; this fixed durability gate is not a performance knob.
 +      initContainers:
 +        - name: wait-for-postgresql
 +          image: {{ include "messages.image" (dict "component" "backend" "context" $) }}
@@ -635,10 +666,10 @@ index 0000000..69043be
 +      protocol: TCP
 diff --git a/helmfile/apps/messages/charts/messages/templates/opensearch-statefulset.yaml b/helmfile/apps/messages/charts/messages/templates/opensearch-statefulset.yaml
 new file mode 100644
-index 0000000..54c02d9
+index 0000000..fd52a5e
 --- /dev/null
 +++ b/helmfile/apps/messages/charts/messages/templates/opensearch-statefulset.yaml
-@@ -0,0 +1,68 @@
+@@ -0,0 +1,79 @@
 +# Single-node OpenSearch for message search. The vendored infra carries no
 +# OpenSearch chart, and at single-VPS scale one node with the security plugin
 +# disabled (cluster-internal traffic only) is the honest deployment.
@@ -684,6 +715,17 @@ index 0000000..54c02d9
 +          volumeMounts:
 +            - name: data
 +              mountPath: /usr/share/opensearch/data
++          # OpenSearch can take several minutes to cold-start on the minimum
++          # supported host. Do not let liveness restart that valid startup;
++          # after cluster health succeeds, the existing probes are unchanged.
++          startupProbe:
++            # Plain HTTP matches the disabled security plugin above.
++            httpGet:
++              path: /_cluster/health
++              port: http
++            periodSeconds: 10
++            timeoutSeconds: 5
++            failureThreshold: 60
 +          readinessProbe:
 +            httpGet:
 +              path: /_cluster/health
@@ -788,10 +830,10 @@ index 0000000..280a606
 +          resources: {{ .Values.worker.resources | toYaml | nindent 12 }}
 diff --git a/helmfile/apps/messages/charts/messages/values.yaml b/helmfile/apps/messages/charts/messages/values.yaml
 new file mode 100644
-index 0000000..04bdc99
+index 0000000..a20e790
 --- /dev/null
 +++ b/helmfile/apps/messages/charts/messages/values.yaml
-@@ -0,0 +1,83 @@
+@@ -0,0 +1,84 @@
 +# Default values for the messages chart. The deploy-time source of truth is
 +# ../../values.yaml.gotmpl (rendered by helmfile); these defaults only make
 +# `helm lint`/`helm template` work standalone and document the shape.
@@ -823,6 +865,7 @@ index 0000000..04bdc99
 +
 +backend:
 +  replicaCount: 1
++  keycloakNamespace: "mb-keycloak"
 +  # Full Django environment (secrets included) — stored in one Secret that the
 +  # backend, worker and migrate job all envFrom.
 +  envVars: {}
@@ -1083,14 +1126,16 @@ index 0000000..33ce096
 +    size: {{ coalesce .Values.pvc.messages.redis.size .Values.pvc.default.size "1Gi" }}
 diff --git a/helmfile/apps/messages/values.yaml.gotmpl b/helmfile/apps/messages/values.yaml.gotmpl
 new file mode 100644
-index 0000000..423080c
+index 0000000..bd224bd
 --- /dev/null
 +++ b/helmfile/apps/messages/values.yaml.gotmpl
-@@ -0,0 +1,152 @@
+@@ -0,0 +1,158 @@
 +{{- $releaseId := now | unixEpoch }}
 +{{- $hostname := printf "%s.%s" .Values.global.hostname.messages .Values.global.domain }}
 +{{- $sslPostfix := ternary "s" "" (.Values.global.tls.enabled | default true) }}
 +{{- $baseUrl := printf "http%s://%s" $sslPostfix $hostname }}
++{{- $portalUrl := printf "https://%s.%s/" .Values.global.hostname.bureaublad .Values.global.domain }}
++{{- $logoutRedirectUrl := printf "https://auth.%s/logout?rd=%s" .Values.global.domain (urlquery $portalUrl) }}
 +{{- $redisUrl := printf "redis://default:%s@%s:%d/1" .Values.cache.messages.password .Values.cache.messages.host (.Values.cache.messages.port | int) -}}
 +{{- $s3Endpoint := printf "http%s://%s:%d" (ternary "s" "" .Values.objectstore.messages.useSSL) .Values.objectstore.messages.endpoint (.Values.objectstore.messages.port | int) -}}
 +{{- /* Server-to-server Keycloak base URL, derived from the backchannel token
@@ -1127,6 +1172,7 @@ index 0000000..423080c
 +  releaseSuffix: {{ $releaseId | quote }}
 +
 +backend:
++  keycloakNamespace: {{ .Values.application.keycloak.namespace | quote }}
 +  envVars:
 +    # Django core
 +    DJANGO_CONFIGURATION: "Production"
@@ -1174,6 +1220,9 @@ index 0000000..423080c
 +    OIDC_OP_AUTHORIZATION_ENDPOINT: {{ .Values.authentication.oidc.authorization_endpoint | quote }}
 +    OIDC_OP_TOKEN_ENDPOINT: {{ .Values.authentication.oidc.token_endpoint | quote }}
 +    OIDC_OP_USER_ENDPOINT: {{ .Values.authentication.oidc.userinfo_endpoint | quote }}
++    # Keep the Django session through the RP-initiated Keycloak round trip so
++    # django-lasuite can validate callback state before clearing it.
++    ALLOW_LOGOUT_GET_METHOD: "true"
 +    OIDC_OP_LOGOUT_ENDPOINT: {{ .Values.authentication.oidc.end_session_endpoint | quote }}
 +    OIDC_RP_CLIENT_ID: {{ .Values.authentication.client.messages.client_id | quote }}
 +    OIDC_RP_CLIENT_SECRET: {{ .Values.authentication.client.messages.client_secret | quote }}
@@ -1182,7 +1231,7 @@ index 0000000..423080c
 +    OIDC_REDIRECT_ALLOWED_HOSTS: '["{{ $baseUrl }}"]'
 +    LOGIN_REDIRECT_URL: {{ $baseUrl | quote }}
 +    LOGIN_REDIRECT_URL_FAILURE: {{ $baseUrl | quote }}
-+    LOGOUT_REDIRECT_URL: {{ $baseUrl | quote }}
++    LOGOUT_REDIRECT_URL: {{ $logoutRedirectUrl | quote }}
 +    # Keycloak admin API (mailbox/group provisioning via service account)
 +    IDENTITY_PROVIDER: "keycloak"
 +    KEYCLOAK_URL: {{ $keycloakUrl | quote }}

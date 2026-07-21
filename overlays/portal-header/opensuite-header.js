@@ -304,7 +304,9 @@
   function logoutLink(className) {
     var logout = document.createElement("a");
     logout.className = className;
-    logout.href = origin("auth") + "/logout?rd=" + encodeURIComponent(origin("bridge") + "/");
+    logout.href = MAIL_ENABLED
+      ? origin("messages") + "/api/v1.0/logout/"
+      : origin("auth") + "/logout?rd=" + encodeURIComponent(origin("bridge") + "/");
     logout.textContent = "Log out";
     logout.setAttribute("aria-label", "Logout");
     return logout;
