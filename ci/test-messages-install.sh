@@ -9,8 +9,10 @@ POSTGRES_VALUES="${INFRA}/helmfile/apps/messages/values-postgresql.yaml.gotmpl"
 MIGRATE_JOB="${INFRA}/helmfile/apps/messages/charts/messages/templates/migrate-job.yaml"
 OPENSEARCH_STATEFULSET="${INFRA}/helmfile/apps/messages/charts/messages/templates/opensearch-statefulset.yaml"
 KEYCLOAK_EGRESS="${INFRA}/helmfile/apps/messages/charts/messages/templates/backend-keycloak-networkpolicy.yaml"
-HEADER_CONFIG="${INFRA}/helmfile/apps/messages/charts/messages/templates/header-configmap.yaml"
+KEYCLOAK_REALM="${INFRA}/helmfile/apps/keycloak/keycloak.yaml.gotmpl"
 MESSAGES_VALUES="${INFRA}/helmfile/apps/messages/values.yaml.gotmpl"
+HEADER_SOURCE="${REPO}/overlays/portal-header/opensuite-header.js"
+HEADER_PUBLISHER="${REPO}/scripts/single-vps-deploy/09-portal-header.sh"
 DEMO_VALUES="${REPO}/helmfile/demo-values.yaml.tmpl"
 
 require_literal() {
@@ -48,19 +50,27 @@ require_literal "${KEYCLOAK_EGRESS}" 'app.kubernetes.io/name: keycloak'
 require_literal "${KEYCLOAK_EGRESS}" 'app.kubernetes.io/component: keycloak'
 require_literal "${KEYCLOAK_EGRESS}" 'port: 8080'
 
-# Coordinated logout must start at Messages in a top-level, first-party context
-# so Django clears its session. Its fixed operator-configured redirect then
-# lets auth-gate clear the edge session and end Keycloak SSO. Do not replace
-# this with an unvalidated, stateless front-channel callback.
-require_literal "${HEADER_CONFIG}" 'sub_filter_types application/javascript;'
-require_literal "${HEADER_CONFIG}" 'logout.href = origin("auth") + "/logout?rd=" + encodeURIComponent(origin("bridge") + "/");'
-require_literal "${HEADER_CONFIG}" 'logout.href = origin("messages") + "/api/v1.0/logout/";'
-require_literal "${REPO}/overlays/portal-header/opensuite-header.js" 'logout.href = origin("auth") + "/logout?rd=" + encodeURIComponent(origin("bridge") + "/");'
+# With Mail deployed, every published shared header must start a top-level,
+# stateful Messages RP logout. Without Mail, the existing auth-gate target
+# remains. The publisher flips only the deployment-specific temporary copy.
+require_literal "${HEADER_SOURCE}" 'logout.href = MAIL_ENABLED'
+require_literal "${HEADER_SOURCE}" '? origin("messages") + "/api/v1.0/logout/"'
+require_literal "${HEADER_SOURCE}" ': origin("auth") + "/logout?rd=" + encodeURIComponent(origin("bridge") + "/");'
+require_literal "${HEADER_PUBLISHER}" "sed -i 's/var MAIL_ENABLED = false;/var MAIL_ENABLED = true;/'"
+
+# django-lasuite must retain the Messages session while Keycloak returns a
+# random state to this exact main-frame callback. Only after state validation
+# may it clear the session and use the fixed operator-configured auth-gate hop.
 require_literal "${MESSAGES_VALUES}" '{{- $portalUrl := printf "https://%s.%s/" .Values.global.hostname.bureaublad .Values.global.domain }}'
 require_literal "${MESSAGES_VALUES}" '{{- $logoutRedirectUrl := printf "https://auth.%s/logout?rd=%s" .Values.global.domain (urlquery $portalUrl) }}'
 require_literal "${MESSAGES_VALUES}" 'ALLOW_LOGOUT_GET_METHOD: "true"'
-require_literal "${MESSAGES_VALUES}" 'OIDC_OP_LOGOUT_ENDPOINT: ""'
+require_literal "${MESSAGES_VALUES}" 'OIDC_OP_LOGOUT_ENDPOINT: {{ .Values.authentication.oidc.end_session_endpoint | quote }}'
 require_literal "${MESSAGES_VALUES}" 'LOGOUT_REDIRECT_URL: {{ $logoutRedirectUrl | quote }}'
+MESSAGES_CLIENT="$(sed -n '/"clientId": "{{ .Values.authentication.client.messages.client_id }}"/,/"clientId": "{{ .Values.authentication.client.messagesRestApi.client_id }}"/p' "${KEYCLOAK_REALM}")"
+grep -Fq '"frontchannelLogout": false' <<<"${MESSAGES_CLIENT}"
+grep -Fq '"backchannel.logout.url": ""' <<<"${MESSAGES_CLIENT}"
+grep -Fq '"frontchannel.logout.url": ""' <<<"${MESSAGES_CLIENT}"
+grep -Fq '"post.logout.redirect.uris": "https://{{ .Values.global.hostname.messages }}.{{ .Values.global.domain }}/api/v1.0/logout-callback/"' <<<"${MESSAGES_CLIENT}"
 
 # A startup probe prevents liveness from repeatedly restarting a healthy cold
 # start. Readiness and liveness remain as strict as before startup succeeds.

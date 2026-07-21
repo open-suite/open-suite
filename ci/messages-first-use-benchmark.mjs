@@ -119,12 +119,22 @@ try {
     await matrixPage.close();
   }
 
-  // The redirect target is protected by the edge gate. Once Keycloak has
-  // ended its SSO session and invoked each front-channel callback, loading the
-  // target must finish at Keycloak's login page rather than silently signing
-  // back in. That is the logged-out state; requiring the protected bridge URL
-  // here would contradict the gate's fail-closed behavior.
-  await Promise.all([
+  // Messages keeps its session only long enough to validate the random state
+  // on the main-frame RP logout callback. The callback then clears that
+  // session and redirects through auth-gate, which clears the edge session and
+  // returns to the protected bridge. Both protected hosts must fail closed at
+  // Keycloak's login page rather than silently signing back in.
+  const logoutCallback = page.waitForResponse((response) => {
+    const url = new URL(response.url());
+    return (
+      response.request().isNavigationRequest() &&
+      response.request().frame() === page.mainFrame() &&
+      url.hostname === `messages.${domain}` &&
+      url.pathname === "/api/v1.0/logout-callback/"
+    );
+  }, { timeout: 60_000 });
+  const [callbackResponse] = await Promise.all([
+    logoutCallback,
     page.waitForURL((url) =>
       url.hostname === `id.${domain}` &&
       url.pathname === "/realms/mijnbureau/protocol/openid-connect/auth" &&
@@ -134,7 +144,13 @@ try {
     }),
     logoutLink.click(),
   ]);
+  const callbackUrl = new URL(callbackResponse.url());
+  if (callbackResponse.status() !== 302 || !callbackUrl.searchParams.get("state")) {
+    throw new Error(`stateful Messages logout callback failed: ${callbackResponse.status()} ${callbackUrl}`);
+  }
+  results.logout_callback_state_verified = true;
   await page.locator("#kc-login").waitFor({ state: "visible", timeout: 15_000 });
+  results.protected_bridge_requires_login = true;
   const postLogoutCookies = await context.cookies();
   const postLogoutGateCookie = postLogoutCookies.find((cookie) => cookie.name === "opensuite_auth");
   const postLogoutMailSession = postLogoutCookies.find(
@@ -145,6 +161,17 @@ try {
   if (postLogoutGateCookie || postLogoutMailSession) {
     throw new Error("coordinated logout did not clear the edge and Messages sessions");
   }
+
+  await page.goto(`https://messages.${domain}/`, { waitUntil: "domcontentloaded" });
+  await page.waitForURL((url) =>
+    url.hostname === `id.${domain}` &&
+    url.pathname === "/realms/mijnbureau/protocol/openid-connect/auth" &&
+    url.searchParams.get("client_id") === "opensuite-auth-gate", {
+    timeout: 30_000,
+    waitUntil: "domcontentloaded",
+  });
+  await page.locator("#kc-login").waitFor({ state: "visible", timeout: 15_000 });
+  results.protected_messages_requires_login = true;
   results.logout_completed = true;
 
   fs.writeFileSync(output, `${JSON.stringify(results, null, 2)}\n`);

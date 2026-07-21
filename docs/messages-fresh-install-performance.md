@@ -24,10 +24,11 @@ Messages silent OIDC login, and Element. The first-use checks require:
 - a successful first Matrix `/sync` response;
 - `Secure`, `HttpOnly` Messages and edge-gate cookies, with the edge cookie
   scoped to the browser session; and
-- the coordinated logout link to start at Messages' same-origin logout
-  endpoint, then finish at Keycloak's login form after the fixed auth-gate and
-  protected-portal redirects, with both cookies removed. Requiring
-  authentication again is the expected fail-closed result after logout.
+- every shared-header logout link to start at Messages' logout endpoint when
+  Mail is enabled, return through the exact main-frame Messages callback with
+  validated state, then finish at Keycloak's login form after the fixed
+  auth-gate and protected-portal redirects, with both cookies removed. Both
+  the portal and Messages must require authentication again.
 
 The browser makes one attempt and uses API and application-owned DOM signals;
 there are no retries or CI workarounds that can hide a failed OIDC exchange,
@@ -108,19 +109,23 @@ API responses, providing an end-to-end check of that backchannel rule. That run
 then failed on the benchmark's old English `Inbox` text selector, which the
 locale-independent API/render signal above replaces.
 
-Messages' header now initiates logout at the app's own `/api/v1.0/logout/`
-endpoint. With the OP logout endpoint intentionally empty, django-lasuite
-clears the Django session in the top-level first-party response and redirects
-to a fixed, deployment-computed auth-gate logout URL. Auth-gate then clears the
-edge session, ends Keycloak SSO, and returns through the protected portal URL.
-The destination is operator configuration rather than request input, and the
-existing state validation on Messages' OIDC callback is not relaxed.
+When Mail is enabled, the deployment-specific shared header now initiates every
+logout at Messages' `/api/v1.0/logout/` endpoint. django-lasuite retains the
+Django session while it persists random state and performs RP-initiated
+Keycloak logout. Keycloak returns the main frame only to the exact Messages
+callback; the callback validates that state before clearing the Django session
+and redirecting to a fixed, deployment-computed auth-gate logout URL. Auth-gate
+then clears the edge session and returns through the protected portal URL.
+Messages' automatic Keycloak front- and back-channel logout URLs are empty, so
+there is no separate stateless callback, and its allowed post-logout redirect
+is narrowed from a wildcard to that exact stateful callback. The auth-gate hop
+is operator configuration rather than request input.
 
 The PostgreSQL startup probe, six-success/30-second database stability rule,
 separate retrying migration Job, migration command, backend database heartbeat,
 and session-cookie attributes are unchanged and remain CI assertions. The
 coordinated logout gate remains fail-closed and now also verifies the
-first-party Messages initiation described above.
+stateful main-frame Messages callback described above.
 
 The tradeoff is explicit: a permanently broken OpenSearch startup can take up
 to 10 minutes to be restarted instead of roughly 100 seconds. This is bounded

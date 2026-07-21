@@ -275,7 +275,7 @@ new file mode 100644
 index 0000000..0eae212
 --- /dev/null
 +++ b/helmfile/apps/messages/charts/messages/templates/header-configmap.yaml
-@@ -0,0 +1,73 @@
+@@ -0,0 +1,70 @@
 +# nginx config for the Open Suite header sidecar — identical to the
 +# opensuite-header-conf the other apps get via
 +# patches/local/opensuite-header-sidecar.patch, with the upstream port set to
@@ -323,9 +323,6 @@ index 0000000..0eae212
 +        client_max_body_size 0;
 +        location = /opensuite-header.js {
 +          default_type application/javascript;
-+          # Messages must clear its first-party session before shared SSO.
-+          sub_filter_types application/javascript;
-+          sub_filter 'logout.href = origin("auth") + "/logout?rd=" + encodeURIComponent(origin("bridge") + "/");' 'logout.href = origin("messages") + "/api/v1.0/logout/";';
 +          # no-cache = revalidate per page view (cheap 304). The JS configmap is
 +          # updated in place by 09-portal-header.sh; there is no versioned URL.
 +          add_header Cache-Control "no-cache";
@@ -1223,10 +1220,10 @@ index 0000000..bd224bd
 +    OIDC_OP_AUTHORIZATION_ENDPOINT: {{ .Values.authentication.oidc.authorization_endpoint | quote }}
 +    OIDC_OP_TOKEN_ENDPOINT: {{ .Values.authentication.oidc.token_endpoint | quote }}
 +    OIDC_OP_USER_ENDPOINT: {{ .Values.authentication.oidc.userinfo_endpoint | quote }}
-+    # Clear the Django session in first-party context, then let auth-gate end
-+    # the shared Keycloak session. Callback state validation stays intact.
++    # Keep the Django session through the RP-initiated Keycloak round trip so
++    # django-lasuite can validate callback state before clearing it.
 +    ALLOW_LOGOUT_GET_METHOD: "true"
-+    OIDC_OP_LOGOUT_ENDPOINT: ""
++    OIDC_OP_LOGOUT_ENDPOINT: {{ .Values.authentication.oidc.end_session_endpoint | quote }}
 +    OIDC_RP_CLIENT_ID: {{ .Values.authentication.client.messages.client_id | quote }}
 +    OIDC_RP_CLIENT_SECRET: {{ .Values.authentication.client.messages.client_secret | quote }}
 +    OIDC_RP_SIGN_ALGO: "RS256"
