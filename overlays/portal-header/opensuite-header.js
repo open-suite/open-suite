@@ -132,9 +132,33 @@
       var ncLast = +sessionStorage.getItem("osNcAutoLogin") || 0;
       if (Date.now() - ncLast > 60000) {
         sessionStorage.setItem("osNcAutoLogin", String(Date.now()));
+        var ncLoginTarget = new URLSearchParams(window.location.search).get("redirect_url") ||
+          new URLSearchParams(window.location.search).get("redirectUrl");
+        var ncReturnTo = ncLoginTarget || sessionStorage.getItem("osNcRequestedPath") || "/apps/files/files";
+        if (ncPath !== "/login" && ncPath.indexOf("/login/") !== 0 &&
+            ncPath.indexOf("/apps/user_oidc/") !== 0) {
+          ncReturnTo = window.location.pathname + window.location.search + window.location.hash;
+        }
+        if (/^https?:\/\//i.test(ncReturnTo)) {
+          var ncReturnUrl = new URL(ncReturnTo);
+          ncReturnTo = ncReturnUrl.origin === window.location.origin
+            ? ncReturnUrl.pathname + ncReturnUrl.search + ncReturnUrl.hash
+            : "";
+        }
+        // user_oidc accepts only a same-origin absolute path. Keep that
+        // invariant here too rather than passing an external/protocol-relative
+        // target through the recovery flow.
+        if (ncReturnTo.charAt(0) !== "/" || ncReturnTo.indexOf("//") === 0) {
+          ncReturnTo = "/apps/files/files";
+        }
+        // Keep the destination through the callback. If the provider state is
+        // stale, the next rendered error page can retry the same destination.
+        sessionStorage.setItem("osNcRequestedPath", ncReturnTo);
         window.location.replace("/apps/user_oidc/login/1?redirectUrl=" +
-          encodeURIComponent(window.location.origin + "/apps/files/files"));
+          encodeURIComponent(ncReturnTo));
       }
+    } else if (ncPath.indexOf("/apps/user_oidc/") !== 0) {
+      sessionStorage.setItem("osNcRequestedPath", ncPath + window.location.search + window.location.hash);
     }
   }
 
@@ -194,16 +218,20 @@
       "#" + HEADER_ID + " .ko-mobile-children{padding-left:14px;}",
       "#" + HEADER_ID + " .ko-mobile-logout{margin-top:5px;border-top:1px solid rgba(255,255,255,.12);border-radius:0;}",
       "}",
-      // The bar overlays the top of apps (no document offset), so full-height
-      // apps like Nextcloud Calendar keep their full viewport and their popovers
-      // aren't clipped. On the bridge portal we instead hide its built-in nav
-      // and push content down, since our bar replaces that nav entirely.
+      // On the bridge portal our shell replaces the native header. These rules
+      // are also present in the response's critical head CSS, before app paint.
       "html.ko-on-bridge .ant-layout-header{display:none !important;}",
       "html.ko-on-bridge body{padding-top:var(" + HEADER_HEIGHT_VAR + ") !important;}",
       // Element fills the viewport (#matrixchat = 100vh) and puts controls at the
       // very top, which the overlay would cover — push it below the bar and
       // shrink it so nothing (room search, message composer) is hidden or cut.
       "html.ko-on-element #matrixchat{margin-top:var(" + HEADER_HEIGHT_VAR + ") !important;height:calc(100vh - var(" + HEADER_HEIGHT_VAR + ")) !important;}",
+      // Nextcloud's native header is absolute and #content is fixed. Reserve a
+      // real row for both so Calendar's navigation and controls are never under
+      // the suite shell and the app still fits exactly inside the viewport.
+      "html.ko-on-nextcloud #header:not(.header-guest){top:var(" + HEADER_HEIGHT_VAR + ") !important;}",
+      "html.ko-on-nextcloud #content{margin-top:calc(var(--header-height) + var(" + HEADER_HEIGHT_VAR + ")) !important;",
+      "height:calc(var(--body-height) - var(" + HEADER_HEIGHT_VAR + ")) !important;}",
       // Nextcloud Office deliberately moves its full-screen Collabora iframe
       // over Nextcloud's own 50px header. Our fixed suite header occupies that
       // same space, so without an offset it covers Collabora's File/Insert tab
@@ -217,7 +245,8 @@
       // popover renders ~50px too tall and its footer (Save) falls off-screen.
       // Pin it just below our bar and bound its height to the viewport; NC's
       // __content already scrolls. (NC-only class, no-op elsewhere.)
-      ".event-popover{top:60px !important;max-height:calc(100vh - 76px) !important;}",
+      ".event-popover{top:calc(var(" + HEADER_HEIGHT_VAR + ") + var(--header-height) + 12px) !important;",
+      "max-height:calc(100vh - var(" + HEADER_HEIGHT_VAR + ") - var(--header-height) - 28px) !important;}",
     ].join("");
     document.head.appendChild(s);
   }
@@ -316,7 +345,6 @@
     if (!document.body) return;
     var existing = document.getElementById(HEADER_ID);
     if (existing && existing.dataset.version === HEADER_VERSION) return;
-    if (existing) existing.remove();
     injectStyles();
     // On the bridge portal, take over from its built-in nav (hide it + offset).
     if (host.indexOf("bridge.") === 0) {
@@ -327,9 +355,13 @@
       document.documentElement.classList.add("ko-on-nextcloud");
     }
 
-    var bar = document.createElement("nav");
+    // The sidecar puts this stable node in the initial HTML. Keep the node
+    // identity across publication/version changes; only enhance its contents.
+    var bar = existing || document.createElement("nav");
+    bar.textContent = "";
     bar.id = HEADER_ID;
     bar.dataset.version = HEADER_VERSION;
+    bar.removeAttribute("data-shell");
     bar.setAttribute("aria-label", "Open Suite");
 
     var brand = document.createElement("a");
@@ -366,7 +398,8 @@
       mobileToggle.setAttribute("aria-label", open ? "Close navigation" : "Open navigation");
     });
 
-    document.body.appendChild(bar);
+    if (!existing) document.body.appendChild(bar);
+    document.documentElement.classList.remove("ko-shell-pending");
     syncHeaderHeight(bar);
     if (typeof ResizeObserver !== "undefined") {
       if (headerResizeObserver) headerResizeObserver.disconnect();
@@ -392,12 +425,19 @@
     });
   }
 
-  if (document.readyState === "loading") {
-    document.addEventListener("DOMContentLoaded", function () {
-      mount();
-    });
-  } else {
-    mount();
+  mount();
+  if (!document.body || !document.getElementById(HEADER_ID)) {
+    if (typeof MutationObserver !== "undefined") {
+      var shellObserver = new MutationObserver(function () {
+        if (document.body && document.getElementById(HEADER_ID)) {
+          shellObserver.disconnect();
+          mount();
+        }
+      });
+      shellObserver.observe(document.documentElement, { childList: true, subtree: true });
+    } else {
+      document.addEventListener("DOMContentLoaded", mount);
+    }
   }
   setInterval(function () {
     mount();
