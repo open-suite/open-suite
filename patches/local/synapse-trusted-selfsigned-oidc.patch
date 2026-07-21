@@ -1,0 +1,66 @@
+diff --git a/helmfile/apps/element/values-synapse.yaml.gotmpl b/helmfile/apps/element/values-synapse.yaml.gotmpl
+index 29b3f89..9465d8c 100644
+--- a/helmfile/apps/element/values-synapse.yaml.gotmpl
++++ b/helmfile/apps/element/values-synapse.yaml.gotmpl
+@@ -45,7 +45,26 @@ master:
+   resourcesPreset: {{ coalesce .Values.global.resourcesPresetPerApp.synapse .Values.global.resourcesPreset | quote }}
+   resources: {{ .Values.resource.synapse.master | toYaml | nindent 4 }}
+ {{- if .Values.cluster.runtimeClassName }}
+   runtimeClassName: {{ .Values.cluster.runtimeClassName | quote }}
+ {{- end }}
++{{- if .Values.global.tls.selfSigned }}
++  # Synapse/Authlib requires every OIDC endpoint to use HTTPS. The deploy
++  # scripts mirror only Keycloak's public CA into this namespace; verification
++  # and hostname checks remain enabled over the CoreDNS -> Traefik path.
++  extraEnvVars:
++    - name: SSL_CERT_FILE
++      value: /synapse/oidc-ca/ca.crt
++  extraVolumes:
++    - name: keycloak-oidc-ca
++      configMap:
++        name: synapse-keycloak-oidc-ca
++        # Keycloak creates its ingress CA during the first Helmfile apply.
++        # OIDC fails closed until the post-deploy CA sync and restart.
++        optional: true
++  extraVolumeMounts:
++    - name: keycloak-oidc-ca
++      mountPath: /synapse/oidc-ca
++      readOnly: true
++{{- end }}
+   autoscaling:
+     vpa: {{ .Values.autoscaling.vertical.synapse.master | toYaml | nindent 6 }}
+@@ -114,4 +133,18 @@ worker:
+     resourcesPreset: {{ coalesce .Values.global.resourcesPresetPerApp.synapse .Values.global.resourcesPreset | quote }}
+     resources: {{ .Values.resource.synapse.worker.default | toYaml | nindent 6 }}
++{{- if .Values.global.tls.selfSigned }}
++    extraEnvVars:
++      - name: SSL_CERT_FILE
++        value: /synapse/oidc-ca/ca.crt
++    extraVolumes:
++      - name: keycloak-oidc-ca
++        configMap:
++          name: synapse-keycloak-oidc-ca
++          optional: true
++    extraVolumeMounts:
++      - name: keycloak-oidc-ca
++        mountPath: /synapse/oidc-ca
++        readOnly: true
++{{- end }}
+     autoscaling:
+       vpa: {{ .Values.autoscaling.vertical.synapse.worker.default | toYaml | nindent 8 }}
+@@ -282,9 +315,12 @@ synapse:
+       client_auth_method: client_secret_post
+       scopes: ["openid", "profile"]
+       authorization_endpoint: {{ .Values.authentication.oidc.authorization_endpoint | quote }}
+-      token_endpoint: {{ .Values.authentication.oidc.token_endpoint | quote }}
+-      userinfo_endpoint: {{ .Values.authentication.oidc.userinfo_endpoint | quote }}
+-      jwks_uri: {{ .Values.authentication.oidc.jwks_uri | quote }}
++      # Authlib enforces RFC 8414's HTTPS requirement. Other apps may use the
++      # shared in-cluster HTTP backchannel in self-signed mode, but Synapse
++      # follows the issuer's public HTTPS route with the CA mounted above.
++      token_endpoint: {{ printf "%s/protocol/openid-connect/token" .Values.authentication.oidc.issuer | quote }}
++      userinfo_endpoint: {{ printf "%s/protocol/openid-connect/userinfo" .Values.authentication.oidc.issuer | quote }}
++      jwks_uri: {{ printf "%s/protocol/openid-connect/certs" .Values.authentication.oidc.issuer | quote }}
+       user_mapping_provider:
+         config:
+           {{- if .Values.authentication.oidc.claims.username }}
