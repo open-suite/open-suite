@@ -60,11 +60,11 @@ lines += [
     "",
     "## First use from a clean browser",
     "",
-    f"- Mail inbox usable: **{first_use['mail_first_usable_ms'] / 1000:.3f}s**",
+    f"- Mail mailbox usable: **{first_use['mail_first_usable_ms'] / 1000:.3f}s**",
     f"- First Matrix sync from Element navigation: **{first_use['matrix_first_sync_from_navigation_ms'] / 1000:.3f}s**",
     f"- First Matrix sync request: **{first_use['matrix_first_sync_request_ms'] / 1000:.3f}s**",
     f"- Session security checks: **{'pass' if first_use['session_security_verified'] else 'fail'}**",
-    f"- Coordinated logout check: **{'pass' if first_use['logout_contract_verified'] else 'fail'}**",
+    f"- Coordinated logout: **{'pass' if first_use['logout_contract_verified'] and first_use['logout_completed'] else 'fail'}**",
     "",
 ]
 output_path.write_text("\n".join(lines))

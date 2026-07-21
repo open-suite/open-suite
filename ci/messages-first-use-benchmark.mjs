@@ -20,6 +20,14 @@ const results = {};
 
 try {
   const mailStarted = performance.now();
+  const mailboxThreadsLoaded = page.waitForResponse((response) => {
+    const url = new URL(response.url());
+    return (
+      url.hostname === `messages.${domain}` &&
+      url.pathname === "/api/v1.0/threads/" &&
+      url.searchParams.get("has_active") === "1"
+    );
+  }, { timeout: 90_000 });
   await page.goto(`https://messages.${domain}/`, { waitUntil: "domcontentloaded" });
   if (page.url().includes(`id.${domain}`)) {
     await page.fill("#username", username);
@@ -29,7 +37,15 @@ try {
   await page.waitForURL(new RegExp(`^https://messages\\.${domain.replaceAll(".", "\\.")}/mailbox/`), {
     timeout: 60_000,
   });
-  await page.getByText("Inbox", { exact: true }).first().waitFor({
+  const mailboxResponse = await mailboxThreadsLoaded;
+  if (!mailboxResponse.ok()) {
+    throw new Error(`first Mail thread list returned HTTP ${mailboxResponse.status()}`);
+  }
+  // An empty first-user mailbox renders .thread-view--empty without mounting
+  // the thread panel. Either state means the authenticated mailbox data has
+  // rendered; unlike translated folder text, these app-owned layout classes
+  // are locale independent.
+  await page.locator(".thread-view--empty, .thread-panel").first().waitFor({
     state: "visible",
     timeout: 30_000,
   });
@@ -42,8 +58,8 @@ try {
       cookie.domain.replace(/^\./, "") === `messages.${domain}` &&
       /sessionid$/.test(cookie.name)
   );
-  if (gateCookie?.expires !== -1) {
-    throw new Error("edge gate cookie is not scoped to the browser session");
+  if (!gateCookie || !gateCookie.secure || !gateCookie.httpOnly || gateCookie.expires !== -1) {
+    throw new Error("edge gate cookie is missing Secure, HttpOnly, or browser-session scope");
   }
   if (!mailSession?.secure || !mailSession?.httpOnly) {
     throw new Error("Messages session cookie lost Secure or HttpOnly");
@@ -64,39 +80,63 @@ try {
   }
   results.logout_contract_verified = true;
 
-  let firstSyncStarted;
-  let firstSyncStatus;
-  let finishFirstSync;
-  const firstSync = new Promise((resolve) => { finishFirstSync = resolve; });
-  page.on("request", (request) => {
-    if (firstSyncStarted === undefined && /\/_matrix\/client\/.*\/sync(?:\?|$)/.test(request.url())) {
-      firstSyncStarted = performance.now();
-    }
-  });
-  page.on("response", async (response) => {
-    if (
-      firstSyncStatus === undefined &&
-      firstSyncStarted !== undefined &&
-      /\/_matrix\/client\/.*\/sync(?:\?|$)/.test(response.url())
-    ) {
-      firstSyncStatus = response.status();
-      await response.finished().catch(() => null);
-      finishFirstSync(performance.now());
-    }
-  });
+  const matrixPage = await context.newPage();
+  try {
+    let firstSyncStarted;
+    let firstSyncStatus;
+    let finishFirstSync;
+    const firstSync = new Promise((resolve) => { finishFirstSync = resolve; });
+    matrixPage.on("request", (request) => {
+      if (firstSyncStarted === undefined && /\/_matrix\/client\/.*\/sync(?:\?|$)/.test(request.url())) {
+        firstSyncStarted = performance.now();
+      }
+    });
+    matrixPage.on("response", async (response) => {
+      if (
+        firstSyncStatus === undefined &&
+        firstSyncStarted !== undefined &&
+        /\/_matrix\/client\/.*\/sync(?:\?|$)/.test(response.url())
+      ) {
+        firstSyncStatus = response.status();
+        await response.finished().catch(() => null);
+        finishFirstSync(performance.now());
+      }
+    });
 
-  const matrixStarted = performance.now();
-  await page.goto(`https://element.${domain}/`, { waitUntil: "domcontentloaded" }).catch(() => null);
-  const firstSyncFinished = await Promise.race([
-    firstSync,
-    new Promise((_, reject) => setTimeout(() => reject(new Error("first Matrix sync timed out")), 90_000)),
-  ]);
-  if (firstSyncStatus < 200 || firstSyncStatus >= 300) {
-    throw new Error(`first Matrix sync returned HTTP ${firstSyncStatus}`);
+    const matrixStarted = performance.now();
+    await matrixPage.goto(`https://element.${domain}/`, { waitUntil: "domcontentloaded" }).catch(() => null);
+    const firstSyncFinished = await Promise.race([
+      firstSync,
+      new Promise((_, reject) => setTimeout(() => reject(new Error("first Matrix sync timed out")), 90_000)),
+    ]);
+    if (firstSyncStatus < 200 || firstSyncStatus >= 300) {
+      throw new Error(`first Matrix sync returned HTTP ${firstSyncStatus}`);
+    }
+    results.matrix_first_sync_from_navigation_ms = Math.round(firstSyncFinished - matrixStarted);
+    results.matrix_first_sync_request_ms = Math.round(firstSyncFinished - firstSyncStarted);
+    results.matrix_first_sync_status = firstSyncStatus;
+  } finally {
+    await matrixPage.close();
   }
-  results.matrix_first_sync_from_navigation_ms = Math.round(firstSyncFinished - matrixStarted);
-  results.matrix_first_sync_request_ms = Math.round(firstSyncFinished - firstSyncStarted);
-  results.matrix_first_sync_status = firstSyncStatus;
+
+  await Promise.all([
+    page.waitForURL(new RegExp(`^https://bridge\\.${domain.replaceAll(".", "\\.")}/`), {
+      timeout: 60_000,
+      waitUntil: "domcontentloaded",
+    }),
+    logoutLink.click(),
+  ]);
+  const postLogoutCookies = await context.cookies();
+  const postLogoutGateCookie = postLogoutCookies.find((cookie) => cookie.name === "opensuite_auth");
+  const postLogoutMailSession = postLogoutCookies.find(
+    (cookie) =>
+      cookie.domain.replace(/^\./, "") === `messages.${domain}` &&
+      /sessionid$/.test(cookie.name)
+  );
+  if (postLogoutGateCookie || postLogoutMailSession) {
+    throw new Error("coordinated logout did not clear the edge and Messages sessions");
+  }
+  results.logout_completed = true;
 
   fs.writeFileSync(output, `${JSON.stringify(results, null, 2)}\n`);
   console.log(JSON.stringify(results));
