@@ -138,11 +138,11 @@ try {
     const logoutHref = await logoutLink.getAttribute("href");
     const logoutUrl = new URL(logoutHref);
     if (
-      logoutUrl.hostname === `auth.${DOMAIN}` &&
-      logoutUrl.pathname === "/logout" &&
-      logoutUrl.searchParams.get("rd") === `https://bridge.${DOMAIN}/`
+      logoutUrl.hostname === `messages.${DOMAIN}` &&
+      logoutUrl.pathname === "/api/v1.0/logout/" &&
+      logoutUrl.search === ""
     )
-      ok("suite header exposes the coordinated logout action");
+      ok("suite header starts coordinated logout at Messages");
     else fail("portal logout action", `unexpected href: ${logoutHref}`);
   } catch (e) {
     fail("portal logout action", e.message.slice(0, 120));
