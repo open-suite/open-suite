@@ -1,0 +1,19 @@
+diff --git a/helmfile/apps/element/values-synapse.yaml.gotmpl b/helmfile/apps/element/values-synapse.yaml.gotmpl
+index f011d0a..9b54b2c 100644
+--- a/helmfile/apps/element/values-synapse.yaml.gotmpl
++++ b/helmfile/apps/element/values-synapse.yaml.gotmpl
+@@ -51,7 +51,13 @@ master:
+     vpa: {{ .Values.autoscaling.vertical.synapse.master | toYaml | nindent 6 }}
+   startupProbe:
+     enabled: true
+-    initialDelaySeconds: 15
++    # Initialized and fresh-schema Synapse v1.155.0 samples reached /health in
++    # under five seconds. Probe then instead of waiting 15 seconds; seven
++    # attempts retain the chart's existing ~35-second startup failure window.
++    initialDelaySeconds: 5
++    periodSeconds: 5
++    timeoutSeconds: 2
++    failureThreshold: 7
+   networkPolicy:
+     extraIngress:
+       # Allow traffic from ingress controller namespace
