@@ -92,7 +92,13 @@ require_literal "${OIDC_RESTART_SCRIPT}" 'openssl x509 -in "${ca_file}" -noout -
 require_literal "${OIDC_RESTART_SCRIPT}" 'kubectl -n mb-element create configmap synapse-keycloak-oidc-ca'
 require_literal "${OIDC_RESTART_SCRIPT}" 'kubectl rollout status deploy/coredns -n kube-system --timeout=300s'
 require_literal "${OIDC_RESTART_SCRIPT}" 'kubectl rollout status deploy/traefik -n kube-system --timeout=300s'
-require_literal "${OIDC_RESTART_SCRIPT}" 'kubectl rollout status deploy/synapse -n mb-element --timeout=300s'
+require_literal "${OIDC_RESTART_SCRIPT}" 'ssl.create_default_context(cafile="/synapse/oidc-ca/ca.crt")'
+require_literal "${OIDC_RESTART_SCRIPT}" 'with urllib.request.urlopen(url, context=context, timeout=10) as response:'
+require_literal "${OIDC_RESTART_SCRIPT}" 'if [ "${jwks_ready}" != true ]; then'
+require_literal "${OIDC_RESTART_SCRIPT}" "-l 'app.kubernetes.io/name=synapse,app.kubernetes.io/instance=synapse' -o name"
+require_literal "${OIDC_RESTART_SCRIPT}" 'for deployment in "${synapse_deployments[@]}"; do'
+require_literal "${OIDC_RESTART_SCRIPT}" 'kubectl -n mb-element rollout restart "${deployment}"'
+require_literal "${OIDC_RESTART_SCRIPT}" 'kubectl -n mb-element rollout status "${deployment}" --timeout=300s'
 
 if [ -z "${DOMAIN}" ]; then
   echo "Self-signed TLS source contracts verified"
@@ -161,6 +167,7 @@ kubectl -n mb-element exec -i deploy/synapse -c synapse -- \
   python - "${DOMAIN}" <<'PY'
 import json
 import os
+import ssl
 import sys
 import urllib.error
 import urllib.parse
@@ -186,7 +193,8 @@ for key, value in expected.items():
 if os.environ.get("SSL_CERT_FILE") != "/synapse/oidc-ca/ca.crt":
     raise SystemExit("Synapse SSL_CERT_FILE does not select the mirrored Keycloak CA")
 
-with urllib.request.urlopen(expected["jwks_uri"], timeout=15) as response:
+context = ssl.create_default_context(cafile="/synapse/oidc-ca/ca.crt")
+with urllib.request.urlopen(expected["jwks_uri"], context=context, timeout=15) as response:
     jwks = json.load(response)
 if not jwks.get("keys"):
     raise SystemExit("Keycloak returned no OIDC signing keys")
@@ -196,7 +204,7 @@ class NoRedirect(urllib.request.HTTPRedirectHandler):
         return None
 
 redirect_url = "https://element.{}/".format(domain)
-sso_url = "http://127.0.0.1:8448/_matrix/client/v3/login/sso/redirect?" + urllib.parse.urlencode(
+sso_url = "http://127.0.0.1:8448/_matrix/client/v3/login/sso/redirect/oidc-mijnbureau?" + urllib.parse.urlencode(
     {"redirectUrl": redirect_url}
 )
 request = urllib.request.Request(
@@ -209,27 +217,27 @@ request = urllib.request.Request(
 )
 opener = urllib.request.build_opener(NoRedirect())
 try:
-    opener.open(request, timeout=15)
+    response = opener.open(request, timeout=15)
 except urllib.error.HTTPError as error:
-    if error.code != 302:
-        raise
+    status = error.code
     location = error.headers.get("Location", "")
-    target = urllib.parse.urlparse(location)
-    authorization = urllib.parse.urlparse(expected["authorization_endpoint"])
-    params = urllib.parse.parse_qs(target.query)
-    if (target.scheme, target.netloc, target.path) != (
-        authorization.scheme,
-        authorization.netloc,
-        authorization.path,
-    ):
-        raise SystemExit("Synapse SSO redirect did not target Keycloak HTTPS")
-    if params.get("client_id") != ["synapse"] or params.get("response_type") != ["code"]:
-        raise SystemExit("Synapse SSO redirect did not preserve the OIDC authorization flow")
-    callback = f"https://matrix.{domain}/_synapse/client/oidc/callback"
-    if params.get("redirect_uri") != [callback]:
-        raise SystemExit("Synapse SSO redirect did not use its canonical HTTPS callback")
 else:
-    raise SystemExit("Synapse SSO endpoint did not return a redirect")
+    status = response.status
+    location = response.headers.get("Location", "")
+
+if status != 302:
+    raise SystemExit(f"Synapse SSO endpoint returned {status}, not 302; Location: {location!r}")
+authorization_prefix = expected["authorization_endpoint"] + "?"
+if not location.startswith(authorization_prefix):
+    raise SystemExit(f"Synapse SSO redirect did not immediately target Keycloak HTTPS; Location: {location!r}")
+target = urllib.parse.urlparse(location)
+params = urllib.parse.parse_qs(target.query)
+if params.get("client_id") != ["synapse"] or params.get("response_type") != ["code"]:
+    raise SystemExit(f"Synapse SSO redirect did not preserve the OIDC authorization flow; Location: {location!r}")
+callback = f"https://matrix.{domain}/_synapse/client/oidc/callback"
+if params.get("redirect_uri") != [callback]:
+    raise SystemExit(f"Synapse SSO redirect did not use its canonical HTTPS callback; Location: {location!r}")
+print("Verified Synapse HTTPS JWKS and immediate Keycloak OIDC SSO redirect")
 PY
 
 expected_sources=(
