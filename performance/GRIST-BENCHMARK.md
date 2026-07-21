@@ -5,6 +5,15 @@ does not change shared resource sizing or the shared application harness.
 
 ## Accepted change: remove the redundant RestartShell
 
+The chart previously combined tag `1.7.15` with digest
+`sha256:d9d35c82799bfa2e0438bb60385fb0b550465dabde2a6e0ceca8afec1aae3305`.
+The digest wins when Kubernetes resolves the image, and that digest contains
+Grist 1.6.1, where `GRIST_RESTART_SHELL` is ignored. The patch now pins the
+effective rendered image to the Grist 1.7.15 index digest
+`sha256:0263064906e2fa88063129d1b84a6ae3d33acb090062e510b32f87b7a1c84917`.
+The rendered-manifest regression guard fails unless the Grist Deployment uses
+that exact image.
+
 Grist 1.7.15 defaults `GRIST_RESTART_SHELL` on for Linux. The first Node
 process binds the port and forks a second copy of the server so an admin-panel
 restart can replace the child without releasing the socket. Kubernetes already
@@ -15,8 +24,13 @@ directly and removes one process/startup layer.
 Direct-server `/status` becomes live before Grist's internal ready flag. The
 patch therefore keeps liveness on `/status`, changes readiness to
 `/status?ready=1`, and polls it every second after the existing five-second
-initial delay. This prevents pre-initialization traffic while avoiding the old
-readiness probe's possible ten-second sampling delay.
+initial delay. A startup probe checks the same ready endpoint after five
+seconds, once per second with a one-second timeout, and restarts after 45
+failures. This prevents pre-initialization traffic, avoids the old readiness
+probe's possible ten-second sampling delay, and bounds initialization at about
+50 seconds even when plain `/status` remains healthy. The copied-state upgrade
+rehearsal below observed 1.7.15 ready at p95 5.797 seconds, leaving more than
+eight times that measured duration before restart.
 
 The larger startup component remains gVisor checkpoint generation (about 5.4s
 in log timestamps). It is required to preserve formula isolation and fast
@@ -71,6 +85,35 @@ Median backend readiness improved 7,932.5 → 6,232ms (-1,700.5ms,
 (-9.66%). The startup reduction is much larger than either profile's spread;
 the smaller browser effects should be reconfirmed after a future deployment.
 
+## 1.6.1 → 1.7.15 upgrade rehearsal
+
+Date: 2026-07-21. The upgrade harness first booted the immutable current
+1.6.1 digest, initialized its PostgreSQL home database, authenticated a test
+user, and created and opened a real document with a unique marker. After a
+graceful stop it made five isolated copies of both the PostgreSQL dump and
+`/persist` document state. Each copy then started with the immutable 1.7.15
+digest, gVisor, and `GRIST_RESTART_SHELL=false`. The harness required
+`/status?ready=1`, unchanged
+user/org/workspace/document counts, a strictly increased migration count, and
+a usable grid containing the exact marker from the pre-existing document. It
+also executes each image's `package.json` version and fails if the immutable
+source and candidate digests are not exactly Grist 1.6.1 and 1.7.15.
+
+All five copies migrated from 42 to 51 recorded migrations. Each retained five
+users, two organizations, two workspaces, and one document. Times are
+milliseconds, with type-7 quantiles.
+
+| Upgrade metric | n | min | p25 | p50 | p75 | p95 | max | IQR | MAD |
+|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|
+| Copied 1.6.1 state → 1.7.15 backend ready | 5 | 5,610 | 5,653 | 5,694 | 5,722 | 5,797.2 | 5,816 | 69 | 41 |
+| Home DB upgrade/startup setup | 5 | 261 | 262 | 264 | 265 | 267.4 | 268 | 3 | 2 |
+| Existing marked document authenticated + open usable | 5 | 1,627.51 | 1,630.78 | 1,633.14 | 1,648.01 | 1,648.46 | 1,648.57 | 17.23 | 5.63 |
+
+This is a representative schema and persisted-document rehearsal, not a copy
+of production data or a claim about production dataset scale. It covers the
+real version transition that the corrected deployment will perform rather than
+only testing a fresh database.
+
 ## Reproduce
 
 The benchmark needs Docker, Node 20+, Chromium installed for the pinned
@@ -87,6 +130,14 @@ BENCHMARK_RUNNER_LABEL='<stable runner class>' \
 BENCHMARK_RUNNER_REGION='<coarse region>' \
 BENCHMARK_OUTPUT=/tmp/grist-result.json \
 node grist-container-benchmark.mjs
+```
+
+Rehearse the effective image upgrade against copied representative 1.6.1 state:
+
+```bash
+BENCHMARK_SAMPLES=5 \
+BENCHMARK_OUTPUT=/tmp/grist-upgrade-result.json \
+node grist-upgrade-benchmark.mjs
 ```
 
 Raw output stays local. A failed readiness check, missing database markers,
@@ -112,9 +163,14 @@ GRIST_INFRA_DIR=/path/to/clean/mijn-bureau-infra \
 - gVisor checkpoint generation is still the dominant cold-container cost.
   Do not switch to `unsandboxed`, Pyodide, or an unvalidated cached checkpoint
   merely to improve readiness.
-- The benchmark uses a fresh PostgreSQL database on every sample and therefore
-  exercises all migrations. Existing-database restart should be sampled on the
-  eventual target cluster before making a production rollout claim.
+- The A/B benchmark uses a fresh PostgreSQL database on every sample. The
+  separate upgrade rehearsal copies a representative 1.6.1 database and
+  persisted document, but production data volume and cluster storage latency
+  may differ. A backup-backed rehearsal remains prudent before production
+  rollout.
+- The upgrade rehearsal uses Grist's filesystem-backed `/persist` document
+  store. Production uses the guarded MinIO topology, so the rehearsal proves
+  document-format preservation but not production object-store latency.
 - The browser samples use Grist test authentication to control variance. The
   patch does not alter any OIDC setting, and the regression guard fails closed
   if OIDC is disabled, but live Keycloak SSO timing remains a deployment check.
