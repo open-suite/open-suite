@@ -1,0 +1,50 @@
+diff --git a/helmfile/apps/docs/values.yaml.gotmpl b/helmfile/apps/docs/values.yaml.gotmpl
+index ce4df2c..ebf2fcc 100644
+--- a/helmfile/apps/docs/values.yaml.gotmpl
++++ b/helmfile/apps/docs/values.yaml.gotmpl
+@@ -26,2 +26,15 @@ backend:
+   replicaCount: 1
++  # Open Suite: probe actual startup instead of withholding a healthy pod for
++  # the chart's fixed 10-second readiness delay. The endpoint is unchanged;
++  # startupProbe also prevents liveness from killing a legitimately slow boot.
++  startupProbe:
++    enabled: true
++    initialDelaySeconds: 0
++    periodSeconds: 5
++    timeoutSeconds: 5
++    failureThreshold: 7
++    successThreshold: 1
++  readinessProbe:
++    initialDelaySeconds: 0
++    periodSeconds: 1
+   resourcesPreset: {{ coalesce .Values.global.resourcesPresetPerApp.docs.backend .Values.global.resourcesPreset | quote }}
+@@ -407,2 +420,14 @@ frontend:
+   replicaCount: 1
++  # The static nginx is normally healthy in well under a second. Keep the
++  # same GET / semantics while allowing Kubernetes to observe it immediately.
++  startupProbe:
++    enabled: true
++    initialDelaySeconds: 0
++    periodSeconds: 1
++    timeoutSeconds: 1
++    failureThreshold: 30
++    successThreshold: 1
++  readinessProbe:
++    initialDelaySeconds: 0
++    periodSeconds: 1
+   resourcesPreset: {{ coalesce .Values.global.resourcesPresetPerApp.docs.frontend .Values.global.resourcesPreset | quote }}
+@@ -440,2 +465,14 @@ yProvider:
+   replicaCount: 1
++  # Probe the existing /ping endpoint during startup rather than sleeping for
++  # ten seconds before the first readiness check.
++  startupProbe:
++    enabled: true
++    initialDelaySeconds: 0
++    periodSeconds: 1
++    timeoutSeconds: 1
++    failureThreshold: 30
++    successThreshold: 1
++  readinessProbe:
++    initialDelaySeconds: 0
++    periodSeconds: 1
+   resourcesPreset: {{ coalesce .Values.global.resourcesPresetPerApp.docs.yProvider .Values.global.resourcesPreset | quote }}
