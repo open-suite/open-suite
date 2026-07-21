@@ -11,6 +11,7 @@ DOMAIN="${2:-}"
 BASELINE="${3:-}"
 REPO="$(cd "$(dirname "$0")/.." && pwd)"
 DEPLOY_SCRIPT="${REPO}/scripts/single-vps-deploy/04-nextcloud-office.sh"
+OIDC_RESTART_SCRIPT="${REPO}/scripts/single-vps-deploy/03-restart-oidc-apps.sh"
 
 require_literal() {
   local file="$1" expected="$2"
@@ -70,6 +71,36 @@ require_literal "${DEPLOY_SCRIPT}" 'kubectl rollout status deploy/traefik -n kub
 require_literal "${DEPLOY_SCRIPT}" 'timeout --signal=TERM --kill-after=5s 15s'
 require_literal "${DEPLOY_SCRIPT}" 'php occ richdocuments:activate-config'
 
+# Synapse cannot consume the shared HTTP backchannel: Authlib validates the
+# explicit provider metadata against RFC 8414 before exchanging a token. Its
+# endpoints must follow the HTTPS issuer, and self-signed mode must add only
+# the Keycloak CA without disabling TLS verification.
+synapse_values="${INFRA}/helmfile/apps/element/values-synapse.yaml.gotmpl"
+require_literal "${synapse_values}" 'token_endpoint: {{ printf "%s/protocol/openid-connect/token" .Values.authentication.oidc.issuer | quote }}'
+require_literal "${synapse_values}" 'userinfo_endpoint: {{ printf "%s/protocol/openid-connect/userinfo" .Values.authentication.oidc.issuer | quote }}'
+require_literal "${synapse_values}" 'jwks_uri: {{ printf "%s/protocol/openid-connect/certs" .Values.authentication.oidc.issuer | quote }}'
+require_literal "${synapse_values}" 'name: SSL_CERT_FILE'
+require_literal "${synapse_values}" 'value: /synapse/oidc-ca/ca.crt'
+require_literal "${synapse_values}" 'name: synapse-keycloak-oidc-ca'
+if grep -Eq 'skip_verification|use_insecure_ssl_client' "${synapse_values}"; then
+  echo "ERROR: Synapse OIDC must not bypass metadata or TLS verification" >&2
+  exit 1
+fi
+require_literal "${OIDC_RESTART_SCRIPT}" 'kubectl -n mb-keycloak get secret "id.${DOMAIN}-tls"'
+require_literal "${OIDC_RESTART_SCRIPT}" "-o jsonpath='{.data.ca\\.crt}'"
+require_literal "${OIDC_RESTART_SCRIPT}" 'openssl x509 -in "${ca_file}" -noout -checkend 0'
+require_literal "${OIDC_RESTART_SCRIPT}" 'kubectl -n mb-element create configmap synapse-keycloak-oidc-ca'
+require_literal "${OIDC_RESTART_SCRIPT}" 'kubectl rollout status deploy/coredns -n kube-system --timeout=300s'
+require_literal "${OIDC_RESTART_SCRIPT}" 'kubectl rollout status deploy/traefik -n kube-system --timeout=300s'
+require_literal "${OIDC_RESTART_SCRIPT}" 'kubectl -n mb-element exec -i "${synapse_pod}" -c synapse --'
+require_literal "${OIDC_RESTART_SCRIPT}" 'ssl.create_default_context(cafile="/synapse/oidc-ca/ca.crt")'
+require_literal "${OIDC_RESTART_SCRIPT}" 'with urllib.request.urlopen(url, context=context, timeout=10) as response:'
+require_literal "${OIDC_RESTART_SCRIPT}" 'if [ "${jwks_ready}" != true ]; then'
+require_literal "${OIDC_RESTART_SCRIPT}" "-l 'app.kubernetes.io/name=synapse,app.kubernetes.io/instance=synapse' -o name"
+require_literal "${OIDC_RESTART_SCRIPT}" 'for deployment in "${synapse_deployments[@]}"; do'
+require_literal "${OIDC_RESTART_SCRIPT}" 'kubectl -n mb-element rollout restart "${deployment}"'
+require_literal "${OIDC_RESTART_SCRIPT}" 'kubectl -n mb-element rollout status "${deployment}" --timeout=300s'
+
 if [ -z "${DOMAIN}" ]; then
   echo "Self-signed TLS source contracts verified"
   exit 0
@@ -113,6 +144,102 @@ validate_certificate_key() {
     return 1
   fi
 }
+
+# Verify the namespace-local trust anchor is an exact, valid copy of the
+# Keycloak ingress CA. The private key must remain confined to mb-keycloak.
+keycloak_secret="id.${DOMAIN}-tls"
+validate_certificate_key mb-keycloak "${keycloak_secret}" ca.crt
+kubectl -n mb-keycloak get secret "${keycloak_secret}" \
+  -o jsonpath='{.data.ca\.crt}' | base64 -d > "${tmp}/keycloak-ca.pem"
+kubectl -n mb-element get configmap synapse-keycloak-oidc-ca \
+  -o jsonpath='{.data.ca\.crt}' > "${tmp}/synapse-keycloak-ca.pem"
+if [ ! -s "${tmp}/synapse-keycloak-ca.pem" ] \
+    || ! openssl x509 -in "${tmp}/synapse-keycloak-ca.pem" -noout -checkend 0 >/dev/null 2>&1 \
+    || ! cmp -s "${tmp}/keycloak-ca.pem" "${tmp}/synapse-keycloak-ca.pem"; then
+  echo "ERROR: Synapse's namespace-local OIDC CA is missing, invalid, or stale" >&2
+  exit 1
+fi
+
+# Exercise the actual Synapse process environment: load its rendered OIDC
+# metadata, verify JWKS over HTTPS with SSL_CERT_FILE, then hit the local SSO
+# redirect endpoint without following the browser redirect to Keycloak.
+kubectl rollout status deploy/synapse -n mb-element --timeout=300s >/dev/null
+kubectl -n mb-element exec -i deploy/synapse -c synapse -- \
+  python - "${DOMAIN}" <<'PY'
+import json
+import os
+import ssl
+import sys
+import urllib.error
+import urllib.parse
+import urllib.request
+
+import yaml
+
+domain = sys.argv[1]
+issuer = f"https://id.{domain}/realms/mijnbureau"
+expected = {
+    "issuer": issuer,
+    "authorization_endpoint": f"{issuer}/protocol/openid-connect/auth",
+    "token_endpoint": f"{issuer}/protocol/openid-connect/token",
+    "userinfo_endpoint": f"{issuer}/protocol/openid-connect/userinfo",
+    "jwks_uri": f"{issuer}/protocol/openid-connect/certs",
+}
+
+with open("/synapse/config/homeserver.yaml", encoding="utf-8") as source:
+    provider = yaml.safe_load(source)["oidc_providers"][0]
+for key, value in expected.items():
+    if provider.get(key) != value:
+        raise SystemExit(f"Synapse OIDC {key} is not the expected HTTPS endpoint")
+if os.environ.get("SSL_CERT_FILE") != "/synapse/oidc-ca/ca.crt":
+    raise SystemExit("Synapse SSL_CERT_FILE does not select the mirrored Keycloak CA")
+
+context = ssl.create_default_context(cafile="/synapse/oidc-ca/ca.crt")
+with urllib.request.urlopen(expected["jwks_uri"], context=context, timeout=15) as response:
+    jwks = json.load(response)
+if not jwks.get("keys"):
+    raise SystemExit("Keycloak returned no OIDC signing keys")
+
+class NoRedirect(urllib.request.HTTPRedirectHandler):
+    def redirect_request(self, req, fp, code, msg, headers, newurl):
+        return None
+
+redirect_url = "https://element.{}/".format(domain)
+sso_url = "http://127.0.0.1:8448/_matrix/client/v3/login/sso/redirect/oidc-mijnbureau?" + urllib.parse.urlencode(
+    {"redirectUrl": redirect_url}
+)
+request = urllib.request.Request(
+    sso_url,
+    headers={
+        "Host": f"matrix.{domain}",
+        "X-Forwarded-For": "127.0.0.1",
+        "X-Forwarded-Proto": "https",
+    },
+)
+opener = urllib.request.build_opener(NoRedirect())
+try:
+    response = opener.open(request, timeout=15)
+except urllib.error.HTTPError as error:
+    status = error.code
+    location = error.headers.get("Location", "")
+else:
+    status = response.status
+    location = response.headers.get("Location", "")
+
+if status != 302:
+    raise SystemExit(f"Synapse SSO endpoint returned {status}, not 302; Location: {location!r}")
+authorization_prefix = expected["authorization_endpoint"] + "?"
+if not location.startswith(authorization_prefix):
+    raise SystemExit(f"Synapse SSO redirect did not immediately target Keycloak HTTPS; Location: {location!r}")
+target = urllib.parse.urlparse(location)
+params = urllib.parse.parse_qs(target.query)
+if params.get("client_id") != ["synapse"] or params.get("response_type") != ["code"]:
+    raise SystemExit(f"Synapse SSO redirect did not preserve the OIDC authorization flow; Location: {location!r}")
+callback = f"https://matrix.{domain}/_synapse/client/oidc/callback"
+if params.get("redirect_uri") != [callback]:
+    raise SystemExit(f"Synapse SSO redirect did not use its canonical HTTPS callback; Location: {location!r}")
+print("Verified Synapse HTTPS JWKS and immediate Keycloak OIDC SSO redirect")
+PY
 
 expected_sources=(
   mb-bureaublad:bridge
