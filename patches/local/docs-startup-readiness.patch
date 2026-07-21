@@ -10,9 +10,9 @@ index ce4df2c..ebf2fcc 100644
 +  startupProbe:
 +    enabled: true
 +    initialDelaySeconds: 0
-+    periodSeconds: 1
++    periodSeconds: 5
 +    timeoutSeconds: 5
-+    failureThreshold: 30
++    failureThreshold: 7
 +    successThreshold: 1
 +  readinessProbe:
 +    initialDelaySeconds: 0

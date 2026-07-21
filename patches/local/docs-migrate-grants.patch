@@ -1,8 +1,133 @@
+diff --git a/helmfile/apps/docs/charts/docs/templates/_helpers.tpl b/helmfile/apps/docs/charts/docs/templates/_helpers.tpl
+index f724026..2d4e830 100644
+--- a/helmfile/apps/docs/charts/docs/templates/_helpers.tpl
++++ b/helmfile/apps/docs/charts/docs/templates/_helpers.tpl
+@@ -188,13 +188,17 @@ docs env vars
+ {{- define "docs.common.env" -}}
+ {{- $topLevelScope := index . 0 -}}
+ {{- $workerScope := index . 1 -}}
++{{- $secretName := include "docs.secretName" $topLevelScope -}}
++{{- if gt (len .) 2 -}}
++{{- $secretName = index . 2 -}}
++{{- end -}}
+ {{- $secretEnvNames := splitList " " (include "docs.secretEnvNames" $topLevelScope) -}}
+ {{- range $key, $value := $workerScope.envVars }}
+ {{- if and (has $key $secretEnvNames) (kindIs "string" $value) }}
+ - name: {{ $key | quote }}
+   valueFrom:
+     secretKeyRef:
+-      name: {{ include "docs.secretName" $topLevelScope }}
++      name: {{ $secretName }}
+       key: {{ $key }}
+ {{- else }}
+ {{- include "docs.env.transformDict" (dict $key $value) }}
+diff --git a/helmfile/apps/docs/charts/docs/templates/backend-job.yaml b/helmfile/apps/docs/charts/docs/templates/backend-job.yaml
+index aaf425d..45f14d5 100644
+--- a/helmfile/apps/docs/charts/docs/templates/backend-job.yaml
++++ b/helmfile/apps/docs/charts/docs/templates/backend-job.yaml
+@@ -2,10 +2,46 @@
+
+ SPDX-License-Identifier: APACHE-2.0
+ */}}
+-{{- $envVars := include "docs.common.env" (list . .Values.backend) -}}
++{{- $secretEnvNames := splitList " " (include "docs.secretEnvNames" .) -}}
++{{- $yProviderOwnedKeys := list "COLLABORATION_SERVER_SECRET" "Y_PROVIDER_API_KEY" -}}
+
+ {{- range $job, $config := $.Values.backend.jobs.jobs }}
+ {{- if $config.command }}
++{{- $jobAnnotations := $config.annotations | default dict -}}
++{{- $isMigrateHook := and (eq $config.name "migrate") (hasKey $jobAnnotations "helm.sh/hook") -}}
++{{- $jobSecretName := include "docs.secretName" $ -}}
++{{- if $isMigrateHook -}}
++{{- $jobSecretName = printf "%s-migrate" (include "docs.backend.fullname" $) -}}
++{{- end -}}
++{{- $envVars := include "docs.common.env" (list $ $.Values.backend $jobSecretName) -}}
++{{- if $isMigrateHook }}
++---
++apiVersion: v1
++kind: Secret
++metadata:
++  name: {{ $jobSecretName }}
++  namespace: {{ include "common.names.namespace" $ | quote }}
++  labels: {{- include "common.labels.standard" ( dict "customLabels" $.Values.commonLabels "context" $ ) | nindent 4 }}
++    app.kubernetes.io/component: backend-migrate
++  annotations:
++    helm.sh/hook: {{ index $jobAnnotations "helm.sh/hook" | quote }}
++    helm.sh/hook-delete-policy: {{ index $jobAnnotations "helm.sh/hook-delete-policy" | quote }}
++    helm.sh/hook-weight: "-10"
++type: Opaque
++stringData:
++  {{- range $key, $value := $.Values.backend.envVars }}
++  {{- if and (has $key $secretEnvNames) (not (has $key $yProviderOwnedKeys)) (kindIs "string" $value) }}
++  {{ $key }}: {{ $value | quote }}
++  {{- end }}
++  {{- end }}
++  {{- with $.Values.backend.migrateDbCredentials }}
++  {{- if kindIs "string" .DB_PASSWORD }}
++  MIGRATE_DB_PASSWORD: {{ .DB_PASSWORD | quote }}
++  {{- end }}
++  {{- end }}
++  COLLABORATION_SERVER_SECRET: {{ $.Values.yProvider.configuration.collaboration.serverSecret | quote }}
++  Y_PROVIDER_API_KEY: {{ $.Values.yProvider.configuration.api.key | quote }}
++{{ end }}
+ ---
+ apiVersion: {{ include "common.capabilities.job.apiVersion" $ }}
+ kind: Job
+@@ -32,7 +68,7 @@ spec:
+         app.kubernetes.io/component: backend
+     spec:
+       {{- include "docs.imagePullSecrets" $ | nindent 6 }}
+-      serviceAccountName: {{ template "docs.serviceAccountName" $ }}
++      serviceAccountName: {{ ternary "default" (include "docs.serviceAccountName" $) $isMigrateHook }}
+       automountServiceAccountToken: {{ $.Values.backend.automountServiceAccountToken }}
+       {{- if $.Values.backend.hostAliases }}
+       hostAliases: {{- include "common.tplvalues.render" (dict "value" $.Values.backend.hostAliases "context" $) | nindent 8 }}
+@@ -84,7 +120,7 @@ spec:
+             - name: "DB_PASSWORD"
+               valueFrom:
+                 secretKeyRef:
+-                  name: {{ include "docs.secretName" $ }}
++                  name: {{ $jobSecretName }}
+                   key: MIGRATE_DB_PASSWORD
+             {{- else }}
+             {{- include "docs.env.transformDict" $.Values.backend.migrateDbCredentials | indent 12 }}
+@@ -111,7 +147,7 @@ spec:
+             - name: empty-dir
+               mountPath: /tmp
+               subPath: tmp-dir
+-            {{- if $.Values.backend.themeCustomization.enabled }}
++            {{- if and $.Values.backend.themeCustomization.enabled (not $isMigrateHook) }}
+             - name: theme-customization
+               mountPath: {{ $.Values.backend.themeCustomization.mountPath }}
+               readOnly: true
+@@ -125,7 +161,7 @@ spec:
+       volumes:
+         - name: empty-dir
+           emptyDir: {}
+-        {{- if $.Values.backend.themeCustomization.enabled }}
++        {{- if and $.Values.backend.themeCustomization.enabled (not $isMigrateHook) }}
+         - name: theme-customization
+           configMap:
+             name: {{ include "docs.theme.fullname" $ }}
 diff --git a/helmfile/apps/docs/charts/docs/values.yaml b/helmfile/apps/docs/charts/docs/values.yaml
-index 98c0ec4..0d6b164 100644
+index 98c0ec4..b345401 100644
 --- a/helmfile/apps/docs/charts/docs/values.yaml
 +++ b/helmfile/apps/docs/charts/docs/values.yaml
-@@ -586,6 +586,35 @@ backend:
+@@ -573,9 +573,12 @@ backend:
+       - name: migrate
+         annotations:
+           argocd.argoproj.io/sync-options: Replace=true,Force=true
++          helm.sh/hook: pre-install,pre-upgrade
++          helm.sh/hook-delete-policy: before-hook-creation,hook-succeeded
++          helm.sh/hook-weight: "0"
+         command:
+           - /bin/sh
+-          - "-c"
++          - "-ec"
+           - |
+             while ! python manage.py check --database default > /dev/null 2>&1
+             do
+@@ -586,6 +589,35 @@ backend:
              echo "Database is ready"
  
              python manage.py migrate --no-input

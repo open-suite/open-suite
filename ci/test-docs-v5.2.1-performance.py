@@ -16,13 +16,15 @@ EXPECTED_PROBES = {
         "template": "templates/backend-deployment.yaml",
         "startup_path": "/__heartbeat__",
         "readiness_path": "/__lbheartbeat__",
-        "startup_failures": "30",
+        "startup_period": "5",
+        "startup_failures": "7",
         "startup_timeout": "5",
     },
     "frontend": {
         "template": "templates/frontend-deployment.yaml",
         "startup_path": "/",
         "readiness_path": "/",
+        "startup_period": "1",
         "startup_failures": "30",
         "startup_timeout": "1",
     },
@@ -30,6 +32,7 @@ EXPECTED_PROBES = {
         "template": "templates/yprovider-deployment.yaml",
         "startup_path": "/ping",
         "readiness_path": "/ping",
+        "startup_period": "1",
         "startup_failures": "30",
         "startup_timeout": "1",
     },
@@ -79,6 +82,15 @@ def scalar(block, name):
     return match.group(1).strip('"')
 
 
+def rendered_resource(source, *, kind, name_fragment):
+    for document in re.split(r"(?m)^---\s*$", source):
+        if re.search(rf"(?m)^kind:\s*{re.escape(kind)}\s*$", document) and re.search(
+            rf"(?m)^\s*name:\s*[^\n]*{re.escape(name_fragment)}[^\n]*$", document
+        ):
+            return document
+    raise AssertionError(f"missing rendered {kind} containing {name_fragment}")
+
+
 def assert_probe(block, *, path, delay, period, timeout, failures):
     expected = {
         "path": path,
@@ -101,12 +113,26 @@ def validate_values_source(infra):
         readiness = yaml_block(section, "readinessProbe")
         assert scalar(startup, "enabled") == "true"
         assert scalar(startup, "initialDelaySeconds") == "0"
-        assert scalar(startup, "periodSeconds") == "1"
+        assert scalar(startup, "periodSeconds") == expected["startup_period"]
         assert scalar(startup, "timeoutSeconds") == expected["startup_timeout"]
         assert scalar(startup, "failureThreshold") == expected["startup_failures"]
         assert scalar(startup, "successThreshold") == "1"
         assert scalar(readiness, "initialDelaySeconds") == "0"
         assert scalar(readiness, "periodSeconds") == "1"
+    backend = EXPECTED_PROBES["backend"]
+    backend_budget = int(backend["startup_failures"]) * max(
+        int(backend["startup_period"]), int(backend["startup_timeout"])
+    )
+    assert backend_budget == 35, f"backend startup failure budget is {backend_budget}s"
+
+
+def validate_infra_dependencies(infra):
+    source = (infra / "helmfile/apps/docs/helmfile-child.yaml.gotmpl").read_text()
+    docs_at = source.index("  - name: docs\n")
+    docs_release = source[docs_at:].split("\n  - name:", 1)[0]
+    for dependency in ("docs-postgresql", "docs-cluster", "docs-redis", "docs-minio"):
+        assert source.index(f"  - name: {dependency}\n") < docs_at
+        assert dependency in docs_release, f"Docs release does not need {dependency}"
 
 
 def validate_rendered_chart(infra, scratch):
@@ -120,7 +146,7 @@ def validate_rendered_chart(infra, scratch):
               startupProbe:
                 enabled: true
                 initialDelaySeconds: 0
-                periodSeconds: 1
+                periodSeconds: {expected['startup_period']}
                 timeoutSeconds: {expected['startup_timeout']}
                 failureThreshold: {expected['startup_failures']}
                 successThreshold: 1
@@ -129,6 +155,25 @@ def validate_rendered_chart(infra, scratch):
                 periodSeconds: 1
             """
         ).strip()
+    values["backend"] += textwrap.dedent(
+        """
+
+          envVars:
+            DB_HOST: docs-postgresql
+            DB_PORT: "5432"
+            DB_NAME: docs
+            DB_USER: docs
+            DB_PASSWORD: app-password
+            DJANGO_SECRET_KEY: django-secret
+            REDIS_URL: redis://docs-redis:6379
+          migrateDbCredentials:
+            DB_USER: postgres
+            DB_PASSWORD: admin-password
+          themeCustomization:
+            enabled: true
+            fileContent: '{}'
+        """
+    ).rstrip()
     override.write_text(
         "cluster:\n  ingress:\n    type: nginx\n" +
         "\n".join(f"{name}:\n{textwrap.indent(value, '  ')}\n" for name, value in values.items())
@@ -141,7 +186,8 @@ def validate_rendered_chart(infra, scratch):
         )
         assert_probe(
             yaml_block(rendered, "startupProbe"),
-            path=expected["startup_path"], delay=0, period=1,
+            path=expected["startup_path"], delay=0,
+            period=expected["startup_period"],
             timeout=expected["startup_timeout"],
             failures=expected["startup_failures"],
         )
@@ -158,10 +204,54 @@ def validate_rendered_chart(infra, scratch):
             failures=3,
         )
 
+    rendered_jobs = run(
+        "helm", "template", "docs", str(chart), "-f", str(override),
+        "--show-only", "templates/backend-job.yaml",
+    )
+    migrate_secret = rendered_resource(
+        rendered_jobs, kind="Secret", name_fragment="backend-migrate"
+    )
+    migrate_job = rendered_resource(
+        rendered_jobs, kind="Job", name_fragment="backend-migrate"
+    )
+    create_superuser_job = rendered_resource(
+        rendered_jobs, kind="Job", name_fragment="backend-createsuperuser"
+    )
+    expected_hook_annotations = {
+        "helm.sh/hook": "pre-install,pre-upgrade",
+        "helm.sh/hook-delete-policy": "before-hook-creation,hook-succeeded",
+    }
+    for resource in (migrate_secret, migrate_job):
+        annotations = yaml_block(resource, "annotations")
+        for name, value in expected_hook_annotations.items():
+            assert scalar(annotations, name) == value
+    assert scalar(yaml_block(migrate_secret, "annotations"), "helm.sh/hook-weight") == "-10"
+    assert scalar(yaml_block(migrate_job, "annotations"), "helm.sh/hook-weight") == "0"
+    assert re.search(r"(?m)^\s*serviceAccountName:\s*default\s*$", migrate_job)
+    assert "theme-customization" not in migrate_job
+    assert re.search(r"(?m)^\s*command:\s*\n\s*- /bin/sh\s*\n\s*- -ec\s*$", migrate_job)
+    assert "python manage.py migrate --no-input" in migrate_job
+    assert "python - << 'GRANTS'" in migrate_job
+    secret_references = re.findall(
+        r"(?m)^\s*secretKeyRef:\s*\n\s*name:\s*([^\s]+)", migrate_job
+    )
+    assert secret_references
+    assert set(secret_references) == {"docs-backend-migrate"}
+    for required_key in (
+        "DB_PASSWORD", "DJANGO_SECRET_KEY", "REDIS_URL", "MIGRATE_DB_PASSWORD"
+    ):
+        assert re.search(rf"(?m)^\s*{required_key}:\s*", migrate_secret)
+    assert "helm.sh/hook:" not in create_superuser_job
+    assert re.search(r"(?m)^\s*serviceAccountName:\s*docs\s*$", create_superuser_job)
+
 
 def validate_migration_grants(infra):
     source = (infra / "helmfile/apps/docs/charts/docs/values.yaml").read_text()
     migrate_at = source.index("python manage.py migrate --no-input")
+    migrate_values = source[source.index("      - name: migrate", 0, migrate_at):migrate_at]
+    assert "helm.sh/hook: pre-install,pre-upgrade" in migrate_values
+    assert "helm.sh/hook-delete-policy: before-hook-creation,hook-succeeded" in migrate_values
+    assert re.search(r'(?m)^\s*- "-ec"\s*$', migrate_values)
     grants_at = source.index("python - << 'GRANTS'", migrate_at)
     assert migrate_at < grants_at
     assert "python manage.py shell" not in source[migrate_at:grants_at + 2000]
@@ -199,6 +289,7 @@ def main():
             run("git", "apply", "--3way", str(patch), cwd=infra)
 
         validate_values_source(infra)
+        validate_infra_dependencies(infra)
         validate_rendered_chart(infra, scratch)
         validate_migration_grants(infra)
 

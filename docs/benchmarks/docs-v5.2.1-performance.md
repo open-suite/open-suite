@@ -21,17 +21,17 @@ initialization step, or loosen readiness failure/timeout thresholds.
 
 | Metric (median) | Before | After | Change |
 | --- | ---: | ---: | ---: |
-| Backend Kubernetes Ready | 13.348s | 8.361s | -37.4% |
-| Frontend Kubernetes Ready | 10.442s | 1.991s | -80.9% |
-| y-provider Kubernetes Ready | 10.523s | 3.979s | -62.2% |
-| All three pods Ready, concurrent cold start | 13.539s | 7.732s | -42.9% |
-| First owned-document list usable from pod creation | 20.510s | 9.226s | -55.0% |
-| First editor + content + WebSocket usable from pod creation | 22.886s | 11.375s | -50.3% |
+| Backend Kubernetes Ready | 13.167s | 11.303s | -14.2% |
+| Frontend Kubernetes Ready | 10.478s | 2.016s | -80.8% |
+| y-provider Kubernetes Ready | 10.482s | 3.505s | -66.6% |
+| All three pods Ready, concurrent cold start | 23.368s | 11.428s | -51.1% |
+| First owned-document list usable from pod creation | 27.510s | 15.179s | -44.8% |
+| First editor + content + WebSocket usable from pod creation | 28.915s | 16.279s | -43.7% |
 | Fresh migration plus post-migration grants | 8.587s | 7.709s | -10.2% |
 | Grant substep only | 1.10s | 0.23s | -79.1% |
 
 The document-open route after the list was already usable changed only from
-2.202s to 2.078s (-5.6%, within the variance expected from this sample size).
+1.241s to 1.074s (-13.4%, within the variance expected from this sample size).
 This is evidence that the PR improves startup gating rather than hiding editor
 work.
 
@@ -105,19 +105,21 @@ ended when the Pod Ready condition became true.
 
 The before manifests reproduce chart v0.1.0 defaults: readiness initial delay
 10s, period 10s, timeout 5s, failure threshold 3, success threshold 1. The
-after manifests use a startup probe with period 1s, failure threshold 30, and
-readiness initial delay 0s / period 1s. Backend startup retains the existing 5s
-heartbeat response tolerance; the static frontend and `/ping` use 1s. All
-other fields are the chart defaults.
+after manifests use readiness initial delay 0s / period 1s. Frontend and
+y-provider startup probe once/second with failure threshold 30 and timeout 1s.
+Backend startup uses period 5s, timeout 5s, and failure threshold 7: a hanging
+heartbeat therefore retains the chart's approximately 35-second startup
+failure budget instead of multiplying 30 attempts by the 5-second timeout.
+All other fields are the chart defaults.
 
 | Component | Before samples (ms) | After samples (ms) |
 | --- | --- | --- |
-| Backend | 23013.5, 23189.5, 13348.4, 13247.4, 13258.2 | 8595.8, 8379.2, 8360.9, 8312.9, 8163.8 |
-| Frontend | 10437.5, 10477.1, 10441.9, 10441.9, 10542.8 | 2011.2, 1984.7, 1976.4, 2010.3, 1990.5 |
-| y-provider | 10541.6, 10508.6, 10522.8, 10534.6, 10473.6 | 3492.9, 3468.9, 4023.9, 4032.6, 3979.4 |
+| Backend | 13222.5, 13125.1, 13167.3, 23050.6, 13009.5 | 11302.6, 11454.9, 11529.4, 11024.8, 8424.8 |
+| Frontend | 10478.1, 10782.7, 10534.4, 10462.4, 10424.5 | 2037.0, 2996.2, 2016.3, 1988.2, 1992.3 |
+| y-provider | 10461.1, 10526.1, 10491.4, 10481.8, 10464.2 | 3471.4, 3999.7, 3513.8, 3461.6, 3505.4 |
 
-The backend's two ~23s outliers missed the first coarse readiness window and
-waited for the next 10-second check. That behavior is precisely what the
+The backend's ~23s outlier missed the first coarse readiness window and waited
+for the next 10-second check. That behavior is precisely what the
 startup/readiness scheduling change removes.
 
 ### First list, first document, and collaboration
@@ -149,12 +151,12 @@ Browser markers:
 
 | Metric | Before samples (ms) | After samples (ms) |
 | --- | --- | --- |
-| All pods Ready | 20702.5, 13337.7, 13539.0 | 5606.9, 7731.8, 7808.0 |
-| Cold list usable | 27518.1, 17519.0, 20509.5 | 9525.6, 9174.9, 9225.8 |
-| Cold first document usable | 29814.1, 19778.0, 22885.5 | 11662.6, 11284.9, 11374.8 |
-| List after traffic began | 6073.7, 3400.4, 6192.2 | 3170.3, 645.8, 603.4 |
-| Document open after list | 2237.0, 2201.5, 2128.3 | 2078.4, 2048.5, 2090.6 |
-| Remote edit visible | 161.5, 151.6, 156.4 | 154.0, 157.5, 175.0 |
+| All pods Ready | 20671.2, 23440.5, 23367.8 | 11428.4, 11575.6, 11248.8 |
+| Cold list usable | 25172.7, 27509.6, 27616.0 | 12803.8, 15768.9, 15179.0 |
+| Cold first document usable | 26545.7, 34395.6, 28915.0 | 15722.8, 16902.9, 16279.0 |
+| List after traffic began | 3729.0, 3307.8, 3460.1 | 584.3, 3441.4, 3152.5 |
+| Document open after list | 1131.3, 6812.2, 1241.2 | 2860.1, 1074.4, 1041.7 |
+| Remote edit visible | 149.1, 146.4, 147.4 | 201.7, 167.4, 160.5 |
 
 The first-list spread is real cold-worker/cache variance. A separate
 seven-sample run against an already-running stack had medians of 566.0ms for
@@ -214,8 +216,9 @@ The value patch uses fields already supported by the vendored upstream chart:
 - existing liveness endpoints and all liveness/readiness timeout, failure, and
   success semantics remain intact;
 - startup probes gate (rather than replace) the existing liveness/readiness
-  checks; backend keeps the old 5-second heartbeat response tolerance while
-  frontend and y-provider use 1 second;
+  checks; backend keeps the old 5-second heartbeat response tolerance and a
+  bounded 35-second startup failure budget while frontend and y-provider use
+  1 second;
 
 The migration still runs in full. Only the second Django initialization is
 removed. The replacement uses the backend image's existing psycopg 3
@@ -224,12 +227,30 @@ dependency, discovers the database owner, quotes it with
 privilege grants in one transaction. The exact v5.2.1 backend image does not
 contain `psql`, so no undeclared binary dependency was introduced.
 
+Migration and grants are a Helm `pre-install,pre-upgrade` hook, so Helm does
+not create or update the normal Deployments until the transaction succeeds.
+The hook uses `/bin/sh -ec`, preventing a failed migration from being masked
+by a later successful grant command. A weight -10 hook Secret supplies the
+same sensitive settings as the normal chart Secret; the weight 0 Job uses the
+namespace's existing default ServiceAccount and does not mount a same-release
+theme ConfigMap. Both hook resources use
+`before-hook-creation,hook-succeeded` cleanup. In the demo environment,
+Helmfile's existing `needs` edges install and wait for PostgreSQL (or CNPG),
+Redis, and MinIO before beginning the Docs release. External environments must
+continue to provision those configured services and any image-pull Secret
+before installing Docs, as required by the existing chart contract.
+
 ## Checks performed
 
 - all 34 local patches apply in sorted order to `UPSTREAM_REF`;
 - `ci/test-docs-v5.2.1-performance.py` applies that series in a clean clone,
   builds the local Helm dependency, renders all three Deployments, and asserts
-  every startup/readiness/liveness endpoint and threshold;
+  every startup/readiness/liveness endpoint and threshold, the 35-second
+  backend startup failure budget, both hook resources and weights, hook
+  cleanup, the hook-scoped Secret references, `/bin/sh -ec`, and dependency
+  ordering;
+- the deterministic Docs test runs from the repository's `patch-series`
+  validation job on every pull request;
 - the grant heredoc compiles and the test rejects a return to `manage.py shell`
   or an unavailable `psql` dependency;
 - `manage.py migrate --check` reports no unapplied migration;
@@ -256,6 +277,9 @@ python3 ci/test-docs-v5.2.1-performance.py \
 - Faster readiness allows traffic as soon as the existing endpoint succeeds.
   Four-worker startup and lazy per-worker state still create first-request
   variance; the full browser benchmark succeeded in every measured sample.
+- A migration or grant failure now intentionally fails the Helm install or
+  upgrade before workload rollout. The hook still waits and retries while the
+  configured database becomes reachable; it does not skip initialization.
 - Readiness now checks once per second instead of once per 10 seconds. The
   endpoints are intentionally lightweight, but this is a small permanent
   health-check traffic increase (one request/second per pod).
@@ -267,9 +291,9 @@ python3 ci/test-docs-v5.2.1-performance.py \
 - Celery still takes 5.98s and about 411MiB. `--autoscale=3,1` saved only about
   0.33s and reduced warm capacity, so it is unchanged.
 - The y-provider image remains 831MB and its process still takes 2.46s.
-- The chart's timestamp-based job release suffix reruns migration/setup jobs on
-  every render. Removing that behavior needs a separate lifecycle/idempotency
-  design; this PR only makes the required grant setup cheaper.
+- Migrations and grants intentionally run on every Helm install and upgrade;
+  the chart's timestamp-based suffix also keeps rerunning the separate setup
+  job. Changing either lifecycle needs a separate idempotency design.
 - Warm document open is still dominated by the object-backed content request,
   WebSocket setup, frontend JavaScript, and editor hydration. No frontend
   bundle or editor behavior is changed here.
