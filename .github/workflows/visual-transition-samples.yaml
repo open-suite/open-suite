@@ -25,7 +25,7 @@ jobs:
       - run: npm i --no-save playwright@1.55.1 && npx playwright install --with-deps chromium
       - name: Require credentials and run sequential samples
         env:
-          SMOKE_USER: ${{ secrets.SMOKE_USER }}
+          SMOKE_USER: johndoe
           SMOKE_PASS: ${{ secrets.SMOKE_PASS }}
           SMOKE_VISUAL_CONTRACT: ${{ vars.SMOKE_VISUAL_CONTRACT || 'baseline' }}
           SMOKE_WHITEBOARD_FILE: ${{ vars.SMOKE_WHITEBOARD_FILE }}

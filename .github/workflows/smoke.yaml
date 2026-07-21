@@ -71,14 +71,14 @@ jobs:
           node-version: 22
       - name: Require live-demo credentials
         env:
-          SMOKE_USER: ${{ secrets.SMOKE_USER }}
+          SMOKE_USER: johndoe
           SMOKE_PASS: ${{ secrets.SMOKE_PASS }}
         run: test -n "$SMOKE_USER" -a -n "$SMOKE_PASS" || { echo 'live-demo smoke secrets are required' >&2; exit 2; }
       - name: Install pinned Playwright
         run: npm i --no-save playwright@1.55.1 && npx playwright install --with-deps chromium
       - name: Run visual transitions
         env:
-          SMOKE_USER: ${{ secrets.SMOKE_USER }}
+          SMOKE_USER: johndoe
           SMOKE_PASS: ${{ secrets.SMOKE_PASS }}
           SMOKE_VISUAL_CONTRACT: ${{ vars.SMOKE_VISUAL_CONTRACT || 'baseline' }}
           SMOKE_WHITEBOARD_FILE: ${{ vars.SMOKE_WHITEBOARD_FILE }}
