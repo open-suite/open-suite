@@ -25,7 +25,9 @@ Messages silent OIDC login, and Element. The first-use checks require:
 - `Secure`, `HttpOnly` Messages and edge-gate cookies, with the edge cookie
   scoped to the browser session; and
 - the coordinated logout link to target the auth-gate logout endpoint and
-  return to the Open Suite portal with both cookies removed.
+  finish at Keycloak's login form after the protected portal redirect, with
+  both cookies removed. Requiring authentication again is the expected
+  fail-closed result after logout.
 
 The browser makes one attempt and uses API and application-owned DOM signals;
 there are no retries or CI workarounds that can hide a failed OIDC exchange,
