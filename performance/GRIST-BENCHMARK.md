@@ -27,10 +27,11 @@ patch therefore keeps liveness on `/status`, changes readiness to
 initial delay. A startup probe checks the same ready endpoint after five
 seconds, once per second with a one-second timeout, and restarts after 45
 failures. This prevents pre-initialization traffic, avoids the old readiness
-probe's possible ten-second sampling delay, and bounds initialization at about
-50 seconds even when plain `/status` remains healthy. The copied-state upgrade
-rehearsal below observed 1.7.15 ready at p95 5.797 seconds, leaving more than
-eight times that measured duration before restart.
+probe's possible ten-second sampling delay, and declares failed initialization
+at about 50 seconds even when plain `/status` remains healthy. Pod termination
+and restart backoff can make replacement availability later. The copied-state
+upgrade rehearsal below observed 1.7.15 ready at p95 5.797 seconds, leaving
+more than eight times that measured duration before restart.
 
 The larger startup component remains gVisor checkpoint generation (about 5.4s
 in log timestamps). It is required to preserve formula isolation and fast
