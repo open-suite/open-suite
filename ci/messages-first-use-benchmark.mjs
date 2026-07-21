@@ -119,13 +119,22 @@ try {
     await matrixPage.close();
   }
 
+  // The redirect target is protected by the edge gate. Once Keycloak has
+  // ended its SSO session and invoked each front-channel callback, loading the
+  // target must finish at Keycloak's login page rather than silently signing
+  // back in. That is the logged-out state; requiring the protected bridge URL
+  // here would contradict the gate's fail-closed behavior.
   await Promise.all([
-    page.waitForURL(new RegExp(`^https://bridge\\.${domain.replaceAll(".", "\\.")}/`), {
+    page.waitForURL((url) =>
+      url.hostname === `id.${domain}` &&
+      url.pathname === "/realms/mijnbureau/protocol/openid-connect/auth" &&
+      url.searchParams.get("client_id") === "opensuite-auth-gate", {
       timeout: 60_000,
       waitUntil: "domcontentloaded",
     }),
     logoutLink.click(),
   ]);
+  await page.locator("#kc-login").waitFor({ state: "visible", timeout: 15_000 });
   const postLogoutCookies = await context.cookies();
   const postLogoutGateCookie = postLogoutCookies.find((cookie) => cookie.name === "opensuite_auth");
   const postLogoutMailSession = postLogoutCookies.find(
