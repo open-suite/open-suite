@@ -7,9 +7,9 @@ index 7398f68..5274160 100644
    password: {{ .Values.secret.collabora.credentials.password | quote }}
 -
 +
-+  # Only preload writing aids used by Open Suite. The chart default "en"
-+  # expands to every English regional dictionary; fonts remain unchanged.
-+  dictionaries: "en_GB nl"
++  # Preload Open Suite's English and Dutch writing aids explicitly. The chart
++  # default "en" expands to every English regional locale; fonts are unchanged.
++  dictionaries: "en_GB en_US nl"
 +
    # The hostname that Collabora will use to identify itself (usually matches the external DNS name)
 @@ -80,5 +84,12 @@ collabora:

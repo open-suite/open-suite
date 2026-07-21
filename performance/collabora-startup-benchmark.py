@@ -42,7 +42,7 @@ def run(*args: str, check: bool = True) -> subprocess.CompletedProcess[str]:
 
 def make_document(path: Path) -> bytes:
     content = b"""<?xml version="1.0" encoding="UTF-8"?>
-<office:document-content xmlns:office="urn:oasis:names:tc:opendocument:xmlns:office:1.0" xmlns:text="urn:oasis:names:tc:opendocument:xmlns:text:1.0" office:version="1.2"><office:body><office:text><text:p>Hello Open Suite performance benchmark</text:p></office:text></office:body></office:document-content>"""
+<office:document-content xmlns:office="urn:oasis:names:tc:opendocument:xmlns:office:1.0" xmlns:text="urn:oasis:names:tc:opendocument:xmlns:text:1.0" xmlns:style="urn:oasis:names:tc:opendocument:xmlns:style:1.0" xmlns:fo="urn:oasis:names:tc:opendocument:xmlns:xsl-fo-compatible:1.0" office:version="1.2"><office:automatic-styles><style:style style:name="P1" style:family="paragraph"><style:text-properties fo:language="en" fo:country="US"/></style:style></office:automatic-styles><office:body><office:text><text:p text:style-name="P1">Hello Open Suite performance benchmark</text:p></office:text></office:body></office:document-content>"""
     manifest = b"""<?xml version="1.0" encoding="UTF-8"?>
 <manifest:manifest xmlns:manifest="urn:oasis:names:tc:opendocument:xmlns:manifest:1.0" manifest:version="1.2"><manifest:file-entry manifest:full-path="/" manifest:media-type="application/vnd.oasis.opendocument.text"/><manifest:file-entry manifest:full-path="content.xml" manifest:media-type="text/xml"/></manifest:manifest>"""
     with ZipFile(path, "w") as archive:
@@ -174,11 +174,36 @@ def document_sample() -> dict[str, object]:
     return marks
 
 
+def assert_startup_languages(profile: str) -> list[str]:
+    output = run("docker", "logs", CONTAINER)
+    logs = (output.stdout + output.stderr).splitlines()
+    if profile != "candidate":
+        return []
+    expected = {
+        "Allowlisted languages:": ("en_GB", "en_US", "nl"),
+        "Preloading local dictionaries:": ("en-US", "en-GB", "nl-NL"),
+        "Preloading local thesauri:": ("en-US", "en-GB"),
+        "Preloading local hyphenators:": ("en-US", "en-GB", "nl-NL"),
+    }
+    matched: list[str] = []
+    for prefix, languages in expected.items():
+        line = next((entry for entry in logs if entry.startswith(prefix)), None)
+        if line is None or any(language not in line.split() for language in languages):
+            raise AssertionError(f"startup log does not preserve {languages}: {line!r}")
+        matched.append(line)
+    return matched
+
+
 def sample(profile: str, image: str, number: int) -> dict[str, object]:
     run("docker", "rm", "-f", CONTAINER, check=False)
     environment = ["-e", "dictionaries=en"]
     if profile == "candidate":
-        environment = ["-e", "dictionaries=en_GB nl", "-e", "DONT_GEN_SSL_CERT=true"]
+        environment = [
+            "-e",
+            "dictionaries=en_GB en_US nl",
+            "-e",
+            "DONT_GEN_SSL_CERT=true",
+        ]
     extra_params = " ".join(
         (
             "--o:ssl.enable=false",
@@ -213,6 +238,8 @@ def sample(profile: str, image: str, number: int) -> dict[str, object]:
         "profile": profile,
         "sample": number,
         "container_ready_ms": ready_ms,
+        "startup_language_logs": assert_startup_languages(profile),
+        "document_language": "en-US",
         "document": document_sample(),
         "wopi_server": WopiHandler.events,
     }

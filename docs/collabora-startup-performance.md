@@ -13,17 +13,16 @@ The candidate changes only Collabora's application values:
   endpoint, while the image no longer generates an unused CA, RSA key, and
   leaf certificate on every start;
 - replace the chart's broad `dictionaries=en` environment override with
-  `en_GB nl`. Collabora expands `en` to 18 regional English writing-aid
-  locales. The candidate preloads `en-GB`, `nl-NL`, and `nl-BE`, matching the
-  chart's existing `en_GB nl` XML intent. This does not remove or filter any
-  fonts.
+  `en_GB en_US nl`. Collabora expands `en` to 18 regional English writing-aid
+  locales. The candidate explicitly retains US and UK English and adds Dutch
+  (`nl-NL` and `nl-BE`). This does not remove or filter any fonts.
 
-Cold service readiness improved by **15.6% at p50** (6265.140 ms to
-5286.895 ms) and **15.6% at p95** (6489.597 ms to 5476.238 ms). First-document
-candidate medians were 0.5–1.9 ms higher in this 10-sample local run. Ten
-samples are too few to characterize tails or establish statistical
-equivalence; the change removes roughly one second from process initialization
-without a material median first-editor shift.
+The **combined candidate** improved cold service readiness by **15.2% at p50**
+(6205.589 ms to 5264.536 ms) and **14.4% at p95** (6383.890 ms to
+5462.386 ms). This run did not use four factorial profiles, so the improvement
+cannot be attributed independently to certificate or dictionary treatment.
+First-document candidate medians stayed within 0.4 ms of baseline. Ten samples
+are too few to characterize tails or establish statistical equivalence.
 
 All values below are milliseconds. p95 is nearest-rank. Sorted raw samples are
 included to make the stated distribution exact rather than inferred from a
@@ -31,16 +30,16 @@ single run.
 
 | Marker | Profile | Sorted samples | min / p50 / p95 / max |
 |---|---|---|---|
-| fresh-container HTTP ready (`GET /` = 200) | baseline | 6165.610, 6170.438, 6201.858, 6207.235, 6221.514, 6308.765, 6337.177, 6337.191, 6341.562, 6489.597 | 6165.610 / 6265.140 / 6489.597 / 6489.597 |
-| fresh-container HTTP ready (`GET /` = 200) | candidate | 5128.036, 5197.995, 5210.878, 5262.840, 5269.449, 5304.341, 5325.504, 5339.259, 5351.557, 5476.238 | 5128.036 / 5286.895 / 5476.238 / 5476.238 |
-| WOPI CheckFileInfo + GetFile (`stats: wopiloadduration`) | baseline | 0, 0, 0, 0, 0, 0, 0, 0, 0, 0 | 0 / 0 / 0 / 0 |
-| WOPI CheckFileInfo + GetFile (`stats: wopiloadduration`) | candidate | 0, 0, 0, 0, 0, 0, 0, 0, 0, 1 | 0 / 0 / 1 / 1 |
-| WebSocket connection attempt to `loaded:` | baseline | 33.925, 34.152, 34.465, 34.534, 34.608, 35.447, 35.589, 35.824, 35.845, 37.395 | 33.925 / 35.028 / 37.395 / 37.395 |
-| WebSocket connection attempt to `loaded:` | candidate | 33.684, 34.124, 34.153, 34.251, 35.297, 35.789, 35.974, 36.525, 48.426, 49.174 | 33.684 / 35.543 / 49.174 / 49.174 |
-| connection attempt to first tile bytes | baseline | 40.803, 40.971, 41.198, 41.293, 41.413, 42.208, 42.404, 42.944, 42.993, 44.723 | 40.803 / 41.811 / 44.723 / 44.723 |
-| connection attempt to first tile bytes | candidate | 40.515, 40.891, 40.960, 42.305, 43.418, 43.722, 44.090, 45.029, 57.274, 58.171 | 40.515 / 43.570 / 58.171 / 58.171 |
-| connection attempt to first tile/cursor invalidation after key input | baseline | 43.141, 43.462, 43.577, 43.643, 43.762, 44.591, 44.791, 45.161, 45.328, 47.104 | 43.141 / 44.177 / 47.104 / 47.104 |
-| connection attempt to first tile/cursor invalidation after key input | candidate | 42.869, 43.319, 43.669, 44.740, 45.843, 46.309, 46.660, 47.671, 60.390, 60.621 | 42.869 / 46.076 / 60.621 / 60.621 |
+| fresh-container HTTP ready (`GET /` = 200) | baseline | 5969.610, 6040.486, 6069.751, 6090.855, 6196.723, 6214.455, 6275.993, 6350.352, 6377.011, 6383.890 | 5969.610 / 6205.589 / 6383.890 / 6383.890 |
+| fresh-container HTTP ready (`GET /` = 200) | candidate | 5122.141, 5160.285, 5206.009, 5253.726, 5262.857, 5266.216, 5365.206, 5438.716, 5454.435, 5462.386 | 5122.141 / 5264.536 / 5462.386 / 5462.386 |
+| WOPI CheckFileInfo + GetFile (`stats: wopiloadduration`) | baseline | 0, 0, 0, 0, 0, 0, 1, 1, 1, 1 | 0 / 0 / 1 / 1 |
+| WOPI CheckFileInfo + GetFile (`stats: wopiloadduration`) | candidate | 0, 0, 0, 0, 0, 0, 1, 1, 1, 1 | 0 / 0 / 1 / 1 |
+| WebSocket connection attempt to `loaded:` | baseline | 34.822, 35.396, 35.400, 35.425, 36.275, 36.394, 36.742, 36.825, 37.338, 38.307 | 34.822 / 36.335 / 38.307 / 38.307 |
+| WebSocket connection attempt to `loaded:` | candidate | 34.914, 35.156, 35.649, 36.086, 36.235, 36.598, 36.815, 37.573, 37.628, 37.923 | 34.914 / 36.417 / 37.923 / 37.923 |
+| connection attempt to first tile bytes | baseline | 42.737, 43.082, 43.755, 44.442, 44.507, 44.596, 44.798, 45.174, 46.481, 48.016 | 42.737 / 44.551 / 48.016 / 48.016 |
+| connection attempt to first tile bytes | candidate | 42.310, 42.792, 43.105, 43.453, 44.289, 44.325, 46.029, 46.390, 47.780, 48.105 | 42.310 / 44.307 / 48.105 / 48.105 |
+| connection attempt to first tile/cursor invalidation after key input | baseline | 44.885, 46.089, 46.288, 46.764, 46.885, 47.019, 47.568, 47.997, 49.159, 50.900 | 44.885 / 46.952 / 50.900 / 50.900 |
+| connection attempt to first tile/cursor invalidation after key input | candidate | 44.642, 45.019, 45.189, 45.769, 46.530, 46.719, 48.439, 50.044, 50.864, 51.271 | 44.642 / 46.625 / 51.271 / 51.271 |
 
 ## Method
 
@@ -52,11 +51,11 @@ sudo performance/collabora-startup-benchmark.py \
   --samples 10 --output collabora-startup-results.json
 ```
 
-The harness discards one baseline and one candidate warm-up, then alternates
-AB/BA order to limit time/order bias. Every sample removes and creates a fresh
-container from the already-pulled immutable image digest. It measures from
-`docker run` invocation until the same HTTP `/` 200 used by the enabled
-Kubernetes readiness probe. This is **service cold readiness**, excluding
+The harness discards one baseline and one combined-candidate warm-up, then
+alternates AB/BA order to limit time/order bias. Every sample removes and
+creates a fresh container from the already-pulled immutable image digest. It
+measures from `docker run` invocation until the same HTTP `/` 200 used by the
+enabled Kubernetes readiness probe. This is **service cold readiness**, excluding
 scheduler and image-pull time; it does not include the probe's 5-second initial
 delay or 10-second cadence, so it is not the quantized Pod `Ready` transition.
 Host page cache remains warm, matching a pod restart on an existing node rather
@@ -72,30 +71,33 @@ still carries a random access token, although this fake does not implement
 Nextcloud's token semantics. The WOPI listener is reachable on the Docker
 bridge so Collabora can call it; the published Collabora benchmark port is
 bound to host loopback. The production WOPI HTTPS host allowlist is not changed
-by the optimization.
+by the optimization. The generated ODT is tagged `en-US`; every sample must
+load it, render a tile, and produce an invalidation after input. Candidate
+startup-log assertions additionally require `en-US`, `en-GB`, and Dutch
+dictionaries/hyphenators plus both English thesauri.
 
 The server-side phase distributions confirm that first-document work is not
 the cold-start bottleneck:
 
 | Phase | Baseline p50 / p95 | Candidate p50 / p95 |
 |---|---:|---:|
-| CheckFileInfo | 1.152 / 1.588 | 1.274 / 1.476 |
-| GetFile | 0.910 / 0.992 | 0.956 / 1.124 |
-| spare-child assignment | 0.096 / 0.159 | 0.102 / 0.113 |
-| jail setup | 910.817 / 965.314 | 881.509 / 891.831 |
-| child document-load handler | 29.483 / 31.651 | 29.819 / 43.443 |
-| loaded-to-first-tile render | 6.477 / 6.724 | 6.237 / 8.880 |
+| CheckFileInfo | 1.181 / 1.493 | 1.233 / 1.553 |
+| GetFile | 1.018 / 1.184 | 1.046 / 1.233 |
+| spare-child assignment | 0.114 / 0.187 | 0.104 / 0.129 |
+| jail setup | 899.188 / 949.619 | 885.066 / 904.567 |
+| child document-load handler | 30.175 / 32.499 | 30.502 / 31.841 |
+| loaded-to-first-tile render | 5.912 / 6.649 | 5.877 / 7.606 |
 
 A timestamped startup trace identifies the dominant interval before the spare
 kit is available: VCL/component/plugin preload, writing-aid locale expansion,
 language data, font-cache warming, and configuration preload. Font preload is
 retained deliberately so workers inherit a complete warm font selection cache.
-Baseline `en` logged 18 dictionary, thesaurus, and hyphenation locales;
-candidate `en_GB nl` logged `en-GB`, `nl-NL`, and `nl-BE`. The implementation
-also removes dummy-certificate key generation ahead of coolwsd. Neither cost is
-on the measured WOPI or render path, consistent with the stable medians in this
-run. The post-key marker is an asynchronous invalidation, not a save
-acknowledgement or persisted-content check.
+Baseline `en` logged 18 English writing-aid locales. Candidate
+`en_GB en_US nl` logged `en-US`, `en-GB`, `nl-NL`, and `nl-BE`. The combined
+candidate also removes dummy-certificate key generation ahead of coolwsd; this
+benchmark does not separate the contribution of those treatments. The
+post-key marker is an asynchronous invalidation, not a save acknowledgement or
+persisted-content check.
 
 ## Safety, rollout, and remaining bottlenecks
 
@@ -105,10 +107,8 @@ acknowledgement or persisted-content check.
 - **WOPI:** both HTTPS alias-group hosts, mode, access tokens, and Nextcloud's
   WOPI enforcement remain unchanged.
 - **Documents/fonts:** no image, font, fontconfig, missing-font diagnostics,
-  LibreOffice component, or rendering option changes. English (UK) and Dutch
-  writing aids remain preloaded. Users who specifically require US-English
-  spelling conventions would need `en_US` added deliberately; font rendering
-  for US-English and all other scripts is unaffected.
+  LibreOffice component, or rendering option changes. English (US and UK) and
+  Dutch writing aids remain preloaded; rendering for all scripts is unaffected.
 - **Isolation/health:** no capabilities, mount, security context, liveness, or
   readiness settings change. The regression guard rejects capability and
   missing-font-diagnostic shortcuts.

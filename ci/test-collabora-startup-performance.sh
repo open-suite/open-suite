@@ -5,6 +5,7 @@ set -euo pipefail
 
 INFRA="${1:?Usage: $0 <patched-infra-dir>}"
 VALUES="${INFRA}/helmfile/apps/collabora/values-collabora.yaml.gotmpl"
+DEPLOYMENT="${INFRA}/helmfile/apps/collabora/charts/collabora/templates/deployment.yaml"
 
 require_literal() {
   local expected="$1"
@@ -16,9 +17,13 @@ require_literal() {
 
 # Keep the measured preload set and skip only the image's unused, internal
 # dummy certificate generation.
-require_literal 'dictionaries: "en_GB nl"'
+require_literal 'dictionaries: "en_GB en_US nl"'
 require_literal 'name: DONT_GEN_SSL_CERT'
 require_literal 'value: "true"'
+
+# Ensure the app value is still rendered into the CODE image's startup
+# environment, where coolwsd maps it to allowed_languages.
+grep -Fq 'value: {{ .Values.collabora.dictionaries | quote }}' "${DEPLOYMENT}"
 
 # Security and fidelity invariants: ingress TLS termination and the WOPI host
 # allowlist remain in force, while no jail capability or font-removal shortcut
