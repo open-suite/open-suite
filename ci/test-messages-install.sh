@@ -9,6 +9,8 @@ POSTGRES_VALUES="${INFRA}/helmfile/apps/messages/values-postgresql.yaml.gotmpl"
 MIGRATE_JOB="${INFRA}/helmfile/apps/messages/charts/messages/templates/migrate-job.yaml"
 OPENSEARCH_STATEFULSET="${INFRA}/helmfile/apps/messages/charts/messages/templates/opensearch-statefulset.yaml"
 KEYCLOAK_EGRESS="${INFRA}/helmfile/apps/messages/charts/messages/templates/backend-keycloak-networkpolicy.yaml"
+HEADER_CONFIG="${INFRA}/helmfile/apps/messages/charts/messages/templates/header-configmap.yaml"
+MESSAGES_VALUES="${INFRA}/helmfile/apps/messages/values.yaml.gotmpl"
 DEMO_VALUES="${REPO}/helmfile/demo-values.yaml.tmpl"
 
 require_literal() {
@@ -46,6 +48,20 @@ require_literal "${KEYCLOAK_EGRESS}" 'app.kubernetes.io/name: keycloak'
 require_literal "${KEYCLOAK_EGRESS}" 'app.kubernetes.io/component: keycloak'
 require_literal "${KEYCLOAK_EGRESS}" 'port: 8080'
 
+# Coordinated logout must start at Messages in a top-level, first-party context
+# so Django clears its session. Its fixed operator-configured redirect then
+# lets auth-gate clear the edge session and end Keycloak SSO. Do not replace
+# this with an unvalidated, stateless front-channel callback.
+require_literal "${HEADER_CONFIG}" 'sub_filter_types application/javascript;'
+require_literal "${HEADER_CONFIG}" 'logout.href = origin("auth") + "/logout?rd=" + encodeURIComponent(origin("bridge") + "/");'
+require_literal "${HEADER_CONFIG}" 'logout.href = origin("messages") + "/api/v1.0/logout/";'
+require_literal "${REPO}/overlays/portal-header/opensuite-header.js" 'logout.href = origin("auth") + "/logout?rd=" + encodeURIComponent(origin("bridge") + "/");'
+require_literal "${MESSAGES_VALUES}" '{{- $portalUrl := printf "https://%s.%s/" .Values.global.hostname.bureaublad .Values.global.domain }}'
+require_literal "${MESSAGES_VALUES}" '{{- $logoutRedirectUrl := printf "https://auth.%s/logout?rd=%s" .Values.global.domain (urlquery $portalUrl) }}'
+require_literal "${MESSAGES_VALUES}" 'ALLOW_LOGOUT_GET_METHOD: "true"'
+require_literal "${MESSAGES_VALUES}" 'OIDC_OP_LOGOUT_ENDPOINT: ""'
+require_literal "${MESSAGES_VALUES}" 'LOGOUT_REDIRECT_URL: {{ $logoutRedirectUrl | quote }}'
+
 # A startup probe prevents liveness from repeatedly restarting a healthy cold
 # start. Readiness and liveness remain as strict as before startup succeeds.
 OPENSEARCH_STARTUP_PROBE="$(sed -n '/^          startupProbe:/,/^            failureThreshold:/p' "${OPENSEARCH_STATEFULSET}")"
@@ -62,7 +78,7 @@ grep -Fq 'tcpSocket:' <<<"${OPENSEARCH_LIVENESS_PROBE}"
 grep -Fq 'initialDelaySeconds: 60' <<<"${OPENSEARCH_LIVENESS_PROBE}"
 grep -Fq 'periodSeconds: 20' <<<"${OPENSEARCH_LIVENESS_PROBE}"
 
-echo "Messages PostgreSQL, migration, and OpenSearch probe contracts verified"
+echo "Messages PostgreSQL, migration, logout, and OpenSearch probe contracts verified"
 
 if [ -n "${FRESH_INSTALL_ARTIFACT_DIR:-}" ]; then
   bash "${REPO}/ci/messages-install-benchmark.sh" \

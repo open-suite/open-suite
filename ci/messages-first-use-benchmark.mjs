@@ -72,11 +72,11 @@ try {
   await logoutLink.waitFor({ state: "visible", timeout: 15_000 });
   const logoutUrl = new URL(await logoutLink.getAttribute("href"));
   if (
-    logoutUrl.hostname !== `auth.${domain}` ||
-    logoutUrl.pathname !== "/logout" ||
-    logoutUrl.searchParams.get("rd") !== `https://bridge.${domain}/`
+    logoutUrl.origin !== `https://messages.${domain}` ||
+    logoutUrl.pathname !== "/api/v1.0/logout/" ||
+    logoutUrl.search
   ) {
-    throw new Error(`coordinated logout target changed: ${logoutUrl}`);
+    throw new Error(`first-party Messages logout target changed: ${logoutUrl}`);
   }
   results.logout_contract_verified = true;
 

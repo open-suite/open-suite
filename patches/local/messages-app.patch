@@ -275,7 +275,7 @@ new file mode 100644
 index 0000000..0eae212
 --- /dev/null
 +++ b/helmfile/apps/messages/charts/messages/templates/header-configmap.yaml
-@@ -0,0 +1,70 @@
+@@ -0,0 +1,73 @@
 +# nginx config for the Open Suite header sidecar — identical to the
 +# opensuite-header-conf the other apps get via
 +# patches/local/opensuite-header-sidecar.patch, with the upstream port set to
@@ -323,6 +323,9 @@ index 0000000..0eae212
 +        client_max_body_size 0;
 +        location = /opensuite-header.js {
 +          default_type application/javascript;
++          # Messages must clear its first-party session before shared SSO.
++          sub_filter_types application/javascript;
++          sub_filter 'logout.href = origin("auth") + "/logout?rd=" + encodeURIComponent(origin("bridge") + "/");' 'logout.href = origin("messages") + "/api/v1.0/logout/";';
 +          # no-cache = revalidate per page view (cheap 304). The JS configmap is
 +          # updated in place by 09-portal-header.sh; there is no versioned URL.
 +          add_header Cache-Control "no-cache";
@@ -1129,11 +1132,13 @@ new file mode 100644
 index 0000000..bd224bd
 --- /dev/null
 +++ b/helmfile/apps/messages/values.yaml.gotmpl
-@@ -0,0 +1,153 @@
+@@ -0,0 +1,158 @@
 +{{- $releaseId := now | unixEpoch }}
 +{{- $hostname := printf "%s.%s" .Values.global.hostname.messages .Values.global.domain }}
 +{{- $sslPostfix := ternary "s" "" (.Values.global.tls.enabled | default true) }}
 +{{- $baseUrl := printf "http%s://%s" $sslPostfix $hostname }}
++{{- $portalUrl := printf "https://%s.%s/" .Values.global.hostname.bureaublad .Values.global.domain }}
++{{- $logoutRedirectUrl := printf "https://auth.%s/logout?rd=%s" .Values.global.domain (urlquery $portalUrl) }}
 +{{- $redisUrl := printf "redis://default:%s@%s:%d/1" .Values.cache.messages.password .Values.cache.messages.host (.Values.cache.messages.port | int) -}}
 +{{- $s3Endpoint := printf "http%s://%s:%d" (ternary "s" "" .Values.objectstore.messages.useSSL) .Values.objectstore.messages.endpoint (.Values.objectstore.messages.port | int) -}}
 +{{- /* Server-to-server Keycloak base URL, derived from the backchannel token
@@ -1218,7 +1223,10 @@ index 0000000..bd224bd
 +    OIDC_OP_AUTHORIZATION_ENDPOINT: {{ .Values.authentication.oidc.authorization_endpoint | quote }}
 +    OIDC_OP_TOKEN_ENDPOINT: {{ .Values.authentication.oidc.token_endpoint | quote }}
 +    OIDC_OP_USER_ENDPOINT: {{ .Values.authentication.oidc.userinfo_endpoint | quote }}
-+    OIDC_OP_LOGOUT_ENDPOINT: {{ .Values.authentication.oidc.end_session_endpoint | quote }}
++    # Clear the Django session in first-party context, then let auth-gate end
++    # the shared Keycloak session. Callback state validation stays intact.
++    ALLOW_LOGOUT_GET_METHOD: "true"
++    OIDC_OP_LOGOUT_ENDPOINT: ""
 +    OIDC_RP_CLIENT_ID: {{ .Values.authentication.client.messages.client_id | quote }}
 +    OIDC_RP_CLIENT_SECRET: {{ .Values.authentication.client.messages.client_secret | quote }}
 +    OIDC_RP_SIGN_ALGO: "RS256"
@@ -1226,7 +1234,7 @@ index 0000000..bd224bd
 +    OIDC_REDIRECT_ALLOWED_HOSTS: '["{{ $baseUrl }}"]'
 +    LOGIN_REDIRECT_URL: {{ $baseUrl | quote }}
 +    LOGIN_REDIRECT_URL_FAILURE: {{ $baseUrl | quote }}
-+    LOGOUT_REDIRECT_URL: {{ $baseUrl | quote }}
++    LOGOUT_REDIRECT_URL: {{ $logoutRedirectUrl | quote }}
 +    # Keycloak admin API (mailbox/group provisioning via service account)
 +    IDENTITY_PROVIDER: "keycloak"
 +    KEYCLOAK_URL: {{ $keycloakUrl | quote }}

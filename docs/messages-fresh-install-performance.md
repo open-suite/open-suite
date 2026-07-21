@@ -24,10 +24,10 @@ Messages silent OIDC login, and Element. The first-use checks require:
 - a successful first Matrix `/sync` response;
 - `Secure`, `HttpOnly` Messages and edge-gate cookies, with the edge cookie
   scoped to the browser session; and
-- the coordinated logout link to target the auth-gate logout endpoint and
-  finish at Keycloak's login form after the protected portal redirect, with
-  both cookies removed. Requiring authentication again is the expected
-  fail-closed result after logout.
+- the coordinated logout link to start at Messages' same-origin logout
+  endpoint, then finish at Keycloak's login form after the fixed auth-gate and
+  protected-portal redirects, with both cookies removed. Requiring
+  authentication again is the expected fail-closed result after logout.
 
 The browser makes one attempt and uses API and application-owned DOM signals;
 there are no retries or CI workarounds that can hide a failed OIDC exchange,
@@ -108,10 +108,19 @@ API responses, providing an end-to-end check of that backchannel rule. That run
 then failed on the benchmark's old English `Inbox` text selector, which the
 locale-independent API/render signal above replaces.
 
+Messages' header now initiates logout at the app's own `/api/v1.0/logout/`
+endpoint. With the OP logout endpoint intentionally empty, django-lasuite
+clears the Django session in the top-level first-party response and redirects
+to a fixed, deployment-computed auth-gate logout URL. Auth-gate then clears the
+edge session, ends Keycloak SSO, and returns through the protected portal URL.
+The destination is operator configuration rather than request input, and the
+existing state validation on Messages' OIDC callback is not relaxed.
+
 The PostgreSQL startup probe, six-success/30-second database stability rule,
 separate retrying migration Job, migration command, backend database heartbeat,
-session-cookie attributes, and coordinated logout contract are unchanged and
-remain CI assertions.
+and session-cookie attributes are unchanged and remain CI assertions. The
+coordinated logout gate remains fail-closed and now also verifies the
+first-party Messages initiation described above.
 
 The tradeoff is explicit: a permanently broken OpenSearch startup can take up
 to 10 minutes to be restarted instead of roughly 100 seconds. This is bounded
