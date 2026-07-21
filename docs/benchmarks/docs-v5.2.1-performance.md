@@ -242,7 +242,7 @@ before installing Docs, as required by the existing chart contract.
 
 ## Checks performed
 
-- all 38 local patches apply in sorted order to `UPSTREAM_REF`;
+- all 39 local patches apply in sorted order to `UPSTREAM_REF`;
 - `ci/test-docs-v5.2.1-performance.py` applies that series in a clean clone,
   builds the local Helm dependency, renders all three Deployments, and asserts
   every startup/readiness/liveness endpoint and threshold, the 35-second
