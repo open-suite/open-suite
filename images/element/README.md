@@ -7,11 +7,13 @@ textual responses, including Element's JavaScript, CSS, JSON, SVG and WebAssembl
 assets.
 
 The image also applies the compiled equivalent of
-`patches/replace-sso-history.patch`. Upstream starts browser SSO with a normal
-`location.href` navigation, which retains the pre-SSO Element entry. Open Suite
-uses `location.replace` so the eventual token-cleaned callback is the only
-Element entry above the referring Portal page. Callback construction, token
-cleanup, home/room fragments, and authentication itself are unchanged.
+`patches/replace-sso-history.patch`, derived from Element source commit
+`eebdc77379814380baeeffb8f41da5e4f2063c86` (`v1.12.24-rc.1`). Upstream starts
+browser SSO with a normal `location.href` navigation, which retains the pre-SSO
+Element entry. Open Suite uses `location.replace` so the eventual token-cleaned
+callback is the only Element entry above the referring Portal page. Callback
+construction, token cleanup, home/room fragments, and authentication itself
+are unchanged.
 
 The image precompresses only the content-hashed files under `bundles/` at the
 same gzip level used by nginx, then serves those copies with `gzip_static`.
