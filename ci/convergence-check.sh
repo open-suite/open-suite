@@ -13,7 +13,9 @@ export KUBECONFIG="${KUBECONFIG:-/etc/rancher/k3s/k3s.yaml}"
 REPO="$(cd "$(dirname "$0")/.." && pwd)"
 INFRA="${INFRA_DIR:-/root/mijn-bureau-infra}"
 DIR="${REPO}/scripts/single-vps-deploy"
-EXPECTED_AUTH_GATE_IMAGE="${AUTH_GATE_IMAGE:-ghcr.io/open-suite/auth-gate:sha-9cdeba7}"
+EXPECTED_AUTH_GATE_IMAGE="${AUTH_GATE_IMAGE:-ghcr.io/open-suite/auth-gate:sha-d04bd46}"
+EXPECTED_PORTAL_REF="${PORTAL_REF:-977ce53c95f6a9bb48a9f0c045e80e4a933642fd}"
+EXPECTED_PORTAL_TAG="sha-${EXPECTED_PORTAL_REF:0:7}"
 source "${REPO}/scripts/lib/state.sh"
 
 MASTER_PASSWORD="$(opensuite_read_master_password)" || exit 2
@@ -63,6 +65,17 @@ probe_sidecar_headers() {
       | grep -Fq 'Open Suite portal header' || { echo 0; return; }
   done
   echo 1
+}
+
+probe_portal_images() {
+  local backend frontend
+  backend="$(kubectl -n mb-bureaublad get deploy bureaublad-backend \
+    -o jsonpath='{.spec.template.spec.containers[?(@.name=="backend")].image}' 2>/dev/null)"
+  frontend="$(kubectl -n mb-bureaublad get deploy bureaublad-frontend \
+    -o jsonpath='{.spec.template.spec.containers[?(@.name=="frontend")].image}' 2>/dev/null)"
+  [ "${backend}" = "ghcr.io/open-suite/portal-api:${EXPECTED_PORTAL_TAG}" ] \
+    && [ "${frontend}" = "ghcr.io/open-suite/portal-frontend:${EXPECTED_PORTAL_TAG}" ] \
+    && echo 1 || echo 0
 }
 
 expected_public_ip() {
@@ -121,6 +134,7 @@ PROBES=(
   meet_image
   element_header
   sidecar_headers
+  portal_images
   livekit_public_ip
   auth_gate
   apex_redirect

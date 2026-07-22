@@ -16,9 +16,9 @@ CLIENT_ID="opensuite-auth-gate"
 NAMESPACE="mb-bureaublad"
 # Prebuilt in CI and pulled from GHCR (ticket 3.1). Pinned to a specific build
 # (not floating :main) so a redeploy is reproducible; bump this when the gate
-# changes. sha-9cdeba7 = the #196 trust-boundary hardening build.
+# changes. sha-d04bd46 = the #234 Collabora image-asset access fix.
 # Override AUTH_GATE_IMAGE to test another tag.
-IMAGE="${AUTH_GATE_IMAGE:-ghcr.io/open-suite/auth-gate:sha-9cdeba7}"
+IMAGE="${AUTH_GATE_IMAGE:-ghcr.io/open-suite/auth-gate:sha-d04bd46}"
 OPEN_SUITE_TLS_MODE="${OPEN_SUITE_TLS_MODE:-letsencrypt}"
 
 echo "==> [1/5] Ensuring auth-gate secrets"
