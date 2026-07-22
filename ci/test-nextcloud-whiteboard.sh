@@ -34,8 +34,8 @@ require_literal "${workflow}" 'hash_file("sha512", "whiteboard/appinfo/info.xml"
 # Image and PVC lifecycle: every required app is present, upgrades replace old
 # code before occ upgrade, and same-version restarts reconcile it again.
 require_literal "${dockerfile}" 'COPY whiteboard/ /usr/src/opensuite/whiteboard/'
-require_literal "${hook}" 'for app in meetcal user_oidc whiteboard; do'
-require_literal "${hook}" 'rsync -a --delete "${source}/" "/var/www/html/custom_apps/${app}/"'
+require_literal "${hook}" 'for app in meetcal user_oidc richdocuments whiteboard; do'
+require_literal "${hook}" 'rsync -a --delete "${source}/" "${nextcloud_root}/custom_apps/${app}/"'
 require_literal "${hook}" 'ERROR: image is missing required app source:'
 require_literal "${dockerfile}" 'pre-installation pre-upgrade before-starting'
 require_literal "${dockerfile}" 'before-starting/20-opensuite-whiteboard.sh'

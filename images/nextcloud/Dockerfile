@@ -1,10 +1,11 @@
 # Open Suite Nextcloud: the pinned upstream image plus our apps baked in.
-# The build context must contain the exact, CI-verified whiteboard/ and patched
-# user_oidc/ release trees; neither app is downloaded at container startup.
+# The build context must contain the exact, CI-verified richdocuments/ and
+# whiteboard/ trees plus patched user_oidc/; no app is downloaded at startup.
 ARG NEXTCLOUD_BASE=registry-1.docker.io/library/nextcloud:34.0.0-apache
 FROM ${NEXTCLOUD_BASE}
 COPY meetcal/ /usr/src/opensuite/meetcal/
 COPY user_oidc/ /usr/src/opensuite/user_oidc/
+COPY richdocuments/ /usr/src/opensuite/richdocuments/
 COPY whiteboard/ /usr/src/opensuite/whiteboard/
 COPY hooks/10-opensuite-apps.sh /usr/local/bin/opensuite-sync-apps
 COPY hooks/20-opensuite-whiteboard.sh /usr/local/bin/opensuite-configure-whiteboard
