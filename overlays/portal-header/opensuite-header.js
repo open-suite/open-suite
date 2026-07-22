@@ -234,7 +234,7 @@
       // real row for both so Calendar's navigation and controls are never under
       // the suite shell and the app still fits exactly inside the viewport.
       "html.ko-on-nextcloud #header:not(.header-guest){top:var(" + HEADER_HEIGHT_VAR + ") !important;}",
-      "html.ko-on-nextcloud #content{margin-top:calc(var(--header-height) + var(" + HEADER_HEIGHT_VAR + ")) !important;",
+      "html.ko-on-nextcloud #content,html.ko-on-nextcloud #content-vue{margin-top:calc(var(--header-height) + var(" + HEADER_HEIGHT_VAR + ")) !important;",
       "height:calc(var(--body-height) - var(" + HEADER_HEIGHT_VAR + ")) !important;}",
       // Nextcloud Office deliberately moves its full-screen Collabora iframe
       // over Nextcloud's own 50px header. Our fixed suite header occupies that
