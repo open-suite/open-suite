@@ -44,6 +44,7 @@ require_literal "${config_hook}" 'config:app:set whiteboard collabBackendUrl'
 require_literal "${config_hook}" 'config:app:set whiteboard jwt_secret_key'
 require_literal "${config_hook}" 'WHITEBOARD_COLLAB_BACKEND_URL:?'
 require_literal "${config_hook}" 'WHITEBOARD_JWT_SECRET:?'
+require_literal "${backend_patch}" 'whiteboardJwtSecret" | sha1sum | quote'
 
 # Nextcloud 34 owns the MIME mapping. The baked app must register LoadViewer
 # and the JavaScript Viewer handler for the exact canonical MIME.

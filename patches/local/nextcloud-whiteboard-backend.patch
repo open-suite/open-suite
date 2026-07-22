@@ -228,7 +228,7 @@ diff --git a/helmfile/apps/nextcloud/values.yaml.gotmpl b/helmfile/apps/nextclou
 index 21d9dcd..e659c0f 100644
 --- a/helmfile/apps/nextcloud/values.yaml.gotmpl
 +++ b/helmfile/apps/nextcloud/values.yaml.gotmpl
-@@ -224,5 +224,30 @@ collabora:
+@@ -224,5 +224,31 @@ collabora:
  {{- end }}
 -
 +
@@ -238,6 +238,7 @@ index 21d9dcd..e659c0f 100644
 +whiteboard:
 +  enabled: true
 +  collabBackendUrl: "https://{{ .Values.global.hostname.nextcloud }}.{{ .Values.global.domain }}/whiteboard"
++  jwtSecret: {{ derivePassword 1 "long" (requiredEnv "MIJNBUREAU_MASTER_PASSWORD") "nextcloud" "whiteboardJwtSecret" | sha1sum | quote }}
 +  authGateMiddleware: '{{ if dig "opensuite" "authGate" "enabled" false .Values }}{{ .Values.application.bureaublad.namespace }}-opensuite-auth-gate@kubernetescrd{{ end }}'
 +  image:
 +    registry: {{ .Values.container.nextcloud.whiteboard.registry | quote }}
