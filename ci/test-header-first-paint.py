@@ -61,6 +61,10 @@ for app, path in configs.items():
     if response.index("--ko-header-height:48px") > response.index("<body>"):
         raise AssertionError(f"{app} rendered critical geometry outside head")
 
+nextcloud_geometry = 'html.ko-on-nextcloud #content,html.ko-on-nextcloud #content-vue'
+if nextcloud_geometry not in configs["nextcloud"].read_text():
+    raise AssertionError(f"nextcloud is missing first-paint contract: {nextcloud_geometry}")
+
 for contract in (
     "mount();\n  if (!document.body || !document.getElementById(HEADER_ID))",
     "var bar = existing || document.createElement(\"nav\")",
@@ -70,6 +74,7 @@ for contract in (
     'new URLSearchParams(window.location.search).get("redirect_url")',
     'encodeURIComponent(ncReturnTo)',
     'html.ko-on-nextcloud #header:not(.header-guest)',
+    'html.ko-on-nextcloud #content,html.ko-on-nextcloud #content-vue',
     'height:calc(var(--body-height) - var(',
 ):
     if contract not in header:

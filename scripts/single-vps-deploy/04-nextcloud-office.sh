@@ -33,6 +33,19 @@ done
 echo "==> Applying pending Nextcloud/core app database upgrades"
 kubectl exec -n mb-nextcloud deploy/nextcloud -c nextcloud -- php occ upgrade
 
+# occ upgrade can replace app PHP on the shared custom_apps PVC while Apache
+# workers are still serving requests. Restart every replica after the upgrade
+# so OPcache cannot retain classes from the previous app version alongside the
+# newly published source.
+echo "==> Reloading Nextcloud after app upgrades"
+kubectl rollout restart deploy/nextcloud -n mb-nextcloud
+kubectl rollout status deploy/nextcloud -n mb-nextcloud --timeout=300s
+for i in $(seq 1 30); do
+  kubectl exec -n mb-nextcloud deploy/nextcloud -c nextcloud -- php occ status >/dev/null 2>&1 && break
+  [ "$i" = 30 ] && { echo "ERROR: occ not responding after post-upgrade restart" >&2; exit 1; }
+  sleep 10
+done
+
 # The chart's fresh-install hook treats app installation failures as warnings,
 # so the app source can exist while richdocuments remains disabled. Office
 # configuration below requires its command namespace: reconcile that state
