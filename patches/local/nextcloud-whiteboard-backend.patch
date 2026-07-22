@@ -228,8 +228,7 @@ diff --git a/helmfile/apps/nextcloud/values.yaml.gotmpl b/helmfile/apps/nextclou
 index 21d9dcd..e659c0f 100644
 --- a/helmfile/apps/nextcloud/values.yaml.gotmpl
 +++ b/helmfile/apps/nextcloud/values.yaml.gotmpl
-@@ -272,6 +272,31 @@ collabora:
-   wopi_allowlist: "{{ index .Values.cluster.networking.podSubnet 0 }},127.0.0.1"
+@@ -224,5 +224,30 @@ collabora:
  {{- end }}
 -
 +
