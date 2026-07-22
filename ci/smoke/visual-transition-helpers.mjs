@@ -6,6 +6,10 @@ export const parseMode = (value = "") => value.trim().toLowerCase() === "enforce
 export function sanitizeUrl(input) {
   try {
     const url = new URL(input);
+    url.pathname = url.pathname
+      .replace(/(\/apps\/files\/directEditing\/)[^/]+/gi, "$1<redacted>")
+      .replace(/(\/apps\/richdocuments\/direct\/)[^/]+/gi, "$1<redacted>")
+      .replace(/(\/apps\/richdocuments\/assets\/)[A-Za-z0-9]{64}/g, "$1<redacted>");
     const keys = [...new Set([...url.searchParams.keys()])].sort();
     url.search = keys.length ? `?${keys.map((key) => `${encodeURIComponent(key)}=<redacted>`).join("&")}` : "";
     if (url.username || url.password) {
@@ -18,6 +22,30 @@ export function sanitizeUrl(input) {
     return url.toString();
   } catch {
     return "<invalid-url>";
+  }
+}
+
+export function sanitizeDiagnostic(input = "", secrets = []) {
+  let value = String(input)
+    .replace(/https?:\/\/[^\s"'<>]+/gi, (url) => sanitizeUrl(url));
+  for (const secret of secrets) {
+    if (secret) value = value.split(secret).join("<redacted>");
+  }
+  return value
+    .replace(/(\/apps\/files\/directEditing\/)[^/\s"'<>]+/gi, "$1<redacted>")
+    .replace(/(\/apps\/richdocuments\/(?:direct|assets)\/)[^/\s"'<>]+/gi, "$1<redacted>")
+    .replace(/\b[A-Za-z0-9_-]{32,}\b/g, "<redacted>")
+    .slice(0, 300);
+}
+
+export function durableNextcloudFile(input, base) {
+  try {
+    const url = new URL(input, base);
+    const match = url.pathname.match(/^\/f\/(\d+)$/);
+    if (url.protocol !== "https:" || url.username || url.password || !match || url.search || url.hash) return null;
+    return { fileId: match[1], url: url.toString() };
+  } catch {
+    return null;
   }
 }
 
@@ -64,6 +92,11 @@ export const classifyFile = (name = "") => whiteboard.test(name) ? "whiteboard" 
 export function chooseCandidate(names, fixture, kind) {
   if (fixture) return names.includes(fixture) && classifyFile(fixture) === kind ? fixture : null;
   return [...names].sort((a, b) => a.localeCompare(b)).find((name) => classifyFile(name) === kind) ?? null;
+}
+
+export function chooseDocxCandidate(names, fixture) {
+  if (fixture) return names.includes(fixture) && /\.docx$/i.test(fixture) ? fixture : null;
+  return [...names].sort((a, b) => a.localeCompare(b)).find((name) => /\.docx$/i.test(name)) ?? null;
 }
 
 export function contractOutcome({ mode, exists = true, observations = [], blocking = [] }) {
