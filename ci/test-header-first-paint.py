@@ -64,6 +64,7 @@ for app, path in configs.items():
 for contract in (
     "mount();\n  if (!document.body || !document.getElementById(HEADER_ID))",
     "var bar = existing || document.createElement(\"nav\")",
+    "if (document.body) {\n          shellObserver.disconnect();\n          mount();",
     'bar.removeAttribute("data-shell")',
     'document.documentElement.classList.remove("ko-shell-pending")',
     'new URLSearchParams(window.location.search).get("redirect_url")',

@@ -429,7 +429,7 @@
   if (!document.body || !document.getElementById(HEADER_ID)) {
     if (typeof MutationObserver !== "undefined") {
       var shellObserver = new MutationObserver(function () {
-        if (document.body && document.getElementById(HEADER_ID)) {
+        if (document.body) {
           shellObserver.disconnect();
           mount();
         }
