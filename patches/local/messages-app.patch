@@ -275,7 +275,7 @@ new file mode 100644
 index 0000000..0eae212
 --- /dev/null
 +++ b/helmfile/apps/messages/charts/messages/templates/header-configmap.yaml
-@@ -0,0 +1,70 @@
+@@ -0,0 +1,73 @@
 +# nginx config for the Open Suite header sidecar — identical to the
 +# opensuite-header-conf the other apps get via
 +# patches/local/opensuite-header-sidecar.patch, with the upstream port set to
@@ -341,7 +341,10 @@ index 0000000..0eae212
 +          proxy_set_header Accept-Encoding "";   # so sub_filter can rewrite the body
 +          proxy_read_timeout 300s;
 +          proxy_redirect off;
-+          sub_filter '</body>' '<script nonce="$ko_nonce" src="/opensuite-header.js"></script></body>';
++          # Match the sidecar first-paint contract: reserve the shell in head,
++          # initiate canonical JS early, then hydrate the initial stable node.
++          sub_filter '</head>' '<style nonce="$ko_nonce">:root{--ko-header-height:48px}html.ko-shell-pending:before{content:"";position:fixed;inset:0 0 auto;height:48px;z-index:2147483646;background:#0b1f33}#ko-portal-header{position:fixed;inset:0 0 auto;height:48px;z-index:2147483647;display:flex;align-items:center;padding:0 14px;background:#0b1f33;color:#fff;box-sizing:border-box}#ko-portal-header[data-shell] .ko-brand{display:flex;align-items:center;gap:8px;color:#fff;font:700 14px system-ui,sans-serif;text-decoration:none}#ko-portal-header[data-shell] .ko-mark{display:flex;align-items:center;justify-content:center;width:26px;height:26px;border-radius:6px;background:#ff5b39;color:#1a1a1a;font-size:16px}</style><script nonce="$ko_nonce">document.documentElement.classList.add("ko-shell-pending")</script><script nonce="$ko_nonce" defer src="/opensuite-header.js"></script></head>';
++          sub_filter '</body>' '<nav id="ko-portal-header" data-shell="critical" aria-label="Open Suite"><a class="ko-brand" href="/"><span class="ko-mark">O</span><span>Open Suite</span></a></nav></body>';
 +          sub_filter_once on;
 +        }
 +      }
