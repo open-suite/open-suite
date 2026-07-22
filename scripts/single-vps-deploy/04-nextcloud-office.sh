@@ -13,6 +13,7 @@
 set -euo pipefail
 
 export KUBECONFIG=/etc/rancher/k3s/k3s.yaml
+RICHDOCUMENTS_VERSION=11.0.1
 
 echo "==> Waiting for Nextcloud to be ready"
 kubectl rollout status deploy/nextcloud -n mb-nextcloud --timeout=300s
@@ -38,6 +39,18 @@ kubectl exec -n mb-nextcloud deploy/nextcloud -c nextcloud -- php occ upgrade
 # strictly here and fail deployment if the app cannot be enabled.
 echo "==> Ensuring the Nextcloud Office app is enabled"
 kubectl exec -n mb-nextcloud deploy/nextcloud -c nextcloud -- php occ app:enable richdocuments
+kubectl exec -n mb-nextcloud deploy/nextcloud -c nextcloud -- \
+  sh -eu -c '
+    version="$(php occ app:list --output=json | php -r '\''
+      $apps = json_decode(stream_get_contents(STDIN), true);
+      echo $apps["enabled"]["richdocuments"] ?? "";
+    '\'')"
+    if [ "${version}" != "$1" ]; then
+      echo "ERROR: expected enabled richdocuments $1, found ${version:-missing}" >&2
+      exit 1
+    fi
+  ' sh "${RICHDOCUMENTS_VERSION}"
+echo "    richdocuments ${RICHDOCUMENTS_VERSION} enabled"
 
 # The chart's post-install configuration can run before the app is enabled on a
 # fresh install, leaving both Collabora URLs empty. Reconcile them after strict

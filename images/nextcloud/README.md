@@ -9,15 +9,138 @@ Pinned upstream Nextcloud plus:
   (Keycloak 26 standard token exchange rejects
   `requested_token_type=refresh_token`; Meet only needs the access token).
   Upstream PR: (pending — see ticket 3.3).
-- `hooks/10-opensuite-apps.sh` — syncs both apps from the image onto the
+- `richdocuments` 11.0.1, the NC34-compatible maintenance release containing
+  upstream's missing-DAV-`share-attributes` guard. Its official archive is
+  SHA-256 pinned and copied unmodified so Nextcloud's package-integrity
+  metadata remains valid.
+- Nextcloud Whiteboard `v1.5.9`, the current stable release compatible with
+  Nextcloud 34, fetched and checksum-verified in CI.
+- `hooks/10-opensuite-apps.sh` — syncs all four apps from the image onto the
   `custom_apps` PVC before installation, before upgrades, and immediately
   before Apache starts. This makes post-install setup and required migrations
   see the image's app versions while retaining a same-version restart fallback
   for opcache (`validate_timestamps=0`).
+- `hooks/20-opensuite-whiteboard.sh` — after upgrades, strictly enables
+  Whiteboard and reconciles its backend URL and shared JWT secret before
+  Apache starts, including on existing-volume and ordinary restart paths.
 
 Built and pushed to `ghcr.io/open-suite/nextcloud` by
 `.github/workflows/nextcloud-image.yaml` (tags: the upstream base tag, and
-`sha-<commit>`); `user_oidc/` is fetched in CI, never committed here.
+`sha-<commit>`); `user_oidc/`, `richdocuments/`, and `whiteboard/` are fetched
+in CI, never committed here.
+
+## Whiteboard release and configuration
+
+Open Suite pins the official `nextcloud/whiteboard` release **v1.5.9**:
+
+- App release: `1.5.9`, upstream source commit
+  `2c97cec3150d5e7ec69e04ed98baaf9f138417ff`.
+- Artifact:
+  `https://github.com/nextcloud-releases/whiteboard/releases/download/v1.5.9/whiteboard-v1.5.9.tar.gz`.
+- SHA-256:
+  `195e5d0b19fbb7e176bd2c89babfd5514aef0224afe5d0ef239304e84046a1fe`.
+- The package metadata declares Nextcloud `min-version="28"` and
+  `max-version="34"`; the Nextcloud App Store selects 1.5.9 for server 34.
+
+CI downloads the immutable release URL, verifies the SHA-256 before extraction,
+checks the package's embedded certificate CN and SHA-512 manifest entry for
+`appinfo/info.xml`, and builds the app into the custom image. The lifecycle
+hook uses
+`rsync -a --delete` before core/app upgrades and before every start, replacing
+an older PVC copy and making repeated reconciliation idempotent. A later
+before-starting hook then runs strict `occ app:enable whiteboard` and configures
+the backend; unlike optional app-store installs, a missing/incompatible app or
+missing backend configuration stops startup.
+
+Nextcloud 34 already maps `.whiteboard` to
+`application/vnd.excalidraw+json` and aliases that MIME to the `whiteboard`
+icon. The app registers both its `LoadViewer` listener and the Viewer JavaScript
+handler for that exact MIME. Do not add local MIME override files for this app.
+If migrating a deployment that previously used the obsolete
+`integration_whiteboard` app, remove its stale whiteboard entries from
+`config/mimetypealiases.json`, then run
+`occ maintenance:mimetype:update-db --repair-filecache` and
+`occ maintenance:mimetype:update-js` before accepting existing files.
+
+The collaboration backend **is required for durable files in v1.5.9**. Although
+parts of upstream's README call it optional for basic editing, the release's
+sync code permits only a backend-designated browser to write through to
+Nextcloud. Without it, edits remain in that browser's IndexedDB and a reload can
+misleadingly appear successful while WebDAV still contains the old file.
+
+Open Suite therefore deploys the official backend image at the matching tag and
+immutable manifest digest:
+
+`ghcr.io/nextcloud-releases/whiteboard:v1.5.9@sha256:b60b7633f90d106ac6922f9bc27e1a1ca2442488b740fefdae4c812f34e9cebc`
+
+It runs as one non-root, read-only-root-filesystem pod with an LRU session
+cache. A retained Helm-generated 64-character JWT secret is mounted into both
+the backend and Nextcloud; it is never placed in values or git. Traefik exposes
+the backend same-origin at `https://nextcloud.<domain>/whiteboard`, strips that
+prefix as upstream requires, and applies HSTS plus the existing auth-gate
+middleware. NetworkPolicy allows ingress only from k3s Traefik in `kube-system`
+and egress only to kube-system DNS. The backend makes no outbound Nextcloud call
+for ordinary collaboration; recording is intentionally not enabled. No Redis,
+service-account token, public backend hostname, or recording storage is added.
+This path deliberately fails rendering on non-Traefik ingress until an
+equivalent reviewed rewrite and policy are implemented.
+
+### Validation and rollback
+
+- `ci/test-nextcloud-whiteboard.sh` verifies the immutable source contract,
+  strict all-start-path enablement/configuration, backend image digest, retained
+  secret, auth-gated path rewrite, pod hardening and NetworkPolicy in a render
+  of the exact pinned chart.
+- `images/nextcloud/test-image-whiteboard.sh` verifies version compatibility,
+  core MIME mappings, LoadViewer/Viewer registration, stale-app replacement,
+  and repeated-sync idempotence in the built image.
+- `ci/smoke/authenticated.mjs` creates a real `.whiteboard`, enters text,
+  observes the canonical MIME and persisted marker through WebDAV, reloads an
+  editable canvas, and deletes the file. It intentionally does not accept
+  `app:list` as proof that the editor works.
+
+The app adds roughly the 114 MiB extracted Whiteboard release to each
+architecture of `ghcr.io/open-suite/nextcloud` (registry compression/deduplication
+will differ); no release tarball or generated app tree is stored in git. The
+deployment also pulls the separately pinned official backend image and adds one
+25m CPU / 128 MiB memory-request pod. Before promotion, run the authenticated
+browser smoke and confirm `occ status` reports `needsDbUpgrade: false`.
+
+Rollback by restoring the previous `sha-<commit>` Nextcloud image tag and the
+previous distribution source, then reapplying Helm; that removes the backend
+workload/route while preserving its JWT Secret (`helm.sh/resource-policy: keep`).
+Disable the app first with `occ app:disable whiteboard` when rolling back to an
+image that predates this integration. Whiteboard 1.5.9 has no app-owned database
+migrations, and `.whiteboard` files remain ordinary user files; never delete
+them as part of image rollback. The retained Secret can be deleted manually
+only after rollback is complete and no Whiteboard deployment consumes it.
+
+## Collabora image picker contract
+
+Collabora's `UI_InsertGraphic` postMessage asks the authenticated Nextcloud
+parent page to open richdocuments' `@nextcloud/dialogs` picker. The picker
+lists the current user's files directly over same-origin WebDAV: `PROPFIND`
+for All files/folders and DAV searches for Recent and Favorites. A selection
+is posted to `/apps/richdocuments/assets`; Nextcloud scopes it to that user's
+folder and returns a one-use URL that only the configured WOPI server may
+fetch. Neither file listing nor asset creation uses the Collabora WOPI token.
+
+Richdocuments 11.0.0 parsed the optional DAV `share-attributes` property
+without checking whether it existed. Normal nodes therefore threw
+`JSON.parse(undefined)` in the picker filter, leaving All files, Recent, and
+Favorites blank even though their DAV requests succeeded. Version 11.0.1
+contains upstream's stable34 fix and retains both the readable-file check and
+the explicit no-download-share exclusion. Open Suite pins it declaratively so
+fresh installs and existing `custom_apps` PVCs receive the same fixed version.
+The Office reconciliation step runs `occ upgrade`, enables the app, and fails
+the deploy unless the enabled version is exactly 11.0.1.
+
+`test-richdocuments-package.sh` verifies the official production bundle—not
+only release metadata—contains the guard, permission restriction, PNG/JPEG
+allowlist, and NC34 version contract. The live Playwright smoke covers the
+rendered All files/Recent/Favorites/folder picker, empty filtering,
+missing-file and unauthorized DAV/asset errors, scoped asset creation, and the
+image-selection postMessage path after an image-bearing release is deployed.
 
 ## Startup performance evidence (2026-07-20)
 

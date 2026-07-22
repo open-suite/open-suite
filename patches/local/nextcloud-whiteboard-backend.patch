@@ -1,0 +1,263 @@
+diff --git a/helmfile/apps/nextcloud/charts/nextcloud/templates/whiteboard-deployment.yaml b/helmfile/apps/nextcloud/charts/nextcloud/templates/whiteboard-deployment.yaml
+new file mode 100644
+index 0000000..f80ccc3
+--- /dev/null
++++ b/helmfile/apps/nextcloud/charts/nextcloud/templates/whiteboard-deployment.yaml
+@@ -0,0 +1,70 @@
++{{- if .Values.whiteboard.enabled }}
++apiVersion: apps/v1
++kind: Deployment
++metadata:
++  name: {{ include "common.names.fullname" . }}-whiteboard
++  namespace: {{ include "common.names.namespace" . | quote }}
++  labels: {{- include "common.labels.standard" (dict "customLabels" .Values.commonLabels "context" $) | nindent 4 }}
++    app.kubernetes.io/component: whiteboard
++spec:
++  replicas: 1
++  strategy:
++    type: Recreate
++  selector:
++    matchLabels: {{- include "common.labels.matchLabels" (dict "customLabels" .Values.commonLabels "context" $) | nindent 6 }}
++      app.kubernetes.io/component: whiteboard
++  template:
++    metadata:
++      labels: {{- include "common.labels.standard" (dict "customLabels" .Values.commonLabels "context" $) | nindent 8 }}
++        app.kubernetes.io/component: whiteboard
++    spec:
++      automountServiceAccountToken: false
++      securityContext:
++        runAsNonRoot: true
++        runAsUser: 65534
++        runAsGroup: 65534
++        fsGroup: 65534
++        seccompProfile:
++          type: RuntimeDefault
++      containers:
++        - name: whiteboard
++          image: {{ printf "%s/%s:%s@%s" .Values.whiteboard.image.registry .Values.whiteboard.image.repository .Values.whiteboard.image.tag .Values.whiteboard.image.digest | quote }}
++          imagePullPolicy: IfNotPresent
++          env:
++            - name: JWT_SECRET_KEY
++              valueFrom:
++                secretKeyRef:
++                  name: {{ include "common.names.fullname" . }}-whiteboard
++                  key: jwt-secret
++            - name: NEXTCLOUD_URL
++              value: {{ printf "https://%s" .Values.ingress.hostname | quote }}
++            - name: STORAGE_STRATEGY
++              value: lru
++            - name: HOST
++              value: 0.0.0.0
++          ports:
++            - name: http
++              containerPort: 3002
++              protocol: TCP
++          readinessProbe:
++            httpGet: { path: /, port: http }
++            periodSeconds: 10
++            timeoutSeconds: 3
++            failureThreshold: 6
++          livenessProbe:
++            httpGet: { path: /, port: http }
++            periodSeconds: 20
++            timeoutSeconds: 3
++            failureThreshold: 3
++          resources: {{- toYaml .Values.whiteboard.resources | nindent 12 }}
++          securityContext:
++            allowPrivilegeEscalation: false
++            readOnlyRootFilesystem: true
++            capabilities: { drop: ["ALL"] }
++          volumeMounts:
++            - name: tmp
++              mountPath: /tmp
++      volumes:
++        - name: tmp
++          emptyDir: {}
++{{- end }}
+diff --git a/helmfile/apps/nextcloud/charts/nextcloud/templates/whiteboard-ingress.yaml b/helmfile/apps/nextcloud/charts/nextcloud/templates/whiteboard-ingress.yaml
+new file mode 100644
+index 0000000..75ff4b6
+--- /dev/null
++++ b/helmfile/apps/nextcloud/charts/nextcloud/templates/whiteboard-ingress.yaml
+@@ -0,0 +1,39 @@
++{{- if and .Values.whiteboard.enabled (eq .Values.cluster.routingMode "ingress") }}
++{{- if ne .Values.cluster.ingress.type "traefik" }}
++{{- fail "Nextcloud Whiteboard currently requires Traefik path-prefix routing" }}
++{{- end }}
++apiVersion: traefik.io/v1alpha1
++kind: Middleware
++metadata:
++  name: {{ include "common.names.fullname" . }}-whiteboard-strip-prefix
++  namespace: {{ include "common.names.namespace" . | quote }}
++spec:
++  stripPrefix:
++    prefixes: ["/whiteboard"]
++---
++apiVersion: networking.k8s.io/v1
++kind: Ingress
++metadata:
++  name: {{ include "common.names.fullname" . }}-whiteboard
++  namespace: {{ include "common.names.namespace" . | quote }}
++  labels: {{- include "common.labels.standard" (dict "customLabels" .Values.commonLabels "context" $) | nindent 4 }}
++    app.kubernetes.io/component: whiteboard
++  annotations:
++    traefik.ingress.kubernetes.io/router.priority: "100"
++    traefik.ingress.kubernetes.io/router.middlewares: '{{ include "common.names.namespace" . }}-hsts-header@kubernetescrd{{ if .Values.whiteboard.authGateMiddleware }},{{ .Values.whiteboard.authGateMiddleware }}{{ end }},{{ include "common.names.namespace" . }}-{{ include "common.names.fullname" . }}-whiteboard-strip-prefix@kubernetescrd'
++spec:
++  ingressClassName: {{ .Values.ingress.ingressClassName | quote }}
++  rules:
++    - host: {{ .Values.ingress.hostname | quote }}
++      http:
++        paths:
++          - path: /whiteboard
++            pathType: Prefix
++            backend:
++              service:
++                name: {{ include "common.names.fullname" . }}-whiteboard
++                port: { name: http }
++  {{- if .Values.ingress.extraTls }}
++  tls: {{- toYaml .Values.ingress.extraTls | nindent 4 }}
++  {{- end }}
++{{- end }}
+diff --git a/helmfile/apps/nextcloud/charts/nextcloud/templates/whiteboard-networkpolicy.yaml b/helmfile/apps/nextcloud/charts/nextcloud/templates/whiteboard-networkpolicy.yaml
+new file mode 100644
+index 0000000..9fe77fb
+--- /dev/null
++++ b/helmfile/apps/nextcloud/charts/nextcloud/templates/whiteboard-networkpolicy.yaml
+@@ -0,0 +1,30 @@
++{{- if .Values.whiteboard.enabled }}
++apiVersion: networking.k8s.io/v1
++kind: NetworkPolicy
++metadata:
++  name: {{ include "common.names.fullname" . }}-whiteboard
++  namespace: {{ include "common.names.namespace" . | quote }}
++spec:
++  podSelector:
++    matchLabels: {{- include "common.labels.matchLabels" (dict "customLabels" .Values.commonLabels "context" $) | nindent 6 }}
++      app.kubernetes.io/component: whiteboard
++  policyTypes: [Ingress, Egress]
++  ingress:
++    - from:
++        - namespaceSelector:
++            matchLabels:
++              kubernetes.io/metadata.name: kube-system
++          podSelector:
++            matchLabels:
++              app.kubernetes.io/name: traefik
++      ports:
++        - { port: 3002, protocol: TCP }
++  egress:
++    - to:
++        - namespaceSelector:
++            matchLabels:
++              kubernetes.io/metadata.name: kube-system
++      ports:
++        - { port: 53, protocol: UDP }
++        - { port: 53, protocol: TCP }
++{{- end }}
+diff --git a/helmfile/apps/nextcloud/charts/nextcloud/templates/whiteboard-secret.yaml b/helmfile/apps/nextcloud/charts/nextcloud/templates/whiteboard-secret.yaml
+new file mode 100644
+index 0000000..b36856e
+--- /dev/null
++++ b/helmfile/apps/nextcloud/charts/nextcloud/templates/whiteboard-secret.yaml
+@@ -0,0 +1,14 @@
++{{- if .Values.whiteboard.enabled }}
++apiVersion: v1
++kind: Secret
++metadata:
++  name: {{ include "common.names.fullname" . }}-whiteboard
++  namespace: {{ include "common.names.namespace" . | quote }}
++  labels: {{- include "common.labels.standard" (dict "customLabels" .Values.commonLabels "context" $) | nindent 4 }}
++    app.kubernetes.io/component: whiteboard
++  annotations:
++    helm.sh/resource-policy: keep
++type: Opaque
++data:
++  jwt-secret: {{ include "common.secrets.passwords.manage" (dict "secret" (printf "%s-whiteboard" (include "common.names.fullname" .)) "key" "jwt-secret" "providedValues" (list "whiteboard.jwtSecret") "length" 64 "strong" true "context" $) }}
++{{- end }}
+diff --git a/helmfile/apps/nextcloud/charts/nextcloud/templates/whiteboard-service.yaml b/helmfile/apps/nextcloud/charts/nextcloud/templates/whiteboard-service.yaml
+new file mode 100644
+index 0000000..fba60ac
+--- /dev/null
++++ b/helmfile/apps/nextcloud/charts/nextcloud/templates/whiteboard-service.yaml
+@@ -0,0 +1,18 @@
++{{- if .Values.whiteboard.enabled }}
++apiVersion: v1
++kind: Service
++metadata:
++  name: {{ include "common.names.fullname" . }}-whiteboard
++  namespace: {{ include "common.names.namespace" . | quote }}
++  labels: {{- include "common.labels.standard" (dict "customLabels" .Values.commonLabels "context" $) | nindent 4 }}
++    app.kubernetes.io/component: whiteboard
++spec:
++  type: ClusterIP
++  selector: {{- include "common.labels.matchLabels" (dict "customLabels" .Values.commonLabels "context" $) | nindent 4 }}
++    app.kubernetes.io/component: whiteboard
++  ports:
++    - name: http
++      port: 3002
++      targetPort: http
++      protocol: TCP
++{{- end }}
+diff --git a/helmfile/apps/nextcloud/charts/nextcloud/values.yaml b/helmfile/apps/nextcloud/charts/nextcloud/values.yaml
+index 1dc0f9b..7947690 100644
+--- a/helmfile/apps/nextcloud/charts/nextcloud/values.yaml
++++ b/helmfile/apps/nextcloud/charts/nextcloud/values.yaml
+@@ -1229,6 +1229,18 @@ collabora:
+   url: ""
+   wopi_allowlist: ""
+-
++
++whiteboard:
++  enabled: false
++  collabBackendUrl: ""
++  jwtSecret: ""
++  authGateMiddleware: ""
++  image:
++    registry: ghcr.io
++    repository: nextcloud-releases/whiteboard
++    tag: v1.5.9
++    digest: sha256:b60b7633f90d106ac6922f9bc27e1a1ca2442488b740fefdae4c812f34e9cebc
++  resources: {}
++
+ ## @section Files Configuration Parameters
+-
++
+ ## Nextcloud Files app configuration
+diff --git a/helmfile/apps/nextcloud/values.yaml.gotmpl b/helmfile/apps/nextcloud/values.yaml.gotmpl
+index 21d9dcd..e659c0f 100644
+--- a/helmfile/apps/nextcloud/values.yaml.gotmpl
++++ b/helmfile/apps/nextcloud/values.yaml.gotmpl
+@@ -224,5 +224,31 @@ collabora:
+ {{- end }}
+-
++
++# Whiteboard v1.5.9 requires its websocket coordinator to designate the browser
++# that durably writes the Nextcloud file. Keep it same-origin and behind the
++# suite auth gate under /whiteboard.
++whiteboard:
++  enabled: true
++  collabBackendUrl: "https://{{ .Values.global.hostname.nextcloud }}.{{ .Values.global.domain }}/whiteboard"
++  jwtSecret: {{ derivePassword 1 "long" (requiredEnv "MIJNBUREAU_MASTER_PASSWORD") "nextcloud" "whiteboardJwtSecret" | sha1sum | quote }}
++  authGateMiddleware: '{{ if dig "opensuite" "authGate" "enabled" false .Values }}{{ .Values.application.bureaublad.namespace }}-opensuite-auth-gate@kubernetescrd{{ end }}'
++  image:
++    registry: {{ .Values.container.nextcloud.whiteboard.registry | quote }}
++    repository: {{ .Values.container.nextcloud.whiteboard.repository | quote }}
++    tag: {{ .Values.container.nextcloud.whiteboard.tag | quote }}
++    digest: {{ .Values.container.nextcloud.whiteboard.digest | quote }}
++  resources: {{ .Values.resource.nextcloud.whiteboard | default dict | toYaml | nindent 4 }}
++
++# The image's before-starting hook owns strict, repeatable app enablement and
++# config. Both the app and backend read the same retained Helm secret.
++extraEnvVars:
++  - name: WHITEBOARD_COLLAB_BACKEND_URL
++    value: "https://{{ .Values.global.hostname.nextcloud }}.{{ .Values.global.domain }}/whiteboard"
++  - name: WHITEBOARD_JWT_SECRET
++    valueFrom:
++      secretKeyRef:
++        name: nextcloud-whiteboard
++        key: jwt-secret
++
+ # Default storage quota per user
+ files:
+   defaultQuota: {{ .Values.application.nextcloud.defaultQuota | default "10 GB" | quote }}

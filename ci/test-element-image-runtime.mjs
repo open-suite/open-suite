@@ -31,6 +31,8 @@ for (const fragment of [
     "FROM scratch",
     "COPY --from=runtime-files / /",
     "COPY --from=patcher /app /app",
+    "COPY patch-sso-history.sh /tmp/patch-sso-history.sh",
+    "&& sh /tmp/patch-sso-history.sh /app",
     "ELEMENT_WEB_PORT=80",
     "EXPOSE 8080",
     "STOPSIGNAL SIGQUIT",
@@ -256,6 +258,10 @@ test "$bundle_count" -eq 1
 bundle_name="$(basename "$(find /app/bundles -mindepth 1 -maxdepth 1 -type d)")"
 gzip_count="$(find /app -type f -name '*.gz' | wc -l | tr -d ' ')"
 test "$gzip_count" -gt 0
+init_js="$(find /app/bundles -name init.js)"
+test "$(printf '%s\n' "$init_js" | sed '/^$/d' | wc -l | tr -d ' ')" -eq 1
+grep -F 'window.location.replace(e.getSsoLoginUrl(o.toString(),t,r,i))' "$init_js" >/dev/null
+! grep -F 'window.location.href=e.getSsoLoginUrl(o.toString(),t,r,i)' "$init_js" >/dev/null
 find /app -type f -name '*.gz' -print0 | xargs -0 gzip -t
 printf 'bundle=%s gzip=%s' "$bundle_name" "$gzip_count"
 `,

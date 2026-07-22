@@ -64,6 +64,27 @@ const browser = await chromium.launch();
 // SMOKE_INSECURE=1: tolerate self-signed certs (local VM deploys).
 const ctx = await browser.newContext({ ignoreHTTPSErrors: process.env.SMOKE_INSECURE === "1" });
 const page = await ctx.newPage();
+await page.addInitScript(() => {
+  window.__openSuiteFirstPaint = [];
+  const sample = () => {
+    const shell = document.getElementById("ko-portal-header");
+    const nativeHeader = document.getElementById("header");
+    const content = document.getElementById("content");
+    const pendingStyle = getComputedStyle(document.documentElement, "::before");
+    window.__openSuiteFirstPaint.push({
+      shell: shell && shell.getBoundingClientRect().toJSON(),
+      shellColor: shell && getComputedStyle(shell).backgroundColor,
+      pending: document.documentElement.classList.contains("ko-shell-pending") && {
+        height: Number.parseFloat(pendingStyle.height),
+        color: pendingStyle.backgroundColor,
+      },
+      nativeHeader: nativeHeader && nativeHeader.getBoundingClientRect().toJSON(),
+      content: content && content.getBoundingClientRect().toJSON(),
+    });
+    if (window.__openSuiteFirstPaint.length < 120) requestAnimationFrame(sample);
+  };
+  requestAnimationFrame(sample);
+});
 const elementRuntimeErrors = [];
 const recordElementError = (message) => {
   if (
@@ -101,6 +122,19 @@ try {
   await dashboard.waitFor({ timeout: 30000 });
   ok("portal renders (dashboard widgets present)");
 
+  await page.waitForTimeout(250);
+  const portalFrames = await page.evaluate(() => window.__openSuiteFirstPaint);
+  const hasValidShellRow = (frame) =>
+    (frame.shell?.height === 48 && frame.shell?.y === 0 && frame.shellColor === "rgb(11, 31, 51)") ||
+    (frame.pending?.height === 48 && frame.pending?.color === "rgb(11, 31, 51)");
+  if (
+    portalFrames.length > 0 &&
+    portalFrames.every(hasValidShellRow) &&
+    portalFrames.some((frame) => frame.shell && !frame.pending)
+  )
+    ok("portal first-frame filmstrip keeps the 48px Open Suite shell");
+  else fail("portal first-frame shell", JSON.stringify(portalFrames));
+
   const gateCookie = (await ctx.cookies()).find((cookie) => cookie.name === "opensuite_auth");
   if (gateCookie?.expires === -1)
     ok("edge gate session lifetime matches Keycloak's browser session");
@@ -120,6 +154,14 @@ try {
   if (JSON.stringify(desktopTopLevel) === JSON.stringify(expectedTopLevel))
     ok("suite navigation has the canonical desktop order");
   else fail("suite navigation order", `expected ${expectedTopLevel}, got ${desktopTopLevel}`);
+
+  const chatHref = await page
+    .locator("#ko-portal-header")
+    .getByRole("link", { name: "Chat", exact: true })
+    .getAttribute("href");
+  if (chatHref === `https://element.${DOMAIN}/#/home`)
+    ok("Chat uses Element's canonical home entry route");
+  else fail("Chat entry route", `unexpected href: ${chatHref}`);
 
   const moreButton = page
     .locator("#ko-portal-header .ko-desktop-nav")
@@ -208,10 +250,18 @@ try {
     );
   await assertGlobalHeader("messages");
 
-  // Reproduce the real first-session path before any direct Nextcloud warm-up:
-  // Mail -> portal -> Office -> Spreadsheets must remain one SSO session.
+  // Reproduce the lane-3 path before any direct Nextcloud warm-up. Native
+  // user_oidc must return to Calendar, not its historical Files fallback.
   await page.goto(`https://bridge.${DOMAIN}/`, { waitUntil: "domcontentloaded" });
   const suiteHeader = page.locator("#ko-portal-header");
+  await suiteHeader.getByRole("link", { name: "Calendar", exact: true }).click();
+  await page.waitForURL(`https://nextcloud.${DOMAIN}/apps/calendar**`, { timeout: 30000 });
+  if (page.url().includes("/apps/calendar"))
+    ok("Portal -> Calendar preserves the requested path through native OIDC");
+  else fail("Portal -> Calendar return path", `landed on ${page.url()}`);
+
+  // The same first-session must also retain existing Office deep links.
+  await page.goto(`https://bridge.${DOMAIN}/`, { waitUntil: "domcontentloaded" });
   const officeButton = suiteHeader.getByRole("button", { name: "Office ▾", exact: true });
   await officeButton.click();
   const spreadsheetsLink = suiteHeader.getByRole("link", { name: "Spreadsheets", exact: true });
@@ -230,6 +280,59 @@ try {
 
   // The Office path above establishes Nextcloud's user_oidc session and stores
   // the login token the meetcal/caldav token exchange needs.
+  //
+  // Reproduce the Portal -> Element history path before warming Element by a
+  // direct navigation. A fresh Element origin takes the immediate SSO path;
+  // one Back must therefore skip every login/callback URL and return to the
+  // meaningful Portal page. Forward must restore the usable canonical home.
+  await page.goto(`https://bridge.${DOMAIN}/`, { waitUntil: "domcontentloaded" });
+  await page.locator(".dashboard-grid").waitFor({ state: "visible", timeout: 30000 });
+  const chatLink = page
+    .locator("#ko-portal-header")
+    .getByRole("link", { name: "Chat", exact: true });
+  await chatLink.click();
+  await page.waitForURL(`https://element.${DOMAIN}/#/home`, { timeout: 45000 });
+  await page.getByText("Send a Direct Message", { exact: true }).waitFor({
+    state: "visible",
+    timeout: 45000,
+  });
+  ok("Portal Chat opens usable Element home");
+
+  await page.goBack({ waitUntil: "domcontentloaded", timeout: 30000 });
+  await page.waitForURL(`https://bridge.${DOMAIN}/**`, { timeout: 30000 });
+  await page.locator(".dashboard-grid").waitFor({ state: "visible", timeout: 30000 });
+  ok("Element home Back skips root/login/callback history and returns to Portal");
+
+  await page.goForward({ waitUntil: "domcontentloaded", timeout: 30000 });
+  await page.waitForURL(`https://element.${DOMAIN}/#/home`, { timeout: 30000 });
+  await page.getByText("Send a Direct Message", { exact: true }).waitFor({
+    state: "visible",
+    timeout: 45000,
+  });
+  ok("Element home Forward restores a usable destination");
+
+  // Explicit room hashes are a separate supported entry contract. They must
+  // remain intact (including across auth restoration), while Back/Forward must
+  // still traverse directly between that room and Portal.
+  const welcomeRoomUrl = `https://element.${DOMAIN}/#/room/#welcome:matrix.${DOMAIN}`;
+  await page.goto(`https://bridge.${DOMAIN}/`, { waitUntil: "domcontentloaded" });
+  await page.locator(".dashboard-grid").waitFor({ state: "visible", timeout: 30000 });
+  await page.goto(welcomeRoomUrl, { waitUntil: "domcontentloaded" }).catch(() => null);
+  await page.waitForURL(`https://element.${DOMAIN}/#/room/**`, { timeout: 30000 });
+  const restoredRoomUrl = page.url();
+  if (restoredRoomUrl.startsWith(`https://element.${DOMAIN}/#/room/`))
+    ok("Element room deep link restores as a room route");
+  else fail("Element room deep link", `landed on ${restoredRoomUrl}`);
+
+  await page.goBack({ waitUntil: "domcontentloaded", timeout: 30000 });
+  await page.waitForURL(`https://bridge.${DOMAIN}/**`, { timeout: 30000 });
+  await page.locator(".dashboard-grid").waitFor({ state: "visible", timeout: 30000 });
+  ok("Element room Back skips login/callback history and returns to Portal");
+
+  await page.goForward({ waitUntil: "domcontentloaded", timeout: 30000 });
+  await page.waitForURL((url) => url.toString() === restoredRoomUrl, { timeout: 30000 });
+  ok("Element room Forward restores the deep link");
+
   for (const host of ["nextcloud", "grist", "docs", "meet", "element"]) {
     // Some OIDC SPAs replace the initial navigation while Playwright is still
     // awaiting it, which surfaces as net::ERR_ABORTED even though the redirect
@@ -324,6 +427,22 @@ try {
   // --- meetcal mints a joinable room ----------------------------------------
   // Needs the Nextcloud session (same browser context) + CSRF token.
   await page.goto(`https://nextcloud.${DOMAIN}/apps/calendar/`, { waitUntil: "domcontentloaded" });
+  await page.waitForURL(`https://nextcloud.${DOMAIN}/apps/calendar**`, { timeout: 30000 });
+  await page.waitForTimeout(250);
+  const calendarFrames = await page.evaluate(() => window.__openSuiteFirstPaint);
+  const calendarViewportHeight = page.viewportSize().height;
+  const calendarGeometry = calendarFrames.filter((frame) => frame.nativeHeader || frame.content);
+  if (
+    calendarGeometry.length > 0 &&
+    calendarGeometry.every((frame) =>
+      hasValidShellRow(frame) && frame.nativeHeader && frame.content &&
+      frame.nativeHeader.y >= 48 &&
+      frame.content.y >= frame.nativeHeader.y + frame.nativeHeader.height - 1 &&
+      frame.content.y + frame.content.height <= calendarViewportHeight + 1
+    ) && calendarGeometry.some((frame) => frame.shell && !frame.pending)
+  )
+    ok("Nextcloud Calendar filmstrip keeps suite and native controls in separate rows");
+  else fail("Nextcloud Calendar first-frame geometry", JSON.stringify(calendarGeometry));
   const room = await page.evaluate(async () => {
     const token = document.querySelector("head[data-requesttoken]")?.dataset.requesttoken ?? "";
     const create = async () => {
@@ -353,6 +472,105 @@ try {
       "meetcal room idempotency",
       `HTTP ${room.first.status}/${room.second.status}, URLs ${firstRoomUrl}/${secondRoomUrl}`
     );
+
+  // --- Whiteboard: create, edit, persist, reopen, and clean up --------------
+  // app:list is not sufficient: this exercises template registration, the
+  // canonical MIME, Viewer handler, editor assets, save path and WebDAV state.
+  const whiteboardName = `Open Suite smoke ${Date.now()}`;
+  const whiteboardFile = `${whiteboardName}.whiteboard`;
+  const whiteboardMarker = "opensuite-whiteboard-smoke-marker";
+  try {
+    await page.goto(`https://nextcloud.${DOMAIN}/apps/files/`, { waitUntil: "domcontentloaded" });
+    await page.getByRole("button", { name: "New", exact: true }).waitFor({ state: "visible", timeout: 30000 });
+    await page.getByRole("button", { name: "New", exact: true }).click();
+    const newWhiteboard = page.getByRole("menuitem", { name: "New whiteboard", exact: true });
+    await newWhiteboard.waitFor({ state: "visible", timeout: 15000 });
+    await newWhiteboard.click();
+
+    const createDialog = page.locator("[data-cy-files-new-node-dialog]").first();
+    await createDialog.waitFor({ state: "visible", timeout: 15000 });
+    const nameField = createDialog.getByRole("textbox", { name: /name/i }).first();
+    await nameField.waitFor({ state: "visible", timeout: 10000 });
+    await nameField.fill(whiteboardName);
+    const create = createDialog.getByRole("button", { name: "Create", exact: true }).first();
+    await create.waitFor({ state: "visible", timeout: 10000 });
+    await create.click();
+
+    const interactiveCanvas = page.locator(".excalidraw__canvas.interactive").first();
+    await interactiveCanvas.waitFor({ state: "visible", timeout: 30000 }).catch(() => {});
+    const canvas = (await interactiveCanvas.count())
+      ? interactiveCanvas
+      : page.locator(".excalidraw__canvas").first();
+    await canvas.waitFor({ state: "visible", timeout: 60000 });
+    const viewerHandler = await page.evaluate(() => {
+      const handlers = window.OCA?.Viewer?.availableHandlers;
+      const whiteboard = Array.isArray(handlers)
+        ? handlers.find((handler) => handler?.id === "whiteboard")
+        : null;
+      return whiteboard ? { id: whiteboard.id, mimes: whiteboard.mimes } : null;
+    });
+    if (viewerHandler?.mimes?.includes("application/vnd.excalidraw+json"))
+      ok("Whiteboard Viewer handler owns application/vnd.excalidraw+json");
+    else fail("Whiteboard Viewer handler", JSON.stringify(viewerHandler));
+
+    const textTool = page.locator('[title^="Text"]').first();
+    await textTool.waitFor({ state: "visible", timeout: 10000 });
+    await textTool.click();
+    const canvasBox = await canvas.boundingBox();
+    if (!canvasBox) throw new Error("Whiteboard canvas has no interaction geometry");
+    const whiteboardEditor = page.locator(".excalidraw-textEditorContainer textarea").first();
+    for (let attempt = 0; attempt < 4 && !(await whiteboardEditor.isVisible()); attempt++) {
+      await page.mouse.click(canvasBox.x + canvasBox.width / 2, canvasBox.y + canvasBox.height / 2);
+      await page.waitForTimeout(300);
+    }
+    await whiteboardEditor.waitFor({ state: "visible", timeout: 10000 });
+    await whiteboardEditor.fill(whiteboardMarker);
+    await whiteboardEditor.press("Escape");
+    await whiteboardEditor.waitFor({ state: "hidden", timeout: 5000 });
+
+    const persisted = await page.evaluate(async ({ fileName, marker }) => {
+      const uid = OC.getCurrentUser().uid;
+      const url = `/remote.php/dav/files/${encodeURIComponent(uid)}/${encodeURIComponent(fileName)}`;
+      for (let attempt = 0; attempt < 30; attempt++) {
+        const propfind = await fetch(url, {
+          method: "PROPFIND",
+          headers: { requesttoken: OC.requestToken, Depth: "0" },
+        });
+        const properties = await propfind.text();
+        const content = propfind.ok ? await fetch(url, {
+          headers: { requesttoken: OC.requestToken },
+        }) : null;
+        const body = content?.ok ? await content.text() : "";
+        if (properties.includes("application/vnd.excalidraw+json") && body.includes(marker)) {
+          return { ok: true, status: propfind.status };
+        }
+        await new Promise((resolve) => setTimeout(resolve, 500));
+      }
+      return { ok: false };
+    }, { fileName: whiteboardFile, marker: whiteboardMarker });
+    if (persisted.ok) ok("Whiteboard edit persists with canonical WebDAV MIME");
+    else fail("Whiteboard persistence/MIME", JSON.stringify(persisted));
+
+    await page.reload({ waitUntil: "domcontentloaded" });
+    await canvas.waitFor({ state: "visible", timeout: 60000 });
+    if (await page.locator('[title^="Text"]').first().isVisible())
+      ok("Whiteboard reopens as an editable canvas");
+    else fail("Whiteboard reopen", "editor toolbar is not visible after reload");
+  } catch (e) {
+    fail("Whiteboard editable-board contract", e.message.slice(0, 180));
+  } finally {
+    const removed = await page.evaluate(async (fileName) => {
+      if (!window.OC?.getCurrentUser) return false;
+      const uid = OC.getCurrentUser().uid;
+      const response = await fetch(
+        `/remote.php/dav/files/${encodeURIComponent(uid)}/${encodeURIComponent(fileName)}`,
+        { method: "DELETE", headers: { requesttoken: OC.requestToken } },
+      );
+      return response.ok || response.status === 404;
+    }, whiteboardFile).catch(() => false);
+    if (removed) ok("cleaned up smoke-created whiteboard");
+    else fail("Whiteboard cleanup", `could not delete ${whiteboardFile}`);
+  }
 
   // --- Matrix SSO flows through without a consent screen --------------------
   // (sso.client_whitelist; the Chat widget breaks UX without it)
@@ -450,6 +668,185 @@ try {
         );
       }
       await page.setViewportSize({ width: 1280, height: 720 });
+    }
+
+    // richdocuments' Insert Image flow crosses three security boundaries:
+    // Collabora asks the parent to open the picker, the authenticated parent
+    // lists files over DAV, and the selected file is copied through the assets
+    // endpoint before its URL is posted back to the cross-origin editor.
+    if (editorUp && editorControlsVisible) {
+      const fixtureFolder = `OpenSuite-Smoke-InsertImage-${Date.now()}`;
+      let fixtureBase = "";
+      try {
+        const fixtures = await page.evaluate(async ({ fixtureFolder }) => {
+          const uid = OC.getCurrentUser().uid;
+          const root = `/remote.php/dav/files/${encodeURIComponent(uid)}/`;
+          const base = `${root}${encodeURIComponent(fixtureFolder)}/`;
+          const headers = { requesttoken: OC.requestToken };
+          const png = Uint8Array.from(atob(
+            "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAFgwJ/l1O1WQAAAABJRU5ErkJggg=="
+          ), c => c.charCodeAt(0));
+          const jpeg = Uint8Array.from(atob(
+            "/9j/4AAQSkZJRgABAQAAAQABAAD/2wBDAP//////////////////////////////////////////////////////////////////////////////////////2wBDAf//////////////////////////////////////////////////////////////////////////////////////wAARCAABAAEDASIAAhEBAxEB/8QAFQABAQAAAAAAAAAAAAAAAAAAAAX/xAAUEAEAAAAAAAAAAAAAAAAAAAAA/9oADAMBAAIQAxAAAAEf/8QAFBABAAAAAAAAAAAAAAAAAAAAAP/aAAgBAQABBQJ//8QAFBEBAAAAAAAAAAAAAAAAAAAAAP/aAAgBAwEBPwF//8QAFBEBAAAAAAAAAAAAAAAAAAAAAP/aAAgBAgEBPwF//8QAFBABAAAAAAAAAAAAAAAAAAAAAP/aAAgBAQAGPwJ//8QAFBABAAAAAAAAAAAAAAAAAAAAAP/aAAgBAQABPyF//9oADAMBAAIAAwAAABAf/8QAFBEBAAAAAAAAAAAAAAAAAAAAAP/aAAgBAwEBPxB//8QAFBEBAAAAAAAAAAAAAAAAAAAAAP/aAAgBAgEBPxB//8QAFBABAAAAAAAAAAAAAAAAAAAAAP/aAAgBAQABPxB//9k="
+          ), c => c.charCodeAt(0));
+          const request = async (url, init) => {
+            const response = await fetch(url, init);
+            return response.status;
+          };
+          const statuses = {
+            mkdir: await request(base, { method: "MKCOL", headers }),
+            png: await request(`${base}picker-smoke.png`, {
+              method: "PUT", headers: { ...headers, "Content-Type": "image/png" }, body: png,
+            }),
+            jpeg: await request(`${base}picker-smoke.jpg`, {
+              method: "PUT", headers: { ...headers, "Content-Type": "image/jpeg" }, body: jpeg,
+            }),
+          };
+          statuses.favorite = await request(`${base}picker-smoke.png`, {
+            method: "PROPPATCH",
+            headers: { ...headers, "Content-Type": "application/xml; charset=utf-8" },
+            body: '<?xml version="1.0"?><d:propertyupdate xmlns:d="DAV:" xmlns:oc="http://owncloud.org/ns"><d:set><d:prop><oc:favorite>1</oc:favorite></d:prop></d:set></d:propertyupdate>',
+          });
+          return { uid, root, base, statuses };
+        }, { fixtureFolder });
+        fixtureBase = fixtures.base;
+        if (
+          fixtures.statuses.mkdir === 201
+          && [200, 201, 204].includes(fixtures.statuses.png)
+          && [200, 201, 204].includes(fixtures.statuses.jpeg)
+          && fixtures.statuses.favorite === 207
+        ) ok("Insert Image fixtures created and PNG marked favorite over authenticated DAV");
+        else throw new Error(`fixture DAV statuses ${JSON.stringify(fixtures.statuses)}`);
+
+        const missingAsset = await page.evaluate(async () => {
+          const response = await fetch("/apps/richdocuments/assets", {
+            method: "POST",
+            credentials: "same-origin",
+            headers: {
+              requesttoken: OC.requestToken,
+              "Content-Type": "application/json",
+            },
+            body: JSON.stringify({ path: "/OpenSuite-Smoke-Missing-Image.png" }),
+          });
+          return response.status;
+        });
+        if (missingAsset === 404) ok("richdocuments asset creation reports a missing-file error");
+        else throw new Error(`missing richdocuments asset returned HTTP ${missingAsset}, expected 404`);
+
+        const anonymous = await browser.newContext({
+          ignoreHTTPSErrors: process.env.SMOKE_INSECURE === "1",
+        });
+        try {
+          const anonymousDav = await anonymous.request.fetch(
+            `https://nextcloud.${DOMAIN}${fixtures.root}`,
+            { method: "PROPFIND", headers: { Depth: "1" }, maxRedirects: 0 }
+          );
+          if ([401, 403].includes(anonymousDav.status()) || (anonymousDav.status() >= 300 && anonymousDav.status() < 400))
+            ok(`unauthenticated DAV root listing is denied (HTTP ${anonymousDav.status()})`);
+          else throw new Error(`unauthenticated PROPFIND returned HTTP ${anonymousDav.status()} (must never be 207)`);
+
+          const anonymousAsset = await anonymous.request.post(
+            `https://nextcloud.${DOMAIN}/apps/richdocuments/assets`,
+            {
+              data: { path: `/${fixtureFolder}/picker-smoke.png` },
+              maxRedirects: 0,
+            }
+          );
+          if (anonymousAsset.status() >= 300)
+            ok(`unauthenticated richdocuments asset creation is denied (HTTP ${anonymousAsset.status()})`);
+          else throw new Error(`unauthenticated asset POST returned HTTP ${anonymousAsset.status()}`);
+        } finally {
+          await anonymous.close();
+        }
+
+        const cool = page.frames().find(f => f.url().includes("cool.html"));
+        if (!cool) throw new Error("Collabora frame disappeared before Insert Image automation");
+        await cool.evaluate(() => {
+          window.__openSuiteInsertGraphicMessages = [];
+          window.addEventListener("message", event => {
+            const value = typeof event.data === "string" ? event.data : JSON.stringify(event.data);
+            if (/Action_InsertGraphic/.test(value || "")) window.__openSuiteInsertGraphicMessages.push(value);
+          });
+        });
+
+        const allFilesDav = page.waitForResponse(response =>
+          response.request().method() === "PROPFIND"
+          && response.url().includes("/remote.php/dav/files/"), { timeout: 15000 });
+        try {
+          await cool.getByText("Insert", { exact: true }).first().click({ timeout: 5000 });
+          const imageCommand = cool.getByText(/^(Image|Image\.\.\.|Insert Image)$/i).last();
+          await imageCommand.click({ timeout: 5000 });
+        } catch (error) {
+          const visible = (await cool.locator("body").innerText().catch(() => "")).slice(0, 1000);
+          throw new Error(`could not invoke Collabora Insert > Image: ${error.message}; frame text=${JSON.stringify(visible)}`);
+        }
+
+        const picker = page.getByRole("dialog").filter({ hasText: "Insert file from Open Suite" });
+        await picker.getByText("Insert file from Open Suite", { exact: true }).waitFor({ timeout: 15000 });
+        await picker.getByText("All files", { exact: true }).waitFor({ state: "visible" });
+        const allFilesResponse = await allFilesDav;
+        if (allFilesResponse.status() === 207) ok("Insert Image All files DAV listing succeeds");
+        else throw new Error(`All files PROPFIND returned HTTP ${allFilesResponse.status()}`);
+
+        await picker.getByText(fixtureFolder, { exact: true }).click();
+        await picker.getByText("picker-smoke.png", { exact: true }).waitFor({ state: "visible" });
+        await picker.getByText("picker-smoke.jpg", { exact: true }).waitFor({ state: "visible" });
+        ok("Insert Image renders folder navigation and PNG/JPEG fixtures");
+
+        const recentDav = page.waitForResponse(response =>
+          response.request().method() === "SEARCH" && response.url().includes("/remote.php/dav/"),
+          { timeout: 15000 });
+        await picker.getByText("Recent", { exact: true }).click();
+        const recentResponse = await recentDav;
+        if (recentResponse.status() !== 207) throw new Error(`Recent DAV SEARCH returned HTTP ${recentResponse.status()}`);
+        await picker.getByText(/picker-smoke\.(png|jpg)/).first().waitFor({ state: "visible" });
+        ok("Insert Image Recent DAV search succeeds and renders a fixture");
+
+        const favoritesDav = page.waitForResponse(response =>
+          response.request().method() === "REPORT" && response.url().includes("/remote.php/dav/"),
+          { timeout: 15000 });
+        await picker.getByText("Favorites", { exact: true }).click();
+        const favoritesResponse = await favoritesDav;
+        if (favoritesResponse.status() !== 207) throw new Error(`Favorites DAV REPORT returned HTTP ${favoritesResponse.status()}`);
+        await picker.getByText("picker-smoke.png", { exact: true }).waitFor({ state: "visible" });
+        ok("Insert Image Favorites DAV search succeeds and renders favorited PNG");
+
+        const filter = picker.getByRole("textbox", { name: "Filter file list" });
+        await filter.fill("guaranteed-no-match-opensuite-smoke");
+        await picker.getByText("picker-smoke.png", { exact: true }).waitFor({ state: "hidden" });
+        await picker.getByText("No matching files", { exact: true }).waitFor({ state: "visible" });
+        ok("Insert Image text filter renders a guaranteed empty listing");
+        await filter.fill("");
+        await picker.getByText("picker-smoke.png", { exact: true }).click();
+
+        const assetPost = page.waitForResponse(response =>
+          response.request().method() === "POST"
+          && response.url().includes("/apps/richdocuments/assets"), { timeout: 15000 });
+        await picker.getByRole("button", { name: "Insert file", exact: true }).click();
+        const assetResponse = await assetPost;
+        if (!assetResponse.ok()) throw new Error(`richdocuments asset POST returned HTTP ${assetResponse.status()}`);
+        ok(`Insert Image asset POST succeeds (HTTP ${assetResponse.status()})`);
+        await cool.waitForFunction(
+          () => window.__openSuiteInsertGraphicMessages?.length > 0,
+          null,
+          { timeout: 15000 }
+        );
+        ok("Action_InsertGraphic reaches the cross-origin Collabora frame");
+      } catch (error) {
+        fail("Collabora Insert Image picker", error.message.slice(0, 1000));
+      } finally {
+        if (fixtureBase) {
+          const cleanupStatus = await page.evaluate(async ({ fixtureBase }) => {
+            const response = await fetch(fixtureBase, {
+              method: "DELETE",
+              headers: { requesttoken: OC.requestToken },
+            });
+            return response.status;
+          }, { fixtureBase }).catch(() => -1);
+          if ([200, 204].includes(cleanupStatus)) ok(`cleaned Insert Image fixture folder ${fixtureFolder}`);
+          else fail("Insert Image fixture cleanup", `DELETE returned HTTP ${cleanupStatus}`);
+        }
+      }
     }
 
     // Clean up: the New→Document click above creates a real file every run
