@@ -452,6 +452,185 @@ try {
       await page.setViewportSize({ width: 1280, height: 720 });
     }
 
+    // richdocuments' Insert Image flow crosses three security boundaries:
+    // Collabora asks the parent to open the picker, the authenticated parent
+    // lists files over DAV, and the selected file is copied through the assets
+    // endpoint before its URL is posted back to the cross-origin editor.
+    if (editorUp && editorControlsVisible) {
+      const fixtureFolder = `OpenSuite-Smoke-InsertImage-${Date.now()}`;
+      let fixtureBase = "";
+      try {
+        const fixtures = await page.evaluate(async ({ fixtureFolder }) => {
+          const uid = OC.getCurrentUser().uid;
+          const root = `/remote.php/dav/files/${encodeURIComponent(uid)}/`;
+          const base = `${root}${encodeURIComponent(fixtureFolder)}/`;
+          const headers = { requesttoken: OC.requestToken };
+          const png = Uint8Array.from(atob(
+            "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAFgwJ/l1O1WQAAAABJRU5ErkJggg=="
+          ), c => c.charCodeAt(0));
+          const jpeg = Uint8Array.from(atob(
+            "/9j/4AAQSkZJRgABAQAAAQABAAD/2wBDAP//////////////////////////////////////////////////////////////////////////////////////2wBDAf//////////////////////////////////////////////////////////////////////////////////////wAARCAABAAEDASIAAhEBAxEB/8QAFQABAQAAAAAAAAAAAAAAAAAAAAX/xAAUEAEAAAAAAAAAAAAAAAAAAAAA/9oADAMBAAIQAxAAAAEf/8QAFBABAAAAAAAAAAAAAAAAAAAAAP/aAAgBAQABBQJ//8QAFBEBAAAAAAAAAAAAAAAAAAAAAP/aAAgBAwEBPwF//8QAFBEBAAAAAAAAAAAAAAAAAAAAAP/aAAgBAgEBPwF//8QAFBABAAAAAAAAAAAAAAAAAAAAAP/aAAgBAQAGPwJ//8QAFBABAAAAAAAAAAAAAAAAAAAAAP/aAAgBAQABPyF//9oADAMBAAIAAwAAABAf/8QAFBEBAAAAAAAAAAAAAAAAAAAAAP/aAAgBAwEBPxB//8QAFBEBAAAAAAAAAAAAAAAAAAAAAP/aAAgBAgEBPxB//8QAFBABAAAAAAAAAAAAAAAAAAAAAP/aAAgBAQABPxB//9k="
+          ), c => c.charCodeAt(0));
+          const request = async (url, init) => {
+            const response = await fetch(url, init);
+            return response.status;
+          };
+          const statuses = {
+            mkdir: await request(base, { method: "MKCOL", headers }),
+            png: await request(`${base}picker-smoke.png`, {
+              method: "PUT", headers: { ...headers, "Content-Type": "image/png" }, body: png,
+            }),
+            jpeg: await request(`${base}picker-smoke.jpg`, {
+              method: "PUT", headers: { ...headers, "Content-Type": "image/jpeg" }, body: jpeg,
+            }),
+          };
+          statuses.favorite = await request(`${base}picker-smoke.png`, {
+            method: "PROPPATCH",
+            headers: { ...headers, "Content-Type": "application/xml; charset=utf-8" },
+            body: '<?xml version="1.0"?><d:propertyupdate xmlns:d="DAV:" xmlns:oc="http://owncloud.org/ns"><d:set><d:prop><oc:favorite>1</oc:favorite></d:prop></d:set></d:propertyupdate>',
+          });
+          return { uid, root, base, statuses };
+        }, { fixtureFolder });
+        fixtureBase = fixtures.base;
+        if (
+          fixtures.statuses.mkdir === 201
+          && [200, 201, 204].includes(fixtures.statuses.png)
+          && [200, 201, 204].includes(fixtures.statuses.jpeg)
+          && fixtures.statuses.favorite === 207
+        ) ok("Insert Image fixtures created and PNG marked favorite over authenticated DAV");
+        else throw new Error(`fixture DAV statuses ${JSON.stringify(fixtures.statuses)}`);
+
+        const missingAsset = await page.evaluate(async () => {
+          const response = await fetch("/apps/richdocuments/assets", {
+            method: "POST",
+            credentials: "same-origin",
+            headers: {
+              requesttoken: OC.requestToken,
+              "Content-Type": "application/json",
+            },
+            body: JSON.stringify({ path: "/OpenSuite-Smoke-Missing-Image.png" }),
+          });
+          return response.status;
+        });
+        if (missingAsset === 404) ok("richdocuments asset creation reports a missing-file error");
+        else throw new Error(`missing richdocuments asset returned HTTP ${missingAsset}, expected 404`);
+
+        const anonymous = await browser.newContext({
+          ignoreHTTPSErrors: process.env.SMOKE_INSECURE === "1",
+        });
+        try {
+          const anonymousDav = await anonymous.request.fetch(
+            `https://nextcloud.${DOMAIN}${fixtures.root}`,
+            { method: "PROPFIND", headers: { Depth: "1" }, maxRedirects: 0 }
+          );
+          if ([401, 403].includes(anonymousDav.status()) || (anonymousDav.status() >= 300 && anonymousDav.status() < 400))
+            ok(`unauthenticated DAV root listing is denied (HTTP ${anonymousDav.status()})`);
+          else throw new Error(`unauthenticated PROPFIND returned HTTP ${anonymousDav.status()} (must never be 207)`);
+
+          const anonymousAsset = await anonymous.request.post(
+            `https://nextcloud.${DOMAIN}/apps/richdocuments/assets`,
+            {
+              data: { path: `/${fixtureFolder}/picker-smoke.png` },
+              maxRedirects: 0,
+            }
+          );
+          if (anonymousAsset.status() >= 300)
+            ok(`unauthenticated richdocuments asset creation is denied (HTTP ${anonymousAsset.status()})`);
+          else throw new Error(`unauthenticated asset POST returned HTTP ${anonymousAsset.status()}`);
+        } finally {
+          await anonymous.close();
+        }
+
+        const cool = page.frames().find(f => f.url().includes("cool.html"));
+        if (!cool) throw new Error("Collabora frame disappeared before Insert Image automation");
+        await cool.evaluate(() => {
+          window.__openSuiteInsertGraphicMessages = [];
+          window.addEventListener("message", event => {
+            const value = typeof event.data === "string" ? event.data : JSON.stringify(event.data);
+            if (/Action_InsertGraphic/.test(value || "")) window.__openSuiteInsertGraphicMessages.push(value);
+          });
+        });
+
+        const allFilesDav = page.waitForResponse(response =>
+          response.request().method() === "PROPFIND"
+          && response.url().includes("/remote.php/dav/files/"), { timeout: 15000 });
+        try {
+          await cool.getByText("Insert", { exact: true }).first().click({ timeout: 5000 });
+          const imageCommand = cool.getByText(/^(Image|Image\.\.\.|Insert Image)$/i).last();
+          await imageCommand.click({ timeout: 5000 });
+        } catch (error) {
+          const visible = (await cool.locator("body").innerText().catch(() => "")).slice(0, 1000);
+          throw new Error(`could not invoke Collabora Insert > Image: ${error.message}; frame text=${JSON.stringify(visible)}`);
+        }
+
+        const picker = page.getByRole("dialog").filter({ hasText: "Insert file from Open Suite" });
+        await picker.getByText("Insert file from Open Suite", { exact: true }).waitFor({ timeout: 15000 });
+        await picker.getByText("All files", { exact: true }).waitFor({ state: "visible" });
+        const allFilesResponse = await allFilesDav;
+        if (allFilesResponse.status() === 207) ok("Insert Image All files DAV listing succeeds");
+        else throw new Error(`All files PROPFIND returned HTTP ${allFilesResponse.status()}`);
+
+        await picker.getByText(fixtureFolder, { exact: true }).click();
+        await picker.getByText("picker-smoke.png", { exact: true }).waitFor({ state: "visible" });
+        await picker.getByText("picker-smoke.jpg", { exact: true }).waitFor({ state: "visible" });
+        ok("Insert Image renders folder navigation and PNG/JPEG fixtures");
+
+        const recentDav = page.waitForResponse(response =>
+          response.request().method() === "SEARCH" && response.url().includes("/remote.php/dav/"),
+          { timeout: 15000 });
+        await picker.getByText("Recent", { exact: true }).click();
+        const recentResponse = await recentDav;
+        if (recentResponse.status() !== 207) throw new Error(`Recent DAV SEARCH returned HTTP ${recentResponse.status()}`);
+        await picker.getByText(/picker-smoke\.(png|jpg)/).first().waitFor({ state: "visible" });
+        ok("Insert Image Recent DAV search succeeds and renders a fixture");
+
+        const favoritesDav = page.waitForResponse(response =>
+          response.request().method() === "REPORT" && response.url().includes("/remote.php/dav/"),
+          { timeout: 15000 });
+        await picker.getByText("Favorites", { exact: true }).click();
+        const favoritesResponse = await favoritesDav;
+        if (favoritesResponse.status() !== 207) throw new Error(`Favorites DAV REPORT returned HTTP ${favoritesResponse.status()}`);
+        await picker.getByText("picker-smoke.png", { exact: true }).waitFor({ state: "visible" });
+        ok("Insert Image Favorites DAV search succeeds and renders favorited PNG");
+
+        const filter = picker.getByRole("textbox", { name: "Filter file list" });
+        await filter.fill("guaranteed-no-match-opensuite-smoke");
+        await picker.getByText("picker-smoke.png", { exact: true }).waitFor({ state: "hidden" });
+        await picker.getByText("No matching files", { exact: true }).waitFor({ state: "visible" });
+        ok("Insert Image text filter renders a guaranteed empty listing");
+        await filter.fill("");
+        await picker.getByText("picker-smoke.png", { exact: true }).click();
+
+        const assetPost = page.waitForResponse(response =>
+          response.request().method() === "POST"
+          && response.url().includes("/apps/richdocuments/assets"), { timeout: 15000 });
+        await picker.getByRole("button", { name: "Insert file", exact: true }).click();
+        const assetResponse = await assetPost;
+        if (!assetResponse.ok()) throw new Error(`richdocuments asset POST returned HTTP ${assetResponse.status()}`);
+        ok(`Insert Image asset POST succeeds (HTTP ${assetResponse.status()})`);
+        await cool.waitForFunction(
+          () => window.__openSuiteInsertGraphicMessages?.length > 0,
+          null,
+          { timeout: 15000 }
+        );
+        ok("Action_InsertGraphic reaches the cross-origin Collabora frame");
+      } catch (error) {
+        fail("Collabora Insert Image picker", error.message.slice(0, 1000));
+      } finally {
+        if (fixtureBase) {
+          const cleanupStatus = await page.evaluate(async ({ fixtureBase }) => {
+            const response = await fetch(fixtureBase, {
+              method: "DELETE",
+              headers: { requesttoken: OC.requestToken },
+            });
+            return response.status;
+          }, { fixtureBase }).catch(() => -1);
+          if ([200, 204].includes(cleanupStatus)) ok(`cleaned Insert Image fixture folder ${fixtureFolder}`);
+          else fail("Insert Image fixture cleanup", `DELETE returned HTTP ${cleanupStatus}`);
+        }
+      }
+    }
+
     // Clean up: the New→Document click above creates a real file every run
     // (nightly + each push), which once littered the demo with 21 copies of
     // "Document (n).docx". Delete anything matching that pattern via the

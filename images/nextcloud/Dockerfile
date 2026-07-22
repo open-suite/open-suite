@@ -1,11 +1,11 @@
 # Open Suite Nextcloud: the pinned upstream image plus our apps baked in
-# (ticket 3.3). The build context must contain a patched user_oidc/ tree —
-# the CI workflow downloads the pinned release tarball and applies
-# patches/user-oidc-token-exchange-access-token.patch before building.
+# (ticket 3.3). The build context must contain a patched user_oidc/ tree and
+# the checksum-pinned official richdocuments/ release fetched by CI.
 ARG NEXTCLOUD_BASE=registry-1.docker.io/library/nextcloud:34.0.0-apache
 FROM ${NEXTCLOUD_BASE}
 COPY meetcal/ /usr/src/opensuite/meetcal/
 COPY user_oidc/ /usr/src/opensuite/user_oidc/
+COPY richdocuments/ /usr/src/opensuite/richdocuments/
 COPY hooks/10-opensuite-apps.sh /usr/local/bin/opensuite-sync-apps
 # The upstream entrypoint runs post-installation after pre-installation, and
 # `occ upgrade` after pre-upgrade. Put our baked app code in place before both;

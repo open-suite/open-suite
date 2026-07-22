@@ -9,7 +9,11 @@ Pinned upstream Nextcloud plus:
   (Keycloak 26 standard token exchange rejects
   `requested_token_type=refresh_token`; Meet only needs the access token).
   Upstream PR: (pending — see ticket 3.3).
-- `hooks/10-opensuite-apps.sh` — syncs both apps from the image onto the
+- `richdocuments` 11.0.1, the NC34-compatible maintenance release containing
+  upstream's missing-DAV-`share-attributes` guard. Its official archive is
+  SHA-256 pinned and copied unmodified so Nextcloud's package-integrity
+  metadata remains valid.
+- `hooks/10-opensuite-apps.sh` — syncs all three apps from the image onto the
   `custom_apps` PVC before installation, before upgrades, and immediately
   before Apache starts. This makes post-install setup and required migrations
   see the image's app versions while retaining a same-version restart fallback
@@ -17,7 +21,35 @@ Pinned upstream Nextcloud plus:
 
 Built and pushed to `ghcr.io/open-suite/nextcloud` by
 `.github/workflows/nextcloud-image.yaml` (tags: the upstream base tag, and
-`sha-<commit>`); `user_oidc/` is fetched in CI, never committed here.
+`sha-<commit>`); `user_oidc/` and `richdocuments/` are fetched in CI, never
+committed here.
+
+## Collabora image picker contract
+
+Collabora's `UI_InsertGraphic` postMessage asks the authenticated Nextcloud
+parent page to open richdocuments' `@nextcloud/dialogs` picker. The picker
+lists the current user's files directly over same-origin WebDAV: `PROPFIND`
+for All files/folders and DAV searches for Recent and Favorites. A selection
+is posted to `/apps/richdocuments/assets`; Nextcloud scopes it to that user's
+folder and returns a one-use URL that only the configured WOPI server may
+fetch. Neither file listing nor asset creation uses the Collabora WOPI token.
+
+Richdocuments 11.0.0 parsed the optional DAV `share-attributes` property
+without checking whether it existed. Normal nodes therefore threw
+`JSON.parse(undefined)` in the picker filter, leaving All files, Recent, and
+Favorites blank even though their DAV requests succeeded. Version 11.0.1
+contains upstream's stable34 fix and retains both the readable-file check and
+the explicit no-download-share exclusion. Open Suite pins it declaratively so
+fresh installs and existing `custom_apps` PVCs receive the same fixed version.
+The Office reconciliation step runs `occ upgrade`, enables the app, and fails
+the deploy unless the enabled version is exactly 11.0.1.
+
+`test-richdocuments-package.sh` verifies the official production bundle—not
+only release metadata—contains the guard, permission restriction, PNG/JPEG
+allowlist, and NC34 version contract. The live Playwright smoke covers the
+rendered All files/Recent/Favorites/folder picker, empty filtering,
+missing-file and unauthorized DAV/asset errors, scoped asset creation, and the
+image-selection postMessage path after an image-bearing release is deployed.
 
 ## Startup performance evidence (2026-07-20)
 

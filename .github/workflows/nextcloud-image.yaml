@@ -1,7 +1,8 @@
 name: nextcloud image
 
 # Build the Open Suite Nextcloud image (pinned upstream + meetcal + patched
-# user_oidc; see images/nextcloud/README.md) and push it to GHCR (ticket 3.3).
+# user_oidc + official richdocuments; see images/nextcloud/README.md) and push it to
+# GHCR (ticket 3.3).
 # Tags: the upstream base tag (e.g. 34.0.0-apache) and the commit sha.
 on:
   push:
@@ -23,6 +24,8 @@ permissions:
 env:
   NEXTCLOUD_TAG: 34.0.0-apache
   USER_OIDC_VERSION: v8.10.1
+  RICHDOCUMENTS_VERSION: v11.0.1
+  RICHDOCUMENTS_SHA256: 1952b5bfa0ddb24a4c125a9c28b12798a634a1263e88136d3244a86408c4c996
 
 jobs:
   build:
@@ -30,7 +33,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - name: Fetch pinned user_oidc release and apply the token-exchange fix
+      - name: Fetch pinned app releases
         working-directory: images/nextcloud
         run: |
           curl -sfL -o user_oidc.tar.gz \
@@ -40,10 +43,17 @@ jobs:
           grep -q "token-type:access_token" user_oidc/lib/Service/TokenService.php
           ! grep -q "token-type:refresh_token'," user_oidc/lib/Service/TokenService.php
 
+          curl -sfL -o richdocuments.tar.gz \
+            "https://github.com/nextcloud-releases/richdocuments/releases/download/${RICHDOCUMENTS_VERSION}/richdocuments-${RICHDOCUMENTS_VERSION}.tar.gz"
+          echo "${RICHDOCUMENTS_SHA256}  richdocuments.tar.gz" | sha256sum --check --strict
+          tar xzf richdocuments.tar.gz && rm richdocuments.tar.gz
+          bash test-richdocuments-package.sh richdocuments
+          bash test-app-sync.sh richdocuments
+
       - name: Lint PHP sources
         working-directory: images/nextcloud
         run: |
-          find meetcal user_oidc/lib -name '*.php' -print0 | xargs -0 -n1 php -l
+          find meetcal user_oidc/lib richdocuments/lib -name '*.php' -print0 | xargs -0 -n1 php -l
 
       - uses: docker/setup-qemu-action@v3
       - uses: docker/setup-buildx-action@v3
