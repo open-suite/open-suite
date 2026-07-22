@@ -3,12 +3,29 @@
 set -euo pipefail
 
 app_dir="${1:-richdocuments}"
+package_state="${2:-prepare}"
 info="${app_dir}/appinfo/info.xml"
 bundle="${app_dir}/js/richdocuments-src_view_Viewer_vue.js"
 source_map="${bundle}.map"
 assets_controller="${app_dir}/lib/Controller/AssetsController.php"
 asset_mapper="${app_dir}/lib/Db/AssetMapper.php"
 routes="${app_dir}/appinfo/routes.php"
+
+case "${package_state}" in
+  prepare)
+    # The acquisition workflow invokes this immediately after verifying and
+    # extracting the pinned archive. Verify the complete signed package before
+    # applying the exact distribution patch, then verify the resulting tree.
+    bash "$0" "${app_dir}" upstream
+    patch --fuzz=0 --no-backup-if-mismatch \
+      -d "$(dirname "${app_dir}")" -p1 \
+      < "$(dirname "${BASH_SOURCE[0]}")/patches/richdocuments-asset-mime.patch"
+    bash "$0" "${app_dir}" patched
+    exit
+    ;;
+  upstream|patched) ;;
+  *) echo "usage: $0 [app-dir] [prepare|upstream|patched]" >&2; exit 2 ;;
+esac
 
 test -f "${info}"
 test -f "${bundle}"
@@ -18,19 +35,27 @@ test -f "${asset_mapper}"
 grep -Fq '<version>11.0.1</version>' "${info}"
 grep -Fq '<nextcloud min-version="34" max-version="34"/>' "${info}"
 
-# Verify every packaged file against Nextcloud's signed SHA-512 manifest. This
-# catches accidental source or generated-asset mutation after archive checks.
-python3 - "${app_dir}" <<'PY'
+# Before patching, verify every packaged file against Nextcloud's signed SHA-512
+# manifest. Afterwards, keep verifying every unmodified file and require the
+# one intentional controller mutation to have its exact deterministic hash.
+python3 - "${app_dir}" "${package_state}" <<'PY'
 import hashlib
 import json
 from pathlib import Path
 import sys
 
 app = Path(sys.argv[1])
+state = sys.argv[2]
 signature = json.loads((app / 'appinfo/signature.json').read_text())
+patched_file = 'lib/Controller/AssetsController.php'
+patched_hash = '6f22679dfaebdd5c860b41b5898c5b30d91c952b9f432b2f6a43008e070fcc4e684ce0fe7a89b13564959ef57bb7393a2ee59701e244c0bf7328767a4b4f9560'
 for relative, expected in signature['hashes'].items():
     path = app / relative
     actual = hashlib.sha512(path.read_bytes()).hexdigest()
+    if state == 'patched' and relative == patched_file:
+        if actual != patched_hash or actual == expected:
+            raise SystemExit(f'patched package integrity mismatch: {relative}')
+        continue
     if actual != expected:
         raise SystemExit(f'package integrity mismatch: {relative}')
 PY
@@ -61,10 +86,20 @@ grep -Fq "if (\$this->request->getMethod() === 'GET')" "${assets_controller}"
 grep -Fq '$this->assetMapper->delete($asset);' "${assets_controller}"
 grep -Fq "new StreamResponse(\$node->fopen('rb'))" "${assets_controller}"
 grep -Fq "addHeader('Content-Disposition', 'attachment')" "${assets_controller}"
-grep -Fq "addHeader('Content-Type', 'application/octet-stream')" "${assets_controller}"
 grep -Fq 'public const TOKEN_TTL = 600;' "${asset_mapper}"
 grep -Fq 'setToken($this->random->generate(64,' "${asset_mapper}"
 grep -Fq 'ISecureRandom::CHAR_UPPER . ISecureRandom::CHAR_LOWER . ISecureRandom::CHAR_DIGITS' "${asset_mapper}"
+
+if [ "${package_state}" = upstream ]; then
+  grep -Fq "addHeader('Content-Type', 'application/octet-stream')" "${assets_controller}"
+else
+  grep -Fq '$mimeType = $node->getMimeType();' "${assets_controller}"
+  grep -Fq "addHeader('Content-Type', \$mimeType !== '' ? \$mimeType : 'application/octet-stream')" "${assets_controller}"
+  if grep -Fq "addHeader('Content-Type', 'application/octet-stream')" "${assets_controller}"; then
+    echo "ERROR: normal richdocuments assets still have a hard-coded generic MIME" >&2
+    exit 1
+  fi
+fi
 
 # The signed production source map is part of the shipped app. Verify the
 # browser sends the returned asset URL unchanged in Action_InsertGraphic,
@@ -94,4 +129,4 @@ for literal in (
         raise SystemExit(f'missing packaged Collabora handoff: {literal}')
 PY
 
-echo "richdocuments 11.0.1 picker package checks passed"
+echo "richdocuments 11.0.1 ${package_state} picker package checks passed"

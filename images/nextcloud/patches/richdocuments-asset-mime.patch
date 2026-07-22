@@ -1,0 +1,12 @@
+--- a/richdocuments/lib/Controller/AssetsController.php
++++ b/richdocuments/lib/Controller/AssetsController.php
+@@ -177,7 +177,8 @@
+ 
+ 		$response = new StreamResponse($node->fopen('rb'));
+ 		$response->addHeader('Content-Disposition', 'attachment');
+-		$response->addHeader('Content-Type', 'application/octet-stream');
++		$mimeType = $node->getMimeType();
++		$response->addHeader('Content-Type', $mimeType !== '' ? $mimeType : 'application/octet-stream');
+ 
+ 		return $response;
+ 	}
