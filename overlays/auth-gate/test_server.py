@@ -415,6 +415,7 @@ class ForwardedRequestTests(unittest.TestCase):
 class WopiBypassTests(unittest.TestCase):
     def test_exact_wopi_callbacks_bypass_on_nextcloud_only(self) -> None:
         token = "AbCdEf0123456789AbCdEf0123456789"
+        asset_token = token + token
         routes = (
             ("GET", "/index.php/apps/richdocuments/wopi/files/42_instance?access_token=secret"),
             ("GET", "/apps/richdocuments/wopi/files/42_instance/contents?access_token=secret"),
@@ -424,6 +425,9 @@ class WopiBypassTests(unittest.TestCase):
             ("GET", "/index.php/apps/richdocuments/wopi/settings?access_token=secret"),
             ("POST", "/index.php/apps/richdocuments/wopi/settings/upload"),
             ("DELETE", "/index.php/apps/richdocuments/wopi/settings"),
+            ("GET", f"/index.php/apps/richdocuments/assets/{asset_token}"),
+            ("GET", f"/apps/richdocuments/assets/{asset_token}"),
+            ("HEAD", f"/apps/richdocuments/assets/{asset_token}"),
             ("GET", f"/index.php/apps/richdocuments/settings/userconfig/{token}/presets/config.json"),
             ("GET", f"/apps/richdocuments/settings/systemconfig/{token}/template/slides/default.otp"),
             ("GET", "/apps/richdocuments/settings/fonts.json"),
@@ -442,7 +446,13 @@ class WopiBypassTests(unittest.TestCase):
 
     def test_nearby_richdocuments_admin_routes_stay_protected(self) -> None:
         token = "AbCdEf0123456789AbCdEf0123456789"
+        asset_token = token + token
         routes = (
+            ("POST", f"/apps/richdocuments/assets/{asset_token}"),
+            ("GET", f"/apps/richdocuments/assets/{asset_token[:-1]}"),
+            ("GET", f"/apps/richdocuments/assets/{asset_token}A"),
+            ("GET", f"/apps/richdocuments/assets/{asset_token[:-1]}_"),
+            ("GET", f"/apps/richdocuments/assets/{asset_token}/preview"),
             ("GET", "/apps/richdocuments/settings/fonts"),
             ("POST", "/apps/richdocuments/settings/fonts"),
             ("GET", "/apps/richdocuments/settings/fonts/custom.ttf/overview"),

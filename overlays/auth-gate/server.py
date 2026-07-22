@@ -82,12 +82,18 @@ BEARER_POLICIES = {
 # Nextcloud richdocuments endpoints fetched by Collabora without a realm
 # session. Keep this narrower than the application's route tree: nearby admin
 # and font-management endpoints must remain gated. Nextcloud still validates
-# the WOPI/settings token and its own source allowlist after this pass-through.
+# the WOPI/settings/asset token and its own source allowlist after this
+# pass-through. Asset URLs are 64-character, ten-minute, one-use bearer URLs;
+# Collabora fetches them without the browser's gate session.
 WOPI_ROUTES = (
     (frozenset({"GET", "POST"}), re.compile(r"^/(?:index\.php/)?apps/richdocuments/wopi/files/[^/]+(?:/contents)?$")),
     (frozenset({"GET"}), re.compile(r"^/(?:index\.php/)?apps/richdocuments/wopi/template/[^/]+$")),
     (frozenset({"GET", "DELETE"}), re.compile(r"^/(?:index\.php/)?apps/richdocuments/wopi/settings$")),
     (frozenset({"POST"}), re.compile(r"^/(?:index\.php/)?apps/richdocuments/wopi/settings/upload$")),
+    (
+        frozenset({"GET", "HEAD"}),
+        re.compile(r"^/(?:index\.php/)?apps/richdocuments/assets/[A-Za-z0-9]{64}$"),
+    ),
     (frozenset({"GET"}), re.compile(r"^/(?:index\.php/)?apps/richdocuments/settings/fonts\.json$")),
     (
         frozenset({"GET"}),
@@ -617,11 +623,11 @@ class Handler(http.server.BaseHTTPRequestHandler):
             self.send_empty(HTTPStatus.BAD_REQUEST)
             return
 
-        # Collabora's WOPI callbacks (CheckFileInfo, contents) authenticate
-        # with their own WOPI access_token, not a realm token; Nextcloud
-        # additionally IP-restricts them to the pod subnet (wopi_allowlist).
-        # Without this pass-through every document open dies with
-        # "Unauthorized WOPI host".
+        # Collabora's WOPI callbacks (CheckFileInfo, contents) and one-use
+        # image asset URLs authenticate with their own tokens, not a realm
+        # token; Nextcloud additionally IP-restricts them to the pod subnet
+        # (wopi_allowlist). Without this pass-through document open or Insert
+        # Image fails before Nextcloud can validate those credentials.
         if is_wopi_request(request):
             self.send_empty(HTTPStatus.NO_CONTENT, {})
             return

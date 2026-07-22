@@ -122,8 +122,20 @@ parent page to open richdocuments' `@nextcloud/dialogs` picker. The picker
 lists the current user's files directly over same-origin WebDAV: `PROPFIND`
 for All files/folders and DAV searches for Recent and Favorites. A selection
 is posted to `/apps/richdocuments/assets`; Nextcloud scopes it to that user's
-folder and returns a one-use URL that only the configured WOPI server may
-fetch. Neither file listing nor asset creation uses the Collabora WOPI token.
+folder and returns a 64-character, ten-minute, one-use URL that only the
+configured WOPI server may fetch. The response deliberately has
+`application/octet-stream` plus `Content-Disposition: attachment`; its body is
+the original file stream, which Collabora identifies by the passed filename
+and image magic. Neither file listing nor asset creation uses the Collabora
+WOPI token.
+
+That one-use GET has no browser realm session. The edge auth gate therefore
+passes only `GET` and its non-consuming `HEAD` probe for
+`/apps/richdocuments/assets/<64 alphanumeric characters>` (with the optional
+`index.php` prefix), just like the exact WOPI callback routes. Richdocuments
+then enforces both the bearer asset token and its WOPI source-IP allowlist. Do
+not broaden this to the assets collection, POST, other token shapes, or nearby
+richdocuments routes: asset creation remains an authenticated user action.
 
 Richdocuments 11.0.0 parsed the optional DAV `share-attributes` property
 without checking whether it existed. Normal nodes therefore threw
@@ -137,10 +149,15 @@ the deploy unless the enabled version is exactly 11.0.1.
 
 `test-richdocuments-package.sh` verifies the official production bundle—not
 only release metadata—contains the guard, permission restriction, PNG/JPEG
-allowlist, and NC34 version contract. The live Playwright smoke covers the
-rendered All files/Recent/Favorites/folder picker, empty filtering,
-missing-file and unauthorized DAV/asset errors, scoped asset creation, and the
-image-selection postMessage path after an image-bearing release is deployed.
+allowlist, NC34 version contract, one-use/ten-minute asset token, original-byte
+stream response, and exact `Action_InsertGraphic` handoff. The auth-gate tests
+pin the single 64-character GET/HEAD bypass and keep malformed tokens, POST,
+and nearby routes protected. The live Playwright smoke uploads an ordinary
+800×450 JPEG through Files, verifies its DAV MIME/magic/SHA-256, covers the
+rendered All files/Recent/Favorites/folder picker and error cases, validates
+the asset JSON URL and postMessage payload, rejects login/HTML asset responses,
+and requires both coloured halves to appear in Collabora's visible document
+canvas. Message delivery alone is not accepted as image insertion.
 
 ## Startup performance evidence (2026-07-20)
 
