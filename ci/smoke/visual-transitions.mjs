@@ -87,7 +87,13 @@ async function journey(name, action) {
         const style = getComputedStyle(element);
         return rect.width > 0 && rect.height > 0 && style.display !== "none" && style.visibility !== "hidden";
       };
+      let rootResizeObserver;
       const sample = () => {
+        const root = document.documentElement;
+        if (root && !rootResizeObserver) {
+          rootResizeObserver = new ResizeObserver(sample);
+          rootResizeObserver.observe(root);
+        }
         const header = document.querySelector("#ko-portal-header");
         const geometry = header ? header.getBoundingClientRect().toJSON() : null;
         const value = JSON.stringify({ present: Boolean(header), version: header?.dataset.version || null, geometry });
@@ -100,6 +106,25 @@ async function journey(name, action) {
           .find((element) => element.id !== "ko-portal-header" && visible(element) && element.getBoundingClientRect().top < 48);
         if (!header && nativeTop) surface("native/headerless top strip");
         const text = document.body?.innerText || "";
+        const pendingStyle = root?.classList.contains("ko-shell-pending")
+          ? getComputedStyle(root, "::before") : null;
+        const pendingContent = pendingStyle?.content?.replaceAll('"', "") || "";
+        if (!header && pendingStyle && Number.parseFloat(pendingStyle.height) >= 40 && !/Open Suite/i.test(pendingContent)) {
+          surface("unbranded pending shell");
+        }
+        if (visible(document.querySelector("#kc-form-login"))) surface("native/provider login");
+        if (location.hostname.startsWith("nextcloud.")
+          && visible(document.querySelector('form[name="login"], #login'))) surface("Nextcloud native login");
+        if (/No office suite is deployed/i.test(text)) surface("No office suite is deployed");
+        if (/received state has expired|Access forbidden/i.test(text)) surface("Nextcloud stale login state");
+        if (/Unable to load|Failed to load|Something went wrong|Internal Server Error/i.test(text)) {
+          surface("Office load error");
+        }
+        const activeOffice = document.querySelector('#app-navigation-vue [aria-current="page"]');
+        const activeOfficeTitle = (activeOffice?.getAttribute("title") || activeOffice?.textContent || "").trim();
+        if (/^(Documents|Spreadsheets|Presentations|Diagrams)$/.test(activeOfficeTitle)) {
+          surface(`Office active section: ${activeOfficeTitle}`);
+        }
         if (/Connecting to chat/i.test(text)) surface("Connecting to chat");
       };
       new PerformanceObserver((list) => {
@@ -107,11 +132,8 @@ async function journey(name, action) {
           if (!entry.hadRecentInput) send({ type: "layout-shift", value: entry.value });
         }
       }).observe({ type: "layout-shift", buffered: true });
-      addEventListener("DOMContentLoaded", () => {
-        sample();
-        new MutationObserver(sample).observe(document.documentElement, { childList: true, subtree: true, characterData: true, attributes: true, attributeFilter: ["class", "style", "data-version"] });
-        new ResizeObserver(sample).observe(document.documentElement);
-      }, { once: true });
+      new MutationObserver(sample).observe(document, { childList: true, subtree: true, characterData: true, attributes: true, attributeFilter: ["class", "style", "data-version", "aria-current"] });
+      sample();
     });
 
     context.on("request", (request) => {
@@ -178,6 +200,9 @@ async function journey(name, action) {
       context,
       rawDocumentRequests,
       portalHeaderVersion,
+      timeline,
+      headerTimeline,
+      surfaceTimeline,
       check,
       contract,
       setMissing: () => { exists = false; },
@@ -267,6 +292,88 @@ async function sameTab({ page, rawDocumentRequests, portalHeaderVersion, check, 
   check(`${destination.label} interaction marker usable`, true);
 }
 
+async function officeDocuments({ page, rawDocumentRequests, portalHeaderVersion, timeline, surfaceTimeline, check, contract }) {
+  const timelineStart = timeline.length;
+  const surfaceStart = surfaceTimeline.length;
+  const header = page.locator("#ko-portal-header");
+  await header.getByRole("button", { name: "Office ▾", exact: true }).click();
+  const link = header.getByRole("link", { name: "Documents", exact: true });
+  const href = await link.getAttribute("href");
+  if (!href) throw new Error("Documents has no href");
+  await link.click();
+
+  await page.waitForURL((url) => url.hostname === `nextcloud.${domain}`
+    && url.pathname === "/apps/office/documents" && !url.search && !url.hash, { timeout: 45_000 });
+  await assertHeader(page, "Office Documents", check, portalHeaderVersion);
+  const activeDocuments = page.locator('#app-navigation-vue a[aria-current="page"][title="Documents"]');
+  await activeDocuments.waitFor({ state: "visible", timeout: 45_000 });
+  const resultHeading = page.locator("#files-section-heading");
+  await resultHeading.waitFor({ state: "visible", timeout: 45_000 });
+  await page.waitForFunction(() => {
+    const visible = (element) => {
+      const rect = element.getBoundingClientRect();
+      const style = getComputedStyle(element);
+      return rect.width > 0 && rect.height > 0 && style.display !== "none" && style.visibility !== "hidden";
+    };
+    return ![...document.querySelectorAll('.icon-loading, .loading, [class*="loading-icon"], [role="progressbar"]')]
+      .some(visible);
+  }, null, { timeout: 45_000 });
+  const officeContent = page.locator("#app-content-vue");
+  contract("Office Documents active section and result list usable",
+    await activeDocuments.isVisible() && await resultHeading.isVisible() && await officeContent.isVisible());
+
+  const transition = timeline.slice(timelineStart);
+  const surfaces = surfaceTimeline.slice(surfaceStart);
+  const officeCommits = transition.filter((item) => {
+    if (item.event !== "committed") return false;
+    try {
+      const url = new URL(item.url);
+      return url.hostname === `nextcloud.${domain}` && url.pathname.startsWith("/apps/office/");
+    } catch {
+      return false;
+    }
+  });
+  const officeResponses = transition.filter((item) => {
+    if (item.event !== "document-response" || item.status !== 200) return false;
+    try {
+      const url = new URL(item.url);
+      return url.hostname === `nextcloud.${domain}`
+        && (url.pathname === "/apps/office/" || url.pathname === "/apps/office/documents");
+    } catch {
+      return false;
+    }
+  });
+  const nextcloudSurfaces = surfaces.filter((item) => {
+    try { return new URL(item.document).hostname === `nextcloud.${domain}`; } catch { return false; }
+  });
+  const forbiddenSurfaces = new Set([
+    "unbranded pending shell",
+    "native/headerless top strip",
+    "Nextcloud native login",
+    "Nextcloud stale login state",
+    "No office suite is deployed",
+    "Office load error",
+  ]);
+
+  contract("Office Documents exact deep link requested", (rawDocumentRequests.get(page) || []).some(
+    (url) => sameDeepLink(url, href, portalUrl)));
+  contract("Office Documents final route is exact and stable", page.url() === `https://nextcloud.${domain}/apps/office/documents`);
+  // Do not cap redirect responses: user_oidc intentionally self-redirects once
+  // while probing SameSite cookie support. Only extra destination documents or
+  // same-document URL churn represent avoidable user-visible transitions.
+  contract("Office renders one successful destination document", officeResponses.length === 1, `count=${officeResponses.length}`);
+  contract("Office performs at most one route canonicalization without hash churn",
+    officeCommits.length <= 2 && officeCommits.every((item) => !new URL(item.url).hash),
+    `commits=${officeCommits.length}`);
+  contract("Office never paints native login, error, or unbranded shell surfaces",
+    !nextcloudSurfaces.some((item) => forbiddenSurfaces.has(item.name))
+      && !surfaces.some((item) => item.name === "native/provider login"),
+    nextcloudSurfaces.map((item) => item.name).join(","));
+  contract("Office never paints the wrong section",
+    !nextcloudSurfaces.some((item) => item.name.startsWith("Office active section:")
+      && item.name !== "Office active section: Documents"));
+}
+
 const chat = {
   label: "Chat",
   hostname: `element.${domain}`,
@@ -312,6 +419,7 @@ try {
   await journey("fresh-login-portal", async () => {});
   if (authenticatedState) {
     await journey("portal-chat", (state) => sameTab(state, "Chat", chat));
+    await journey("portal-office-documents", officeDocuments);
     await journey("portal-calendar", (state) => sameTab(state, "Calendar", calendar));
 
     for (const kind of ["whiteboard", "office"]) {
