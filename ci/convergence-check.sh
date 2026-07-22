@@ -14,8 +14,9 @@ REPO="$(cd "$(dirname "$0")/.." && pwd)"
 INFRA="${INFRA_DIR:-/root/mijn-bureau-infra}"
 DIR="${REPO}/scripts/single-vps-deploy"
 EXPECTED_AUTH_GATE_IMAGE="${AUTH_GATE_IMAGE:-ghcr.io/open-suite/auth-gate:sha-d04bd46}"
-EXPECTED_PORTAL_REF="${PORTAL_REF:-977ce53c95f6a9bb48a9f0c045e80e4a933642fd}"
+EXPECTED_PORTAL_REF="${PORTAL_REF:-934ae5f1a5a0d287fe6cf9e632cca8098c4b9ed7}"
 EXPECTED_PORTAL_TAG="sha-${EXPECTED_PORTAL_REF:0:7}"
+EXPECTED_NEXTCLOUD_TAG="${NEXTCLOUD_TAG:-sha-693c013}"
 source "${REPO}/scripts/lib/state.sh"
 
 MASTER_PASSWORD="$(opensuite_read_master_password)" || exit 2
@@ -78,6 +79,14 @@ probe_portal_images() {
     && echo 1 || echo 0
 }
 
+probe_nextcloud_image() {
+  local image
+  image="$(kubectl -n mb-nextcloud get deploy nextcloud \
+    -o jsonpath='{.spec.template.spec.containers[?(@.name=="nextcloud")].image}' 2>/dev/null)"
+  [ "${image}" = "ghcr.io/open-suite/nextcloud:${EXPECTED_NEXTCLOUD_TAG}" ] \
+    && echo 1 || echo 0
+}
+
 expected_public_ip() {
   if [ -n "${OPEN_SUITE_PUBLIC_IP:-}" ]; then
     printf '%s' "${OPEN_SUITE_PUBLIC_IP}"
@@ -135,6 +144,7 @@ PROBES=(
   element_header
   sidecar_headers
   portal_images
+  nextcloud_image
   livekit_public_ip
   auth_gate
   apex_redirect
