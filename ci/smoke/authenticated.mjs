@@ -64,6 +64,27 @@ const browser = await chromium.launch();
 // SMOKE_INSECURE=1: tolerate self-signed certs (local VM deploys).
 const ctx = await browser.newContext({ ignoreHTTPSErrors: process.env.SMOKE_INSECURE === "1" });
 const page = await ctx.newPage();
+await page.addInitScript(() => {
+  window.__openSuiteFirstPaint = [];
+  const sample = () => {
+    const shell = document.getElementById("ko-portal-header");
+    const nativeHeader = document.getElementById("header");
+    const content = document.getElementById("content");
+    const pendingStyle = getComputedStyle(document.documentElement, "::before");
+    window.__openSuiteFirstPaint.push({
+      shell: shell && shell.getBoundingClientRect().toJSON(),
+      shellColor: shell && getComputedStyle(shell).backgroundColor,
+      pending: document.documentElement.classList.contains("ko-shell-pending") && {
+        height: Number.parseFloat(pendingStyle.height),
+        color: pendingStyle.backgroundColor,
+      },
+      nativeHeader: nativeHeader && nativeHeader.getBoundingClientRect().toJSON(),
+      content: content && content.getBoundingClientRect().toJSON(),
+    });
+    if (window.__openSuiteFirstPaint.length < 120) requestAnimationFrame(sample);
+  };
+  requestAnimationFrame(sample);
+});
 const elementRuntimeErrors = [];
 const recordElementError = (message) => {
   if (
@@ -100,6 +121,19 @@ try {
   }
   await dashboard.waitFor({ timeout: 30000 });
   ok("portal renders (dashboard widgets present)");
+
+  await page.waitForTimeout(250);
+  const portalFrames = await page.evaluate(() => window.__openSuiteFirstPaint);
+  const hasValidShellRow = (frame) =>
+    (frame.shell?.height === 48 && frame.shell?.y === 0 && frame.shellColor === "rgb(11, 31, 51)") ||
+    (frame.pending?.height === 48 && frame.pending?.color === "rgb(11, 31, 51)");
+  if (
+    portalFrames.length > 0 &&
+    portalFrames.every(hasValidShellRow) &&
+    portalFrames.some((frame) => frame.shell && !frame.pending)
+  )
+    ok("portal first-frame filmstrip keeps the 48px Open Suite shell");
+  else fail("portal first-frame shell", JSON.stringify(portalFrames));
 
   const gateCookie = (await ctx.cookies()).find((cookie) => cookie.name === "opensuite_auth");
   if (gateCookie?.expires === -1)
@@ -208,10 +242,18 @@ try {
     );
   await assertGlobalHeader("messages");
 
-  // Reproduce the real first-session path before any direct Nextcloud warm-up:
-  // Mail -> portal -> Office -> Spreadsheets must remain one SSO session.
+  // Reproduce the lane-3 path before any direct Nextcloud warm-up. Native
+  // user_oidc must return to Calendar, not its historical Files fallback.
   await page.goto(`https://bridge.${DOMAIN}/`, { waitUntil: "domcontentloaded" });
   const suiteHeader = page.locator("#ko-portal-header");
+  await suiteHeader.getByRole("link", { name: "Calendar", exact: true }).click();
+  await page.waitForURL(`https://nextcloud.${DOMAIN}/apps/calendar**`, { timeout: 30000 });
+  if (page.url().includes("/apps/calendar"))
+    ok("Portal -> Calendar preserves the requested path through native OIDC");
+  else fail("Portal -> Calendar return path", `landed on ${page.url()}`);
+
+  // The same first-session must also retain existing Office deep links.
+  await page.goto(`https://bridge.${DOMAIN}/`, { waitUntil: "domcontentloaded" });
   const officeButton = suiteHeader.getByRole("button", { name: "Office ▾", exact: true });
   await officeButton.click();
   const spreadsheetsLink = suiteHeader.getByRole("link", { name: "Spreadsheets", exact: true });
@@ -324,6 +366,22 @@ try {
   // --- meetcal mints a joinable room ----------------------------------------
   // Needs the Nextcloud session (same browser context) + CSRF token.
   await page.goto(`https://nextcloud.${DOMAIN}/apps/calendar/`, { waitUntil: "domcontentloaded" });
+  await page.waitForURL(`https://nextcloud.${DOMAIN}/apps/calendar**`, { timeout: 30000 });
+  await page.waitForTimeout(250);
+  const calendarFrames = await page.evaluate(() => window.__openSuiteFirstPaint);
+  const calendarViewportHeight = page.viewportSize().height;
+  const calendarGeometry = calendarFrames.filter((frame) => frame.nativeHeader || frame.content);
+  if (
+    calendarGeometry.length > 0 &&
+    calendarGeometry.every((frame) =>
+      hasValidShellRow(frame) && frame.nativeHeader && frame.content &&
+      frame.nativeHeader.y >= 48 &&
+      frame.content.y >= frame.nativeHeader.y + frame.nativeHeader.height - 1 &&
+      frame.content.y + frame.content.height <= calendarViewportHeight + 1
+    ) && calendarGeometry.some((frame) => frame.shell && !frame.pending)
+  )
+    ok("Nextcloud Calendar filmstrip keeps suite and native controls in separate rows");
+  else fail("Nextcloud Calendar first-frame geometry", JSON.stringify(calendarGeometry));
   const room = await page.evaluate(async () => {
     const token = document.querySelector("head[data-requesttoken]")?.dataset.requesttoken ?? "";
     const create = async () => {
