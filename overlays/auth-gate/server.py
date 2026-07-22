@@ -91,7 +91,7 @@ WOPI_ROUTES = (
     (frozenset({"GET", "DELETE"}), re.compile(r"^/(?:index\.php/)?apps/richdocuments/wopi/settings$")),
     (frozenset({"POST"}), re.compile(r"^/(?:index\.php/)?apps/richdocuments/wopi/settings/upload$")),
     (
-        frozenset({"GET", "HEAD"}),
+        frozenset({"GET", "HEAD", "OPTIONS"}),
         re.compile(r"^/(?:index\.php/)?apps/richdocuments/assets/[A-Za-z0-9]{64}$"),
     ),
     (frozenset({"GET"}), re.compile(r"^/(?:index\.php/)?apps/richdocuments/settings/fonts\.json$")),

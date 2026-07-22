@@ -428,6 +428,7 @@ class WopiBypassTests(unittest.TestCase):
             ("GET", f"/index.php/apps/richdocuments/assets/{asset_token}"),
             ("GET", f"/apps/richdocuments/assets/{asset_token}"),
             ("HEAD", f"/apps/richdocuments/assets/{asset_token}"),
+            ("OPTIONS", f"/apps/richdocuments/assets/{asset_token}"),
             ("GET", f"/index.php/apps/richdocuments/settings/userconfig/{token}/presets/config.json"),
             ("GET", f"/apps/richdocuments/settings/systemconfig/{token}/template/slides/default.otp"),
             ("GET", "/apps/richdocuments/settings/fonts.json"),
@@ -449,6 +450,7 @@ class WopiBypassTests(unittest.TestCase):
         asset_token = token + token
         routes = (
             ("POST", f"/apps/richdocuments/assets/{asset_token}"),
+            ("OPTIONS", f"/apps/richdocuments/assets/{asset_token}/preview"),
             ("GET", f"/apps/richdocuments/assets/{asset_token[:-1]}"),
             ("GET", f"/apps/richdocuments/assets/{asset_token}A"),
             ("GET", f"/apps/richdocuments/assets/{asset_token[:-1]}_"),
