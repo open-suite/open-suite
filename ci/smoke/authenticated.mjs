@@ -773,7 +773,7 @@ try {
           response.request().method() === "PROPFIND"
           && response.url().includes("/remote.php/dav/files/"), { timeout: 15000 });
         try {
-          await cool.getByText("Insert", { exact: true }).first().click({ timeout: 5000 });
+          await cool.locator("#menu-insert > a").click({ timeout: 5000 });
           const imageCommand = cool.getByText(/^(Image|Image\.\.\.|Insert Image)$/i).last();
           await imageCommand.click({ timeout: 5000 });
         } catch (error) {
