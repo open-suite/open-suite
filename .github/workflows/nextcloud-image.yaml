@@ -1,7 +1,7 @@
 name: nextcloud image
 
 # Build the Open Suite Nextcloud image (pinned upstream + meetcal + patched
-# user_oidc; see images/nextcloud/README.md) and push it to GHCR (ticket 3.3).
+# user_oidc + Whiteboard; see images/nextcloud/README.md) and push it to GHCR.
 # Tags: the upstream base tag (e.g. 34.0.0-apache) and the commit sha.
 on:
   push:
@@ -23,12 +23,32 @@ permissions:
 env:
   NEXTCLOUD_TAG: 34.0.0-apache
   USER_OIDC_VERSION: v8.10.1
+  WHITEBOARD_VERSION: v1.5.9
+  WHITEBOARD_SHA256: 195e5d0b19fbb7e176bd2c89babfd5514aef0224afe5d0ef239304e84046a1fe
 
 jobs:
   build:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+
+      - name: Fetch checksum-pinned Whiteboard release
+        working-directory: images/nextcloud
+        run: |
+          curl -fsSL -o whiteboard.tar.gz \
+            "https://github.com/nextcloud-releases/whiteboard/releases/download/${WHITEBOARD_VERSION}/whiteboard-${WHITEBOARD_VERSION}.tar.gz"
+          echo "${WHITEBOARD_SHA256}  whiteboard.tar.gz" | sha256sum --check --strict
+          tar xzf whiteboard.tar.gz && rm whiteboard.tar.gz
+          test "$(sed -n 's:.*<version>\([^<]*\)</version>.*:\1:p' whiteboard/appinfo/info.xml)" = "${WHITEBOARD_VERSION#v}"
+          grep -Fq '<nextcloud min-version="28" max-version="34"/>' whiteboard/appinfo/info.xml
+          php -r '
+            $manifest = json_decode(file_get_contents("whiteboard/appinfo/signature.json"), true, 512, JSON_THROW_ON_ERROR);
+            $certificate = openssl_x509_parse($manifest["certificate"]);
+            $infoHash = hash_file("sha512", "whiteboard/appinfo/info.xml");
+            if (($certificate["subject"]["CN"] ?? null) !== "whiteboard"
+              || !hash_equals($manifest["hashes"]["appinfo/info.xml"] ?? "", $infoHash)
+              || empty($manifest["signature"])) { exit(1); }
+          '
 
       - name: Fetch pinned user_oidc release and apply the token-exchange fix
         working-directory: images/nextcloud
@@ -43,7 +63,18 @@ jobs:
       - name: Lint PHP sources
         working-directory: images/nextcloud
         run: |
-          find meetcal user_oidc/lib -name '*.php' -print0 | xargs -0 -n1 php -l
+          find meetcal user_oidc/lib whiteboard/lib -name '*.php' -print0 | xargs -0 -n1 php -l
+
+      - name: Verify exact Whiteboard source and lifecycle contracts
+        run: bash ci/test-nextcloud-whiteboard.sh
+
+      - name: Build and verify the amd64 image artifact
+        working-directory: images/nextcloud
+        run: |
+          docker build --pull \
+            --build-arg "NEXTCLOUD_BASE=registry-1.docker.io/library/nextcloud:${NEXTCLOUD_TAG}" \
+            --tag opensuite-nextcloud:whiteboard-test .
+          bash test-image-whiteboard.sh opensuite-nextcloud:whiteboard-test
 
       - uses: docker/setup-qemu-action@v3
       - uses: docker/setup-buildx-action@v3

@@ -354,6 +354,105 @@ try {
       `HTTP ${room.first.status}/${room.second.status}, URLs ${firstRoomUrl}/${secondRoomUrl}`
     );
 
+  // --- Whiteboard: create, edit, persist, reopen, and clean up --------------
+  // app:list is not sufficient: this exercises template registration, the
+  // canonical MIME, Viewer handler, editor assets, save path and WebDAV state.
+  const whiteboardName = `Open Suite smoke ${Date.now()}`;
+  const whiteboardFile = `${whiteboardName}.whiteboard`;
+  const whiteboardMarker = "opensuite-whiteboard-smoke-marker";
+  try {
+    await page.goto(`https://nextcloud.${DOMAIN}/apps/files/`, { waitUntil: "domcontentloaded" });
+    await page.getByRole("button", { name: "New", exact: true }).waitFor({ state: "visible", timeout: 30000 });
+    await page.getByRole("button", { name: "New", exact: true }).click();
+    const newWhiteboard = page.getByRole("menuitem", { name: "New whiteboard", exact: true });
+    await newWhiteboard.waitFor({ state: "visible", timeout: 15000 });
+    await newWhiteboard.click();
+
+    const createDialog = page.locator("[data-cy-files-new-node-dialog]").first();
+    await createDialog.waitFor({ state: "visible", timeout: 15000 });
+    const nameField = createDialog.getByRole("textbox", { name: /name/i }).first();
+    await nameField.waitFor({ state: "visible", timeout: 10000 });
+    await nameField.fill(whiteboardName);
+    const create = createDialog.getByRole("button", { name: "Create", exact: true }).first();
+    await create.waitFor({ state: "visible", timeout: 10000 });
+    await create.click();
+
+    const interactiveCanvas = page.locator(".excalidraw__canvas.interactive").first();
+    await interactiveCanvas.waitFor({ state: "visible", timeout: 30000 }).catch(() => {});
+    const canvas = (await interactiveCanvas.count())
+      ? interactiveCanvas
+      : page.locator(".excalidraw__canvas").first();
+    await canvas.waitFor({ state: "visible", timeout: 60000 });
+    const viewerHandler = await page.evaluate(() => {
+      const handlers = window.OCA?.Viewer?.availableHandlers;
+      const whiteboard = Array.isArray(handlers)
+        ? handlers.find((handler) => handler?.id === "whiteboard")
+        : null;
+      return whiteboard ? { id: whiteboard.id, mimes: whiteboard.mimes } : null;
+    });
+    if (viewerHandler?.mimes?.includes("application/vnd.excalidraw+json"))
+      ok("Whiteboard Viewer handler owns application/vnd.excalidraw+json");
+    else fail("Whiteboard Viewer handler", JSON.stringify(viewerHandler));
+
+    const textTool = page.locator('[title^="Text"]').first();
+    await textTool.waitFor({ state: "visible", timeout: 10000 });
+    await textTool.click();
+    const canvasBox = await canvas.boundingBox();
+    if (!canvasBox) throw new Error("Whiteboard canvas has no interaction geometry");
+    const whiteboardEditor = page.locator(".excalidraw-textEditorContainer textarea").first();
+    for (let attempt = 0; attempt < 4 && !(await whiteboardEditor.isVisible()); attempt++) {
+      await page.mouse.click(canvasBox.x + canvasBox.width / 2, canvasBox.y + canvasBox.height / 2);
+      await page.waitForTimeout(300);
+    }
+    await whiteboardEditor.waitFor({ state: "visible", timeout: 10000 });
+    await whiteboardEditor.fill(whiteboardMarker);
+    await whiteboardEditor.press("Escape");
+    await whiteboardEditor.waitFor({ state: "hidden", timeout: 5000 });
+
+    const persisted = await page.evaluate(async ({ fileName, marker }) => {
+      const uid = OC.getCurrentUser().uid;
+      const url = `/remote.php/dav/files/${encodeURIComponent(uid)}/${encodeURIComponent(fileName)}`;
+      for (let attempt = 0; attempt < 30; attempt++) {
+        const propfind = await fetch(url, {
+          method: "PROPFIND",
+          headers: { requesttoken: OC.requestToken, Depth: "0" },
+        });
+        const properties = await propfind.text();
+        const content = propfind.ok ? await fetch(url, {
+          headers: { requesttoken: OC.requestToken },
+        }) : null;
+        const body = content?.ok ? await content.text() : "";
+        if (properties.includes("application/vnd.excalidraw+json") && body.includes(marker)) {
+          return { ok: true, status: propfind.status };
+        }
+        await new Promise((resolve) => setTimeout(resolve, 500));
+      }
+      return { ok: false };
+    }, { fileName: whiteboardFile, marker: whiteboardMarker });
+    if (persisted.ok) ok("Whiteboard edit persists with canonical WebDAV MIME");
+    else fail("Whiteboard persistence/MIME", JSON.stringify(persisted));
+
+    await page.reload({ waitUntil: "domcontentloaded" });
+    await canvas.waitFor({ state: "visible", timeout: 60000 });
+    if (await page.locator('[title^="Text"]').first().isVisible())
+      ok("Whiteboard reopens as an editable canvas");
+    else fail("Whiteboard reopen", "editor toolbar is not visible after reload");
+  } catch (e) {
+    fail("Whiteboard editable-board contract", e.message.slice(0, 180));
+  } finally {
+    const removed = await page.evaluate(async (fileName) => {
+      if (!window.OC?.getCurrentUser) return false;
+      const uid = OC.getCurrentUser().uid;
+      const response = await fetch(
+        `/remote.php/dav/files/${encodeURIComponent(uid)}/${encodeURIComponent(fileName)}`,
+        { method: "DELETE", headers: { requesttoken: OC.requestToken } },
+      );
+      return response.ok || response.status === 404;
+    }, whiteboardFile).catch(() => false);
+    if (removed) ok("cleaned up smoke-created whiteboard");
+    else fail("Whiteboard cleanup", `could not delete ${whiteboardFile}`);
+  }
+
   // --- Matrix SSO flows through without a consent screen --------------------
   // (sso.client_whitelist; the Chat widget breaks UX without it)
   await page.goto(

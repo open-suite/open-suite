@@ -51,6 +51,7 @@ resource:
     redis: { requests: { cpu: 25m, memory: 16Mi } }
   nextcloud:
     nextcloud: { requests: { cpu: 150m, memory: 384Mi } }
+    whiteboard: { requests: { cpu: 25m, memory: 128Mi } }
     postgresql: { requests: { cpu: 75m, memory: 96Mi } }
     redis: { requests: { cpu: 25m, memory: 16Mi } }
     minio: { requests: { cpu: 25m, memory: 192Mi } }
@@ -146,6 +147,11 @@ container:
     registry: "ghcr.io"
     repository: "open-suite/nextcloud"
     tag: "${NEXTCLOUD_TAG}"
+    whiteboard:
+      registry: "ghcr.io"
+      repository: "nextcloud-releases/whiteboard"
+      tag: "v1.5.9"
+      digest: "sha256:b60b7633f90d106ac6922f9bc27e1a1ca2442488b740fefdae4c812f34e9cebc"
   bureaublad:
     registry: "ghcr.io"
     backend:
