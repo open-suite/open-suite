@@ -7,10 +7,13 @@ import { chromium } from "playwright";
 import {
   assessElementHome,
   chooseCandidate,
+  chooseDocxCandidate,
   contractOutcome,
+  durableNextcloudFile,
   enforceArtifactBudget,
   parseMode,
   sameDeepLink,
+  sanitizeDiagnostic,
   sanitizeUrl,
 } from "./visual-transition-helpers.mjs";
 
@@ -33,13 +36,14 @@ let authenticatedState;
 const safeName = (value) => value.replace(/[^a-z0-9-]/gi, "-").slice(0, 60);
 const portalUrl = `https://bridge.${domain}/`;
 
-async function journey(name, action) {
+async function journey(name, action, { metadataOnly = false } = {}) {
   const dir = path.join(root, safeName(name));
   await mkdir(dir, { recursive: true });
   const timeline = [];
   const layoutShifts = [];
   const headerTimeline = [];
   const surfaceTimeline = [];
+  const runtimeErrors = [];
   const rawDocumentRequests = new WeakMap();
   const pageLabels = new WeakMap();
   let popupPage;
@@ -56,7 +60,7 @@ async function journey(name, action) {
   };
 
   try {
-    const recordsVideo = Boolean(authenticatedState);
+    const recordsVideo = Boolean(authenticatedState) && !metadataOnly;
     context = await browser.newContext({
       ...(authenticatedState ? { storageState: authenticatedState } : {}),
       viewport: { width: 1280, height: 720 },
@@ -72,6 +76,30 @@ async function journey(name, action) {
       target.push({ page: pageLabels.get(sourcePage) || "top", document: sanitizeUrl(sourcePage.url()), ...entry });
     });
     await context.addInitScript(() => {
+      window.__osOfficeLifecycle = [];
+      window.addEventListener("message", (event) => {
+        const fromActiveCollabora = [...document.querySelectorAll('iframe[data-cy="coolframe"], #loleafletframe')]
+          .some((frame) => frame.contentWindow === event.source);
+        if (!fromActiveCollabora) return;
+        let data = event.data;
+        try {
+          if (typeof data === "string") data = JSON.parse(data);
+        } catch {
+          return;
+        }
+        if (data?.MessageId === "App_LoadingStatus" && data?.Values?.Status) {
+          window.__osOfficeLifecycle.push({
+            at: performance.now(),
+            messageId: data.MessageId,
+            status: data.Values.Status,
+          });
+          if (data.Values.Status === "Document_Loaded") {
+            const count = Number.parseInt(document.documentElement.dataset.osOfficeDocumentLoadedCount || "0", 10) + 1;
+            document.documentElement.dataset.osOfficeDocumentLoadedCount = String(count);
+            document.documentElement.setAttribute(`data-os-office-document-loaded-${count}`, "");
+          }
+        }
+      });
       const send = (entry) => window.__osTransitionRecord({ at: performance.now(), ...entry }).catch(() => {});
       let lastHeader = "";
       let headerWasPresent = false;
@@ -137,8 +165,15 @@ async function journey(name, action) {
     });
 
     context.on("request", (request) => {
-      const frame = request.frame();
-      if (!request.isNavigationRequest() || frame !== frame.page().mainFrame()) return;
+      if (!request.isNavigationRequest()) return;
+      let frame;
+      try {
+        frame = request.frame();
+      } catch {
+        timeline.push({ page: "popup-pending", event: "document-request", url: sanitizeUrl(request.url()) });
+        return;
+      }
+      if (frame !== frame.page().mainFrame()) return;
       const sourcePage = frame.page();
       const requests = rawDocumentRequests.get(sourcePage) || [];
       requests.push(request.url());
@@ -147,8 +182,21 @@ async function journey(name, action) {
     });
     context.on("response", (response) => {
       const request = response.request();
-      const frame = request.frame();
-      if (!request.isNavigationRequest() || frame !== frame.page().mainFrame()) return;
+      if (!request.isNavigationRequest()) return;
+      let frame;
+      try {
+        frame = request.frame();
+      } catch {
+        timeline.push({
+          page: "popup-pending",
+          event: "document-response",
+          status: response.status(),
+          redirected: Boolean(request.redirectedFrom()),
+          url: sanitizeUrl(response.url()),
+        });
+        return;
+      }
+      if (frame !== frame.page().mainFrame()) return;
       timeline.push({
         page: pageLabels.get(frame.page()) || "top",
         event: "document-response",
@@ -159,6 +207,22 @@ async function journey(name, action) {
     });
     context.on("page", (candidate) => {
       pageLabels.set(candidate, page ? "popup" : "top");
+      candidate.on("pageerror", (error) => {
+        runtimeErrors.push({
+          page: pageLabels.get(candidate) || "top",
+          type: "pageerror",
+          name: error.name || "Error",
+          message: sanitizeDiagnostic(error.message, [user, pass]),
+        });
+      });
+      candidate.on("console", (message) => {
+        if (message.type() !== "error") return;
+        runtimeErrors.push({
+          page: pageLabels.get(candidate) || "top",
+          type: "console",
+          message: sanitizeDiagnostic(message.text(), [user, pass]),
+        });
+      });
       candidate.on("framenavigated", (frame) => {
         if (frame === candidate.mainFrame()) {
           timeline.push({ page: pageLabels.get(candidate) || "top", event: "committed", url: sanitizeUrl(frame.url()) });
@@ -203,6 +267,7 @@ async function journey(name, action) {
       timeline,
       headerTimeline,
       surfaceTimeline,
+      runtimeErrors,
       check,
       contract,
       setMissing: () => { exists = false; },
@@ -213,16 +278,17 @@ async function journey(name, action) {
     contract("native/headerless top strip never visible", !surfaceTimeline.some((item) => item.name === "native/headerless top strip"));
     contract("header is never removed after insertion", !headerTimeline.some((item) => item.event === "removed"));
   } catch (error) {
-    // Playwright errors can embed full navigation URLs. Keep diagnostics in
-    // screenshots/video and only record the non-sensitive error class here.
-    check("journey completed", false, true, error?.name || "Error");
+    // Playwright errors can embed navigation URLs or application diagnostics.
+    // Persist only the bounded, credential- and capability-redacted message.
+    check("journey completed", false, true,
+      `${error?.name || "Error"}: ${sanitizeDiagnostic(error?.message, [user, pass])}`);
   }
 
   const outcome = contractOutcome({ mode, exists, observations, blocking });
   if (outcome.failed && context) {
     // Before authenticatedState exists, a failed Keycloak form can still hold
     // credentials. Never persist pixels from that context.
-    if (authenticatedState) {
+    if (authenticatedState && !metadataOnly) {
       await page?.screenshot({ path: path.join(dir, "failure-top.png"), fullPage: true }).catch(() => {});
       await popupPage?.screenshot({ path: path.join(dir, "failure-popup.png"), fullPage: true }).catch(() => {});
     }
@@ -235,6 +301,7 @@ async function journey(name, action) {
       layoutShifts,
       headerTimeline,
       surfaceTimeline,
+      runtimeErrors,
       observations,
       contract: blocking,
     }, null, 2));
@@ -252,6 +319,7 @@ async function journey(name, action) {
     layoutShiftTotal: layoutShifts.reduce((total, entry) => total + entry.value, 0),
     headerTimeline,
     surfaceTimeline,
+    runtimeErrors,
   });
 }
 
@@ -374,6 +442,173 @@ async function officeDocuments({ page, rawDocumentRequests, portalHeaderVersion,
       && item.name !== "Office active section: Documents"));
 }
 
+function isExpandedFilesRoute(value, fileId) {
+  try {
+    const url = new URL(value);
+    return url.origin === `https://nextcloud.${domain}`
+      && url.pathname === `/apps/files/files/${fileId}`;
+  } catch {
+    return false;
+  }
+}
+
+async function waitForCollaboraFrame(page) {
+  return page.frames().find((frame) => frame.parentFrame() === page.mainFrame() && frame.url().includes("/cool.html"))
+    ?? page.waitForEvent("framenavigated", {
+      predicate: (frame) => frame.parentFrame() === page.mainFrame() && frame.url().includes("/cool.html"),
+      timeout: 45_000,
+    });
+}
+
+async function documentLoadedCount(page) {
+  return Number.parseInt(await page.locator("html").getAttribute("data-os-office-document-loaded-count") || "0", 10);
+}
+
+async function waitForDocumentLoaded(page, previousCount = 0) {
+  await page.locator(`html[data-os-office-document-loaded-${previousCount + 1}]`)
+    .waitFor({ state: "attached", timeout: 45_000 });
+}
+
+async function assertOfficeHeaderGeometry(page, label, portalHeaderVersion, check, contract) {
+  await assertHeader(page, label, check, portalHeaderVersion);
+  const header = await page.locator("#ko-portal-header").boundingBox();
+  const editor = await page.locator(".office-viewer:not(.widget-file)").last().boundingBox();
+  const viewport = page.viewportSize();
+  const near = (left, right) => Math.abs(left - right) <= 2;
+  contract(`${label} starts below shared header and fills remaining viewport`, Boolean(
+    header && editor && viewport
+      && near(header.x, 0)
+      && near(header.y, 0)
+      && near(header.width, viewport.width)
+      && near(editor.x, 0)
+      && near(editor.y, header.y + header.height)
+      && near(editor.width, viewport.width)
+      && near(editor.y + editor.height, viewport.height)
+  ), `header=${JSON.stringify(header)},editor=${JSON.stringify(editor)}`);
+}
+
+async function invokeFirstInsertImage(page, editor, label, contract) {
+  const menu = editor.locator("#menu-insert > a");
+  await menu.waitFor({ state: "visible", timeout: 30_000 });
+  await menu.click();
+  await editor.getByText(/^(Image|Image\.\.\.|Insert Image)$/i).last().click();
+  const picker = page.getByRole("dialog").filter({ hasText: "Insert file from Open Suite" }).last();
+  await picker.waitFor({ state: "visible", timeout: 15_000 });
+  contract(`${label} first Insert Image click opens picker`, true);
+  await page.keyboard.press("Escape");
+  await picker.waitFor({ state: "hidden" });
+}
+
+async function closeOfficeToFiles(page, editor, fileId, label, portalHeaderVersion, check, contract) {
+  const frame = page.locator('iframe[data-cy="coolframe"], #loleafletframe');
+  await editor.locator("#closebutton").click();
+  await frame.waitFor({ state: "detached", timeout: 30_000 });
+  const files = page.locator("#app-content-files, .files-list, [data-testid='files-list']").first();
+  await files.waitFor({ state: "visible", timeout: 30_000 });
+  await assertHeader(page, `${label} closed Files view`, check, portalHeaderVersion);
+  const url = new URL(page.url());
+  contract(`${label} close returns to exact Files view`,
+    isExpandedFilesRoute(url, fileId) && !url.searchParams.has("openfile"));
+  contract(`${label} close removes Collabora frame`,
+    !page.frames().some((candidate) => candidate.url().includes("/cool.html")));
+}
+
+async function portalFilesOfficeLifecycle({ page, rawDocumentRequests, portalHeaderVersion, timeline, check, contract, setMissing, setPopup }) {
+  const fixture = process.env.SMOKE_OFFICE_FILE;
+  const widget = page.locator(".dashboard-item").filter({ has: page.getByRole("link", { name: "Files", exact: true }) }).first();
+  const links = widget.locator('a[target="_blank"]');
+  const expected = fixture
+    ? links.getByText(fixture, { exact: true })
+    : links.filter({ hasText: /\.docx$/i }).first();
+  const candidateVisible = await expected.waitFor({ state: "visible", timeout: 30_000 })
+    .then(() => true, () => false);
+  if (!candidateVisible) {
+    setMissing();
+    contract("DOCX fixture/candidate exists", false);
+    return;
+  }
+  const names = (await links.allTextContents()).map((name) => name.trim()).filter(Boolean);
+  const candidate = chooseDocxCandidate(names, fixture);
+  if (!candidate) {
+    setMissing();
+    contract("DOCX fixture/candidate is valid", false);
+    return;
+  }
+
+  const target = links.getByText(candidate, { exact: true });
+  const href = await target.getAttribute("href");
+  const parsedDurable = href && durableNextcloudFile(href, portalUrl);
+  const durable = parsedDurable && new URL(parsedDurable.url).origin === `https://nextcloud.${domain}`
+    ? parsedDurable
+    : null;
+  contract("Files widget Office link is an exact durable Nextcloud /f/{id} URL", Boolean(durable));
+  // Baseline mode observes the currently deployed portal until its separately
+  // owned production change lands. Enforce mode fails the contract above.
+  if (!durable) return;
+
+  for (let attempt = 1; attempt <= 2; attempt += 1) {
+    const timelineStart = timeline.length;
+    const [popup] = await Promise.all([page.waitForEvent("popup"), target.click()]);
+    setPopup(popup);
+    popup.setDefaultTimeout(15_000);
+    popup.setDefaultNavigationTimeout(45_000);
+    await popup.waitForURL((url) => isExpandedFilesRoute(url, durable.fileId), { timeout: 45_000 });
+    contract(`Office attempt ${attempt} requests exact durable deep link`,
+      (rawDocumentRequests.get(popup) || []).some((url) => sameDeepLink(url, durable.url, portalUrl))
+        || timeline.slice(timelineStart).some((item) => item.event === "document-request" && sameDeepLink(item.url, durable.url, portalUrl)));
+    contract(`Office attempt ${attempt} never requests directEditing`,
+      !(rawDocumentRequests.get(popup) || []).some((url) => /\/apps\/files\/directEditing\//.test(new URL(url).pathname))
+        && !timeline.slice(timelineStart).some((item) => item.event === "document-request" && /\/apps\/files\/directEditing\//.test(new URL(item.url).pathname)));
+    check(`Office attempt ${attempt} source Portal remains dashboard`, await page.locator(".dashboard-grid").isVisible());
+
+    let editor = await waitForCollaboraFrame(popup);
+    await waitForDocumentLoaded(popup);
+    await assertOfficeHeaderGeometry(popup, `Office attempt ${attempt}`, portalHeaderVersion, check, contract);
+
+    if (attempt === 1) {
+      await invokeFirstInsertImage(popup, editor, "Office attempt 1", contract);
+      const routeBeforeReload = sanitizeUrl(popup.url());
+      await popup.reload({ waitUntil: "domcontentloaded" });
+      await popup.waitForURL((url) => isExpandedFilesRoute(url, durable.fileId), { timeout: 45_000 });
+      editor = await waitForCollaboraFrame(popup);
+      await waitForDocumentLoaded(popup);
+      contract("Office refresh reopens the exact file route", sanitizeUrl(popup.url()) === routeBeforeReload);
+      contract("Office refresh does not render not-found",
+        !/Page not found|could not be found/i.test(await popup.locator("body").innerText()));
+      await assertOfficeHeaderGeometry(popup, "Office refreshed", portalHeaderVersion, check, contract);
+    }
+
+    await closeOfficeToFiles(popup, editor, durable.fileId, `Office attempt ${attempt}`, portalHeaderVersion, check, contract);
+
+    if (attempt === 1) {
+      const history = [{ state: "closed", url: sanitizeUrl(popup.url()) }];
+      const loadedBeforeBack = await documentLoadedCount(popup);
+      await popup.goBack({ waitUntil: "commit" });
+      editor = await waitForCollaboraFrame(popup);
+      await waitForDocumentLoaded(popup, loadedBeforeBack);
+      history.push({ state: "back-open", url: sanitizeUrl(popup.url()) });
+      contract("Office Back deterministically reopens exact file",
+        isExpandedFilesRoute(popup.url(), durable.fileId)
+          && new URL(popup.url()).searchParams.has("openfile"));
+      await assertOfficeHeaderGeometry(popup, "Office Back", portalHeaderVersion, check, contract);
+
+      await popup.goForward({ waitUntil: "commit" });
+      await popup.locator('iframe[data-cy="coolframe"], #loleafletframe').waitFor({ state: "detached", timeout: 30_000 });
+      await popup.locator("#app-content-files, .files-list, [data-testid='files-list']").first()
+        .waitFor({ state: "visible", timeout: 30_000 });
+      history.push({ state: "forward-closed", url: sanitizeUrl(popup.url()) });
+      const historyContract = contract("Office Forward deterministically restores closed Files view",
+        isExpandedFilesRoute(popup.url(), durable.fileId)
+          && !new URL(popup.url()).searchParams.has("openfile")
+          && !popup.frames().some((frame) => frame.url().includes("/cool.html")));
+      historyContract.detail = JSON.stringify(history);
+      await assertHeader(popup, "Office Forward Files view", check, portalHeaderVersion);
+    }
+
+    await popup.close();
+  }
+}
+
 const chat = {
   label: "Chat",
   hostname: `element.${domain}`,
@@ -421,56 +656,36 @@ try {
     await journey("portal-chat", (state) => sameTab(state, "Chat", chat));
     await journey("portal-office-documents", officeDocuments);
     await journey("portal-calendar", (state) => sameTab(state, "Calendar", calendar));
+    await journey("portal-files-office-lifecycle", portalFilesOfficeLifecycle, { metadataOnly: true });
 
-    for (const kind of ["whiteboard", "office"]) {
-      await journey(`portal-files-${kind}`, async ({ page, rawDocumentRequests, portalHeaderVersion, check, contract, setMissing, setPopup }) => {
-        const fixture = kind === "whiteboard" ? process.env.SMOKE_WHITEBOARD_FILE : process.env.SMOKE_OFFICE_FILE;
+    await journey("portal-files-whiteboard", async ({ page, rawDocumentRequests, portalHeaderVersion, check, contract, setMissing, setPopup }) => {
+        const fixture = process.env.SMOKE_WHITEBOARD_FILE;
         const widget = page.locator(".dashboard-item").filter({ has: page.getByRole("link", { name: "Files", exact: true }) }).first();
         const links = widget.locator('a[target="_blank"]');
         const names = (await links.allTextContents()).map((name) => name.trim()).filter(Boolean);
-        const candidate = chooseCandidate(names, fixture, kind);
+        const candidate = chooseCandidate(names, fixture, "whiteboard");
         if (!candidate) {
           setMissing();
-          contract(`${kind} fixture/candidate exists`, false);
+          contract("whiteboard fixture/candidate exists", false);
           return;
         }
         const target = links.getByText(candidate, { exact: true });
         const href = await target.getAttribute("href");
-        if (!href) throw new Error(`${kind} candidate has no deep link`);
+        if (!href) throw new Error("whiteboard candidate has no deep link");
         const [popup] = await Promise.all([page.waitForEvent("popup"), target.click()]);
         setPopup(popup);
         popup.setDefaultTimeout(15_000);
         popup.setDefaultNavigationTimeout(30_000);
         await popup.waitForLoadState("domcontentloaded").catch(() => {});
         await popup.waitForURL((url) => url.hostname === `nextcloud.${domain}`, { timeout: 30_000 });
-        check(`${kind} final host`, new URL(popup.url()).hostname === `nextcloud.${domain}`);
+        check("whiteboard final host", new URL(popup.url()).hostname === `nextcloud.${domain}`);
         contract("popup exact deep link requested", (rawDocumentRequests.get(popup) || []).some((url) => sameDeepLink(url, href, portalUrl)));
-        await assertHeader(popup, kind === "whiteboard" ? "Whiteboard" : "Office editor", check, portalHeaderVersion);
+        await assertHeader(popup, "Whiteboard", check, portalHeaderVersion);
         check("source Portal remains authenticated dashboard", await page.locator(".dashboard-grid").isVisible());
 
-        if (kind === "whiteboard") {
-          const marker = popup.locator("canvas, [class*='whiteboard'][class*='toolbar'], [data-testid*='canvas']").first();
-          const visible = await marker.waitFor({ state: "visible", timeout: 30_000 }).then(() => true, () => false);
-          contract("whiteboard canvas/tool marker usable", visible);
-        } else {
-          let editor;
-          for (let attempt = 0; attempt < 15 && !editor; attempt += 1) {
-            editor = popup.frames().find((frame) => frame.url().includes("cool.html"));
-            if (!editor) await popup.waitForTimeout(2_000);
-          }
-          const file = editor?.getByText("File", { exact: true }).first();
-          const insert = editor?.getByText("Insert", { exact: true }).first();
-          const [fileReady, insertReady] = await Promise.all([
-            file?.waitFor({ state: "visible", timeout: 30_000 }).then(() => true, () => false),
-            insert?.waitFor({ state: "visible", timeout: 30_000 }).then(() => true, () => false),
-          ]);
-          const usable = Boolean(editor && fileReady && insertReady);
-          if (usable) {
-            await file.click();
-            await popup.keyboard.press("Escape");
-          }
-          check("Collabora File/Insert interaction marker usable", usable);
-        }
+        const marker = popup.locator("canvas, [class*='whiteboard'][class*='toolbar'], [data-testid*='canvas']").first();
+        const visible = await marker.waitFor({ state: "visible", timeout: 30_000 }).then(() => true, () => false);
+        contract("whiteboard canvas/tool marker usable", visible);
 
         const filesListVisible = await popup.locator("#app-content-files, .files-list, [data-testid='files-list']").first().isVisible().catch(() => false);
         contract("editor shown instead of Files list", !filesListVisible);
@@ -486,7 +701,6 @@ try {
         const historyContract = contract("Back/Forward outcome preserves source or restores popup", historyOutcome !== "popup-forward-unavailable" && await page.locator(".dashboard-grid").isVisible());
         historyContract.detail = historyOutcome;
       });
-    }
   }
 } finally {
   await browser.close();

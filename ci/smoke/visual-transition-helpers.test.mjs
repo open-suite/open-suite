@@ -3,7 +3,7 @@ import { mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { test } from "node:test";
-import { assessElementHome, classifyFile, chooseCandidate, contractOutcome, enforceArtifactBudget, parseMode, sameDeepLink, sanitizeUrl } from "./visual-transition-helpers.mjs";
+import { assessElementHome, classifyFile, chooseCandidate, chooseDocxCandidate, contractOutcome, durableNextcloudFile, enforceArtifactBudget, parseMode, sameDeepLink, sanitizeDiagnostic, sanitizeUrl } from "./visual-transition-helpers.mjs";
 
 test("mode only enables an explicit enforce contract", () => {
   assert.equal(parseMode("enforce"), "enforce");
@@ -16,11 +16,35 @@ test("URLs retain shape but never query values or credentials", () => {
   assert.equal(sameDeepLink("/f/7?x=one#editor", "/f/7?x=one#editor", "https://nextcloud.example.test"), true);
   assert.equal(sameDeepLink("/apps/files", "/f/7", "https://nextcloud.example.test"), false);
 });
+test("direct-edit capabilities and asset tokens never survive diagnostics", () => {
+  const token = "a".repeat(64);
+  const direct = sanitizeUrl(`https://nextcloud.example.test/apps/files/directEditing/${token}`);
+  const asset = sanitizeDiagnostic(`failed https://nextcloud.example.test/apps/richdocuments/assets/${token}?login_hint=short&code=VERYSECRET bearer=${token} password=short`, ["short"]);
+  assert.equal(direct, "https://nextcloud.example.test/apps/files/directEditing/%3Credacted%3E");
+  assert.ok(!direct.includes(token));
+  assert.ok(!asset.includes(token));
+  assert.ok(!asset.includes("secret"));
+  assert.ok(!asset.includes("short"));
+  assert.ok(!asset.includes("VERYSECRET"));
+});
+test("durable Nextcloud links contain only a stable numeric file id", () => {
+  assert.deepEqual(durableNextcloudFile("https://nextcloud.example.test/f/94", "https://bridge.example.test"), {
+    fileId: "94",
+    url: "https://nextcloud.example.test/f/94",
+  });
+  assert.equal(durableNextcloudFile("/index.php/f/1394", "https://nextcloud.example.test"), null);
+  assert.equal(durableNextcloudFile("http://nextcloud.example.test/f/94", "https://nextcloud.example.test"), null);
+  assert.equal(durableNextcloudFile("https://user:pass@nextcloud.example.test/f/94", "https://nextcloud.example.test"), null);
+  assert.equal(durableNextcloudFile("/apps/files/directEditing/secret", "https://nextcloud.example.test"), null);
+  assert.equal(durableNextcloudFile("/f/94?token=secret", "https://nextcloud.example.test"), null);
+});
 test("file candidates are deterministic and correctly classified", () => {
   assert.equal(classifyFile("Board.whiteboard"), "whiteboard");
   assert.equal(classifyFile("Plan.DOCX"), "office");
   assert.equal(chooseCandidate(["z.docx", "a.odt"], "", "office"), "a.odt");
   assert.equal(chooseCandidate(["a.odt"], "missing.docx", "office"), null);
+  assert.equal(chooseDocxCandidate(["a.odt", "z.docx"], ""), "z.docx");
+  assert.equal(chooseDocxCandidate(["z.docx"], "a.odt"), null);
 });
 test("Element home marker requires authenticated home and visible room navigation", () => {
   const bodyText = "Welcome John Doe\nNow, let's help you get started\nSend a Direct Message";
