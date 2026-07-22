@@ -67,6 +67,8 @@ require_literal "${DEPLOY_SCRIPT}" "for source in mb-keycloak:id mb-collabora:co
 require_literal "${DEPLOY_SCRIPT}" "-o jsonpath='{.data.ca\\.crt}'"
 require_literal "${DEPLOY_SCRIPT}" 'openssl x509 -in "${cert_file}" -noout -checkend 0'
 require_literal "${DEPLOY_SCRIPT}" 'php occ security:certificates:import'
+require_literal "${DEPLOY_SCRIPT}" 'kubectl rollout restart deploy/nextcloud -n mb-nextcloud'
+require_literal "${DEPLOY_SCRIPT}" 'ERROR: occ not responding after post-upgrade restart'
 require_literal "${DEPLOY_SCRIPT}" 'kubectl rollout status deploy/traefik -n kube-system --timeout=300s'
 require_literal "${DEPLOY_SCRIPT}" 'timeout --signal=TERM --kill-after=5s 15s'
 require_literal "${DEPLOY_SCRIPT}" 'php occ richdocuments:activate-config'
