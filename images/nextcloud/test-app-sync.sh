@@ -8,8 +8,17 @@ image_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 tmp="$(mktemp -d)"
 trap 'rm -rf "${tmp}"' EXIT
 
-mkdir -p "${tmp}/stage/richdocuments" "${tmp}/nextcloud/custom_apps/richdocuments/appinfo"
+mkdir -p \
+  "${tmp}/stage/meetcal" \
+  "${tmp}/stage/user_oidc" \
+  "${tmp}/stage/richdocuments" \
+  "${tmp}/stage/whiteboard" \
+  "${tmp}/nextcloud/custom_apps/richdocuments/appinfo"
 cp -a "${app_source}/." "${tmp}/stage/richdocuments/"
+touch \
+  "${tmp}/stage/meetcal/fixture" \
+  "${tmp}/stage/user_oidc/fixture" \
+  "${tmp}/stage/whiteboard/fixture"
 cat > "${tmp}/nextcloud/custom_apps/richdocuments/appinfo/info.xml" <<'XML'
 <info><version>11.0.0</version></info>
 XML

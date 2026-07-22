@@ -192,6 +192,8 @@ for sample in $(seq 1 "${samples}"); do
     -e NEXTCLOUD_ADMIN_USER=benchmark-admin \
     -e NEXTCLOUD_ADMIN_PASSWORD=benchmark-password \
     -e NEXTCLOUD_TRUSTED_DOMAINS=localhost \
+    -e WHITEBOARD_COLLAB_BACKEND_URL=https://localhost/whiteboard \
+    -e WHITEBOARD_JWT_SECRET=benchmark-only-whiteboard-secret \
     -e POSTGRES_DB=nextcloud \
     -e POSTGRES_USER=nextcloud \
     -e POSTGRES_PASSWORD=benchmark-password \

@@ -23,7 +23,7 @@ require_literal "${dockerfile}" 'COPY hooks/10-opensuite-apps.sh /usr/local/bin/
 require_literal "${dockerfile}" 'COPY richdocuments/ /usr/src/opensuite/richdocuments/'
 require_literal "${dockerfile}" 'for phase in pre-installation pre-upgrade before-starting'
 require_literal "${dockerfile}" 'ln -s /usr/local/bin/opensuite-sync-apps'
-require_literal "${sync_hook}" 'for app in meetcal user_oidc richdocuments; do'
+require_literal "${sync_hook}" 'for app in meetcal user_oidc richdocuments whiteboard; do'
 require_literal "${sync_hook}" 'stage_root="${OPENSUITE_STAGE_ROOT:-/usr/src/opensuite}"'
 require_literal "${sync_hook}" 'nextcloud_root="${NEXTCLOUD_ROOT:-/var/www/html}"'
 

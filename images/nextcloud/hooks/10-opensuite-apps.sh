@@ -12,13 +12,18 @@
 #     (requested_token_type refresh->access, required by Keycloak 26 standard
 #     exchange; see images/nextcloud/patches/). occ app:install in the chart's
 #     post-install script becomes a local enable once this copy exists.
-#   - richdocuments: pinned official NC34-compatible release containing the
-#     upstream empty image-picker fix.
+#   - richdocuments: the pinned official NC34-compatible release containing
+#     the upstream empty image-picker fix.
+#   - whiteboard: the checksum-pinned official release. Its matching backend
+#     designates the browser responsible for durable Nextcloud file writes.
 set -eu
 stage_root="${OPENSUITE_STAGE_ROOT:-/usr/src/opensuite}"
 nextcloud_root="${NEXTCLOUD_ROOT:-/var/www/html}"
-for app in meetcal user_oidc richdocuments; do
-  if [ -d "${stage_root}/${app}" ]; then
-    rsync -a --delete "${stage_root}/${app}/" "${nextcloud_root}/custom_apps/${app}/"
+for app in meetcal user_oidc richdocuments whiteboard; do
+  source="${stage_root}/${app}"
+  if [ ! -d "${source}" ]; then
+    echo "ERROR: image is missing required app source: ${app}" >&2
+    exit 1
   fi
+  rsync -a --delete "${source}/" "${nextcloud_root}/custom_apps/${app}/"
 done
