@@ -11,8 +11,8 @@ Pinned upstream Nextcloud plus:
   Upstream PR: (pending — see ticket 3.3).
 - `richdocuments` 11.0.1, the NC34-compatible maintenance release containing
   upstream's missing-DAV-`share-attributes` guard. Its official archive is
-  SHA-256 pinned and copied unmodified so Nextcloud's package-integrity
-  metadata remains valid.
+  SHA-256 pinned and its signed SHA-512 manifest is verified before Open Suite's
+  one-file asset-MIME patch is applied deterministically.
 - Nextcloud Whiteboard `v1.5.9`, the current stable release compatible with
   Nextcloud 34, fetched and checksum-verified in CI.
 - `hooks/10-opensuite-apps.sh` — syncs all four apps from the image onto the
@@ -122,12 +122,20 @@ parent page to open richdocuments' `@nextcloud/dialogs` picker. The picker
 lists the current user's files directly over same-origin WebDAV: `PROPFIND`
 for All files/folders and DAV searches for Recent and Favorites. A selection
 is posted to `/apps/richdocuments/assets`; Nextcloud scopes it to that user's
-folder and returns a 64-character, ten-minute, one-use URL that only the
-configured WOPI server may fetch. The response deliberately has
-`application/octet-stream` plus `Content-Disposition: attachment`; its body is
-the original file stream, which Collabora identifies by the passed filename
-and image magic. Neither file listing nor asset creation uses the Collabora
-WOPI token.
+folder and returns a 64-character, ten-minute, one-use bearer URL. The source
+route retains richdocuments' configured WOPI-source restriction; behind the
+suite ingress, possession of the unguessable token remains the effective
+request credential. The extensionless response retains
+`Content-Disposition: attachment`, streams the original file bytes, and uses
+the selected Nextcloud node's authoritative MIME type (with
+`application/octet-stream` only as an empty-MIME fallback). CODE passes the URL
+from `Action_InsertGraphic` to its kit; the engine's HTTP/UCB layer may issue a
+non-consuming HEAD for `Content-Type` before reading the stream. An extensionless
+URL advertised as generic binary gives that path no authoritative JPEG type and
+ended in the observed engine-side `Unknown image format` failure. `nosniff` is a
+browser policy, not a source-confirmed kit rejection, and is harmless once the
+declared MIME is correct. Neither file listing nor asset creation uses the
+Collabora WOPI token.
 
 That one-use GET has no browser realm session. The edge auth gate therefore
 passes only `GET` and its non-consuming `HEAD` probe for
@@ -147,17 +155,32 @@ fresh installs and existing `custom_apps` PVCs receive the same fixed version.
 The Office reconciliation step runs `occ upgrade`, enables the app, and fails
 the deploy unless the enabled version is exactly 11.0.1.
 
-`test-richdocuments-package.sh` verifies the official production bundle—not
-only release metadata—contains the guard, permission restriction, PNG/JPEG
-allowlist, NC34 version contract, one-use/ten-minute asset token, original-byte
-stream response, and exact `Action_InsertGraphic` handoff. The auth-gate tests
-pin the single 64-character GET/HEAD bypass and keep malformed tokens, POST,
-and nearby routes protected. The live Playwright smoke uploads an ordinary
-800×450 JPEG through Files, verifies its DAV MIME/magic/SHA-256, covers the
-rendered All files/Recent/Favorites/folder picker and error cases, validates
-the asset JSON URL and postMessage payload, rejects login/HTML asset responses,
-and requires both coloured halves to appear in Collabora's visible document
-canvas. Message delivery alone is not accepted as image insertion.
+`test-richdocuments-package.sh` verifies the complete signed upstream package,
+then verifies every unmodified packaged file plus the exact patched controller
+hash. It pins the guard, permission restriction, PNG/JPEG allowlist, NC34
+version contract, one-use/ten-minute asset token, authoritative node MIME with
+safe fallback, original-byte stream response, and exact
+`Action_InsertGraphic` handoff. The auth-gate tests pin the single 64-character
+GET/HEAD bypass and keep malformed tokens, POST, and nearby routes protected.
+The live Playwright smoke uploads ordinary JPEGs through Files, verifies their
+DAV MIME/magic/SHA-256, covers the rendered All files/Recent/Favorites/folder
+picker and error cases, requires an anonymous non-consuming asset HEAD to
+return `image/jpeg` directly from Nextcloud, rejects login/HTML/generic-binary
+asset responses, and requires two separately tokenized insertions to render
+their distinct colours in Collabora's visible document canvas. Message
+delivery alone is not accepted as image insertion.
+
+Nextcloud 34 has no supported per-event Activity deletion API. Existing human
+demo activity therefore needs one reviewed, exact database cleanup. Select
+candidate `oc_activity` rows where `affecteduser` and `"user"` both equal the
+human demo user's exact Nextcloud UID, `app = 'files'`,
+`object_type = 'files'`, and the final `file` component matches only
+`OpenSuite-Smoke-*`, `OpenSuite-Real-JPEG-*`, or the historical
+`Open Suite smoke <digits>.whiteboard` fixture. Export and review the IDs, then
+delete only that explicit `activity_id` list in a transaction; do not install a
+recurring broad name purge. Self-actions do not populate `oc_activity_mq`.
+Moving destructive browser fixtures to an isolated test identity is a separate
+test-infrastructure follow-up, not part of the image MIME fix.
 
 ## Startup performance evidence (2026-07-20)
 
