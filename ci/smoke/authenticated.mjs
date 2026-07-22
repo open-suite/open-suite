@@ -155,6 +155,14 @@ try {
     ok("suite navigation has the canonical desktop order");
   else fail("suite navigation order", `expected ${expectedTopLevel}, got ${desktopTopLevel}`);
 
+  const chatHref = await page
+    .locator("#ko-portal-header")
+    .getByRole("link", { name: "Chat", exact: true })
+    .getAttribute("href");
+  if (chatHref === `https://element.${DOMAIN}/#/home`)
+    ok("Chat uses Element's canonical home entry route");
+  else fail("Chat entry route", `unexpected href: ${chatHref}`);
+
   const moreButton = page
     .locator("#ko-portal-header .ko-desktop-nav")
     .getByRole("button", { name: "More ▾", exact: true });
@@ -272,6 +280,59 @@ try {
 
   // The Office path above establishes Nextcloud's user_oidc session and stores
   // the login token the meetcal/caldav token exchange needs.
+  //
+  // Reproduce the Portal -> Element history path before warming Element by a
+  // direct navigation. A fresh Element origin takes the immediate SSO path;
+  // one Back must therefore skip every login/callback URL and return to the
+  // meaningful Portal page. Forward must restore the usable canonical home.
+  await page.goto(`https://bridge.${DOMAIN}/`, { waitUntil: "domcontentloaded" });
+  await page.locator(".dashboard-grid").waitFor({ state: "visible", timeout: 30000 });
+  const chatLink = page
+    .locator("#ko-portal-header")
+    .getByRole("link", { name: "Chat", exact: true });
+  await chatLink.click();
+  await page.waitForURL(`https://element.${DOMAIN}/#/home`, { timeout: 45000 });
+  await page.getByText("Send a Direct Message", { exact: true }).waitFor({
+    state: "visible",
+    timeout: 45000,
+  });
+  ok("Portal Chat opens usable Element home");
+
+  await page.goBack({ waitUntil: "domcontentloaded", timeout: 30000 });
+  await page.waitForURL(`https://bridge.${DOMAIN}/**`, { timeout: 30000 });
+  await page.locator(".dashboard-grid").waitFor({ state: "visible", timeout: 30000 });
+  ok("Element home Back skips root/login/callback history and returns to Portal");
+
+  await page.goForward({ waitUntil: "domcontentloaded", timeout: 30000 });
+  await page.waitForURL(`https://element.${DOMAIN}/#/home`, { timeout: 30000 });
+  await page.getByText("Send a Direct Message", { exact: true }).waitFor({
+    state: "visible",
+    timeout: 45000,
+  });
+  ok("Element home Forward restores a usable destination");
+
+  // Explicit room hashes are a separate supported entry contract. They must
+  // remain intact (including across auth restoration), while Back/Forward must
+  // still traverse directly between that room and Portal.
+  const welcomeRoomUrl = `https://element.${DOMAIN}/#/room/#welcome:matrix.${DOMAIN}`;
+  await page.goto(`https://bridge.${DOMAIN}/`, { waitUntil: "domcontentloaded" });
+  await page.locator(".dashboard-grid").waitFor({ state: "visible", timeout: 30000 });
+  await page.goto(welcomeRoomUrl, { waitUntil: "domcontentloaded" }).catch(() => null);
+  await page.waitForURL(`https://element.${DOMAIN}/#/room/**`, { timeout: 30000 });
+  const restoredRoomUrl = page.url();
+  if (restoredRoomUrl.startsWith(`https://element.${DOMAIN}/#/room/`))
+    ok("Element room deep link restores as a room route");
+  else fail("Element room deep link", `landed on ${restoredRoomUrl}`);
+
+  await page.goBack({ waitUntil: "domcontentloaded", timeout: 30000 });
+  await page.waitForURL(`https://bridge.${DOMAIN}/**`, { timeout: 30000 });
+  await page.locator(".dashboard-grid").waitFor({ state: "visible", timeout: 30000 });
+  ok("Element room Back skips login/callback history and returns to Portal");
+
+  await page.goForward({ waitUntil: "domcontentloaded", timeout: 30000 });
+  await page.waitForURL((url) => url.toString() === restoredRoomUrl, { timeout: 30000 });
+  ok("Element room Forward restores the deep link");
+
   for (const host of ["nextcloud", "grist", "docs", "meet", "element"]) {
     // Some OIDC SPAs replace the initial navigation while Playwright is still
     // awaiting it, which surfaces as net::ERR_ABORTED even though the redirect

@@ -109,7 +109,11 @@
   // sub = subdomain the item points at; used for both the href and active app.
   var NAV = [
     { label: "Home", sub: "bridge" },
-    { label: "Chat", sub: "element" },
+    // Element's authenticated bare-root startup pushes #/home, leaving both
+    // / and /#/home above the referring Portal entry. Enter its supported
+    // canonical home route directly so Back returns to Portal; Element still
+    // preserves explicit room hashes across its replace-only SSO callback.
+    { label: "Chat", sub: "element", path: "/#/home" },
     { label: "Meet", sub: "meet" },
     { label: "Office", sub: "nextcloud", children: OFFICE_CHILDREN },
     { label: "Calendar", sub: "nextcloud", path: "/apps/calendar" },
