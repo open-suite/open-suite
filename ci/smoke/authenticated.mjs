@@ -895,6 +895,25 @@ try {
           }
           validateAssetUrl(probeAsset.url);
 
+          // LibreOffice's WebDAV UCB probes remote graphics with OPTIONS
+          // before fetching them. The edge gate must pass this exact tokenized
+          // route through without redirecting the kit to the login host.
+          const assetOptions = await anonymous.request.fetch(probeAsset.url, {
+            method: "OPTIONS",
+            maxRedirects: 0,
+          });
+          if (
+            assetOptions.status() >= 200
+            && assetOptions.status() < 500
+            && !assetOptions.headers().location
+          ) ok(`extensionless asset OPTIONS stays on Nextcloud (HTTP ${assetOptions.status()})`);
+          else {
+            throw new Error(
+              `asset OPTIONS contract failed: HTTP ${assetOptions.status()}, `
+              + `location=${assetOptions.headers().location || "none"}`
+            );
+          }
+
           const assetHead = await anonymous.request.head(probeAsset.url, { maxRedirects: 0 });
           const headType = assetHead.headers()["content-type"]?.split(";", 1)[0];
           if (
