@@ -1,0 +1,51 @@
+name: visual transition samples
+on:
+  schedule:
+    - cron: "43 4 * * 2"
+  workflow_dispatch:
+    inputs:
+      samples:
+        description: Sequential samples (maximum 10)
+        default: "5"
+permissions:
+  contents: read
+concurrency:
+  group: smoke-live-demo
+  cancel-in-progress: false
+env:
+  SMOKE_DOMAIN: demo.opensuite.online
+jobs:
+  samples:
+    runs-on: ubuntu-latest
+    timeout-minutes: 120
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with: { node-version: 22 }
+      - run: npm i --no-save playwright@1.55.1 && npx playwright install --with-deps chromium
+      - name: Require credentials and run sequential samples
+        env:
+          SMOKE_USER: johndoe
+          SMOKE_PASS: ${{ secrets.SMOKE_PASS }}
+          SMOKE_VISUAL_CONTRACT: ${{ vars.SMOKE_VISUAL_CONTRACT || 'baseline' }}
+          SMOKE_WHITEBOARD_FILE: ${{ vars.SMOKE_WHITEBOARD_FILE }}
+          SMOKE_OFFICE_FILE: ${{ vars.SMOKE_OFFICE_FILE }}
+          REQUESTED_SAMPLES: ${{ inputs.samples || '5' }}
+        run: |
+          test -n "$SMOKE_USER" -a -n "$SMOKE_PASS" || { echo 'live-demo smoke secrets are required' >&2; exit 2; }
+          case "$REQUESTED_SAMPLES" in ''|*[!0-9]*) exit 2;; esac
+          test "$REQUESTED_SAMPLES" -ge 1 -a "$REQUESTED_SAMPLES" -le 10 || exit 2
+          per_sample_bytes=$((78643200 / REQUESTED_SAMPLES))
+          failed=0
+          for i in $(seq 1 "$REQUESTED_SAMPLES"); do
+            SMOKE_ARTIFACT_DIR="smoke-visual-artifacts/sample-$i" \
+              SMOKE_ARTIFACT_MAX_BYTES="$per_sample_bytes" \
+              node ci/smoke/visual-transitions.mjs || failed=1
+          done
+          exit "$failed"
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: visual-transition-samples
+          path: smoke-visual-artifacts
+          retention-days: 7
