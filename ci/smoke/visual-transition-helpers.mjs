@@ -94,9 +94,11 @@ export function chooseCandidate(names, fixture, kind) {
   return [...names].sort((a, b) => a.localeCompare(b)).find((name) => classifyFile(name) === kind) ?? null;
 }
 
-export function chooseDocxCandidate(names, fixture) {
-  if (fixture) return names.includes(fixture) && /\.docx$/i.test(fixture) ? fixture : null;
-  return [...names].sort((a, b) => a.localeCompare(b)).find((name) => /\.docx$/i.test(name)) ?? null;
+export function officeLifecycleFixtureName(timestamp, nonce) {
+  if (!Number.isSafeInteger(timestamp) || timestamp < 0 || !/^[a-f0-9-]{36}$/i.test(nonce)) {
+    throw new TypeError("invalid Office lifecycle fixture identity");
+  }
+  return `OpenSuite-Lifecycle-${timestamp}-${nonce}.docx`;
 }
 
 export function contractOutcome({ mode, exists = true, observations = [], blocking = [] }) {
