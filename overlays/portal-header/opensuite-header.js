@@ -467,6 +467,10 @@
 
   function slugOf(el) { return (el.textContent || "").trim().toLowerCase(); }
 
+  function isOfficeSection(slug) {
+    return /^(documents|spreadsheets|presentations|diagrams)$/.test(slug);
+  }
+
   function navItems() {
     var nav = document.getElementById("app-navigation-vue");
     return nav ? nav.querySelectorAll('li[class*="app-navigation-entry"]') : [];
@@ -479,67 +483,72 @@
     return (param || "").trim().toLowerCase();
   }
 
-  function writeOfficePath(slug) {
-    if (!slug) return;
+  function writeOfficePath(slug, addHistory) {
+    if (!isOfficeSection(slug)) return;
     var nextPath = "/apps/office/" + slug;
-    var nextHref = window.location.origin + nextPath;
-    if (window.location.href !== nextHref) {
-      history.replaceState(null, "", nextPath);
+    if (window.location.pathname !== nextPath || window.location.search || window.location.hash) {
+      history[addHistory ? "pushState" : "replaceState"](null, "", nextPath);
     }
   }
 
-  // Select the section named by the URL, retrying while the sidebar (which
-  // renders only after the app's async template fetch) comes up.
-  function applyFromUrl() {
-    var want = requestedSection();
-    if (!want) return;
-    var tries = 0;
-    (function attempt() {
-      var items = navItems();
-      for (var i = 0; i < items.length; i++) {
-        if (slugOf(items[i]) === want) {
-          writeOfficePath(want);
-          // Already active → leave it, so we don't loop click→hashchange→click.
-          if (items[i].className.indexOf("active") === -1) {
-            (items[i].querySelector("a") || items[i]).click();
-          }
-          setTimeout(function () { writeOfficePath(want); }, 0);
-          setTimeout(function () { writeOfficePath(want); }, 250);
-          setTimeout(function () { writeOfficePath(want); }, 1000);
-          return;
-        }
-      }
-      if (tries++ < 40) setTimeout(attempt, 150); // up to ~6s for first paint
-    })();
+  function isActive(item) {
+    return Boolean(item.querySelector('[aria-current="page"], .app-navigation-entry.active'));
   }
 
-  // Mirror sidebar clicks into the path so the URL reflects the open section.
+  var selectingFromUrl = false;
+
+  // Select the section named by the URL as soon as the async sidebar renders.
+  // Office sets aria-current before exposing its result pane, so Documents (the
+  // native default) is not clicked a second time and non-default sections are
+  // selected while the one legitimate data loader is still visible.
+  function applyFromUrl() {
+    var want = requestedSection();
+    if (!isOfficeSection(want)) return false;
+    var items = navItems();
+    for (var i = 0; i < items.length; i++) {
+      if (slugOf(items[i]) === want) {
+        writeOfficePath(want, false);
+        if (!isActive(items[i])) {
+          selectingFromUrl = true;
+          (items[i].querySelector("a") || items[i]).click();
+          selectingFromUrl = false;
+        }
+        return true;
+      }
+    }
+    return false;
+  }
+
+  // Mirror a real sidebar selection into one history entry. Prevent the
+  // navigation item's href="#" default from racing the canonical path.
   function watchClicks() {
     var nav = document.getElementById("app-navigation-vue");
-    if (!nav || nav.dataset.osHashBound) return;
+    if (!nav || nav.dataset.osHashBound) return Boolean(nav);
     nav.dataset.osHashBound = "1";
     nav.addEventListener("click", function (e) {
       var li = e.target.closest && e.target.closest('li[class*="app-navigation-entry"]');
       if (!li || !nav.contains(li)) return;
       var slug = slugOf(li);
-      writeOfficePath(slug);
-      setTimeout(function () { writeOfficePath(slug); }, 0);
-      setTimeout(function () { writeOfficePath(slug); }, 250);
-      setTimeout(function () { writeOfficePath(slug); }, 1000);
+      if (!isOfficeSection(slug)) return;
+      e.preventDefault();
+      if (!selectingFromUrl) writeOfficePath(slug, true);
     });
+    return true;
   }
 
   window.addEventListener("popstate", applyFromUrl);
-  window.addEventListener("hashchange", function () {
-    var section = requestedSection();
-    if (section) setTimeout(function () { writeOfficePath(section); }, 0);
-  });
-  applyFromUrl();
-  setInterval(function () {
-    var section = requestedSection();
-    if (section) writeOfficePath(section);
-  }, 100);
-  setInterval(watchClicks, 1000);
+  var initialSection = requestedSection();
+  if (isOfficeSection(initialSection)) writeOfficePath(initialSection, false);
+
+  function synchronizeOfficeNavigation() {
+    var bound = watchClicks();
+    var selected = applyFromUrl();
+    if (bound && selected) officeObserver.disconnect();
+  }
+
+  var officeObserver = new MutationObserver(synchronizeOfficeNavigation);
+  officeObserver.observe(document.documentElement, { childList: true, subtree: true });
+  synchronizeOfficeNavigation();
 })();
 
 /*

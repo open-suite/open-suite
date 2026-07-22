@@ -61,9 +61,14 @@ for app, path in configs.items():
     if response.index("--ko-header-height:48px") > response.index("<body>"):
         raise AssertionError(f"{app} rendered critical geometry outside head")
 
-nextcloud_geometry = 'html.ko-on-nextcloud #content,html.ko-on-nextcloud #content-vue'
-if nextcloud_geometry not in configs["nextcloud"].read_text():
-    raise AssertionError(f"nextcloud is missing first-paint contract: {nextcloud_geometry}")
+nextcloud_source = configs["nextcloud"].read_text()
+for nextcloud_contract in (
+    'html.ko-on-nextcloud #content,html.ko-on-nextcloud #content-vue',
+    'html.ko-shell-pending:before{content:\"Open Suite\"',
+    'html.ko-shell-pending:after{content:\"O\"',
+):
+    if nextcloud_contract not in nextcloud_source:
+        raise AssertionError(f"nextcloud is missing first-paint contract: {nextcloud_contract}")
 
 for contract in (
     "mount();\n  if (!document.body || !document.getElementById(HEADER_ID))",
@@ -76,6 +81,10 @@ for contract in (
     'html.ko-on-nextcloud #header:not(.header-guest)',
     'html.ko-on-nextcloud #content,html.ko-on-nextcloud #content-vue',
     'height:calc(var(--body-height) - var(',
+    'item.querySelector(\'[aria-current="page"], .app-navigation-entry.active\')',
+    'history[addHistory ? "pushState" : "replaceState"]',
+    'e.preventDefault()',
+    'new MutationObserver(synchronizeOfficeNavigation)',
 ):
     if contract not in header:
         raise AssertionError(f"canonical asset is missing contract: {contract}")
@@ -84,8 +93,15 @@ if 'encodeURIComponent(window.location.origin + "/apps/files/files")' in header:
     raise AssertionError("Nextcloud native OIDC recovery still hard-falls back to Files")
 if 'existing.remove()' in header:
     raise AssertionError("canonical asset still replaces the stable shell node")
+for office_poll in (
+    'setTimeout(function () { writeOfficePath',
+    'setInterval(watchClicks',
+    'items[i].className.indexOf("active")',
+):
+    if office_poll in header:
+        raise AssertionError(f"Office navigation still races the native app: {office_poll}")
 for path in configs.values():
     if "sub_filter_once off;" in path.read_text():
         raise AssertionError(f"{path} can inject duplicate shell markup")
 
-print("first-paint shell, nonce, hydration, geometry, and Calendar return contracts verified")
+print("first-paint shell, Office route, nonce, hydration, geometry, and Calendar return contracts verified")
