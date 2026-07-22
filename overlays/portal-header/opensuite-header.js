@@ -543,7 +543,7 @@
   function synchronizeOfficeNavigation() {
     var bound = watchClicks();
     var selected = applyFromUrl();
-    if (bound && selected) officeObserver.disconnect();
+    if (bound && (selected || !isOfficeSection(requestedSection()))) officeObserver.disconnect();
   }
 
   var officeObserver = new MutationObserver(synchronizeOfficeNavigation);

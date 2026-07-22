@@ -337,7 +337,8 @@ async function officeDocuments({ page, rawDocumentRequests, portalHeaderVersion,
     if (item.event !== "document-response" || item.status !== 200) return false;
     try {
       const url = new URL(item.url);
-      return url.hostname === `nextcloud.${domain}` && url.pathname === "/apps/office/";
+      return url.hostname === `nextcloud.${domain}`
+        && (url.pathname === "/apps/office/" || url.pathname === "/apps/office/documents");
     } catch {
       return false;
     }
