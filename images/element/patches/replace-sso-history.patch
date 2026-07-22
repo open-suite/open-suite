@@ -1,0 +1,12 @@
+diff --git a/apps/web/src/BasePlatform.ts b/apps/web/src/BasePlatform.ts
+--- a/apps/web/src/BasePlatform.ts
++++ b/apps/web/src/BasePlatform.ts
+@@ -354,7 +354,7 @@ export default abstract class BasePlatform {
+             localStorage.setItem(SSO_IDP_ID_KEY, idpId);
+         }
+         const callbackUrl = this.getSSOCallbackUrl(fragmentAfterLogin);
+-        window.location.href = mxClient.getSsoLoginUrl(callbackUrl.toString(), loginType, idpId, action); // redirect to SSO
++        window.location.replace(mxClient.getSsoLoginUrl(callbackUrl.toString(), loginType, idpId, action)); // redirect to SSO
+     }
+ 
+     /**

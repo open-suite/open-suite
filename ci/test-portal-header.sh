@@ -150,6 +150,7 @@ for key, item in patched.items():
     expected_key = "bureaublad-button.js" if key[0] == "mb-element" else "opensuite-header.js"
     assert list(data) == [expected_key]
     assert "Open Suite portal header" in data[expected_key]
+    assert '{ label: "Chat", sub: "element", path: "/#/home" }' in data[expected_key]
     assert 'var HEADER_VERSION = "source";' not in data[expected_key]
 
 execs = [item for item in operations if item["kind"] == "exec"]

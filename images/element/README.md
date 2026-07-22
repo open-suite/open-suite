@@ -6,6 +6,15 @@ static bundle at build time. Its nginx configuration also gzip-compresses
 textual responses, including Element's JavaScript, CSS, JSON, SVG and WebAssembly
 assets.
 
+The image also applies the compiled equivalent of
+`patches/replace-sso-history.patch`, derived from Element source commit
+`eebdc77379814380baeeffb8f41da5e4f2063c86` (`v1.12.24-rc.1`). Upstream starts
+browser SSO with a normal `location.href` navigation, which retains the pre-SSO
+Element entry. Open Suite uses `location.replace` so the eventual token-cleaned
+callback is the only Element entry above the referring Portal page. Callback
+construction, token cleanup, home/room fragments, and authentication itself
+are unchanged.
+
 The image precompresses only the content-hashed files under `bundles/` at the
 same gzip level used by nginx, then serves those copies with `gzip_static`.
 Mutable runtime files such as `config.json` are deliberately excluded so a
@@ -46,10 +55,11 @@ the edit into the image makes it survive re-applies (Phase 2.2).
 
 ## How it stays honest
 
-`patch-verification-reminders.sh` asserts the exact minified fragments it
-rewrites are present before patching and gone after. If an image bump ships a
-different bundle, the build fails loudly instead of silently shipping an
-un-patched Element. Bump `ELEMENT_TAG` and re-derive the match strings together.
+The patch scripts assert the exact minified fragments they rewrite are present
+before patching and gone after. If an image bump ships a different bundle, the
+build fails loudly instead of silently shipping an unpatched Element. Bump
+`ELEMENT_TAG`, verify the source patch against the pinned tag, and re-derive
+the compiled match strings together.
 
 ## 2026-07-20 cold-start investigation
 
