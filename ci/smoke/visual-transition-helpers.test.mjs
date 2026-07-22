@@ -3,7 +3,7 @@ import { mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { test } from "node:test";
-import { assessElementHome, classifyFile, chooseCandidate, chooseDocxCandidate, contractOutcome, durableNextcloudFile, enforceArtifactBudget, parseMode, sameDeepLink, sanitizeDiagnostic, sanitizeUrl } from "./visual-transition-helpers.mjs";
+import { assessElementHome, classifyFile, chooseCandidate, contractOutcome, durableNextcloudFile, enforceArtifactBudget, officeLifecycleFixtureName, parseMode, sameDeepLink, sanitizeDiagnostic, sanitizeUrl } from "./visual-transition-helpers.mjs";
 
 test("mode only enables an explicit enforce contract", () => {
   assert.equal(parseMode("enforce"), "enforce");
@@ -43,8 +43,14 @@ test("file candidates are deterministic and correctly classified", () => {
   assert.equal(classifyFile("Plan.DOCX"), "office");
   assert.equal(chooseCandidate(["z.docx", "a.odt"], "", "office"), "a.odt");
   assert.equal(chooseCandidate(["a.odt"], "missing.docx", "office"), null);
-  assert.equal(chooseDocxCandidate(["a.odt", "z.docx"], ""), "z.docx");
-  assert.equal(chooseDocxCandidate(["z.docx"], "a.odt"), null);
+});
+test("Office lifecycle fixture names are unique, valid DOCX basenames", () => {
+  const first = officeLifecycleFixtureName(1784750000000, "12345678-1234-4abc-8def-1234567890ab");
+  const second = officeLifecycleFixtureName(1784750000000, "12345678-1234-4abc-8def-1234567890ac");
+  assert.equal(first, "OpenSuite-Lifecycle-1784750000000-12345678-1234-4abc-8def-1234567890ab.docx");
+  assert.notEqual(first, second);
+  assert.match(first, /^[A-Za-z0-9-]+\.docx$/);
+  assert.throws(() => officeLifecycleFixtureName(1784750000000, "../report"), /invalid Office lifecycle fixture identity/);
 });
 test("Element home marker requires authenticated home and visible room navigation", () => {
   const bodyText = "Welcome John Doe\nNow, let's help you get started\nSend a Direct Message";

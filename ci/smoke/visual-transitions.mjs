@@ -1,16 +1,17 @@
 // Focused visual-transition gate for the live assembled stack. Evidence is
 // intentionally top-level and sanitized: never emit credentials, cookies,
 // storage state, response bodies, or URL query values.
+import { randomUUID } from "node:crypto";
 import { mkdir, rm, writeFile } from "node:fs/promises";
 import path from "node:path";
 import { chromium } from "playwright";
 import {
   assessElementHome,
   chooseCandidate,
-  chooseDocxCandidate,
   contractOutcome,
   durableNextcloudFile,
   enforceArtifactBudget,
+  officeLifecycleFixtureName,
   parseMode,
   sameDeepLink,
   sanitizeDiagnostic,
@@ -36,7 +37,7 @@ let authenticatedState;
 const safeName = (value) => value.replace(/[^a-z0-9-]/gi, "-").slice(0, 60);
 const portalUrl = `https://bridge.${domain}/`;
 
-async function journey(name, action, { metadataOnly = false } = {}) {
+async function journey(name, action, { metadataOnly = false, beforePortal, cleanup } = {}) {
   const dir = path.join(root, safeName(name));
   await mkdir(dir, { recursive: true });
   const timeline = [];
@@ -52,6 +53,7 @@ async function journey(name, action, { metadataOnly = false } = {}) {
   const observations = [];
   const blocking = [];
   let exists = true;
+  let portalHeaderVersion;
   const check = (label, ok, hard = true, detail = "") => observations.push({ label, ok: Boolean(ok), hard, detail });
   const contract = (label, ok, detail = "") => {
     const item = { label, ok: Boolean(ok), detail };
@@ -235,6 +237,8 @@ async function journey(name, action, { metadataOnly = false } = {}) {
     page.setDefaultTimeout(15_000);
     page.setDefaultNavigationTimeout(30_000);
 
+    if (beforePortal) await beforePortal({ page, context, check, contract });
+
     await page.goto(portalUrl, { waitUntil: "domcontentloaded" });
     let submittedFreshCredentials = false;
     if (page.url().includes(`id.${domain}`) && !authenticatedState) {
@@ -256,7 +260,7 @@ async function journey(name, action, { metadataOnly = false } = {}) {
     check("authenticated dashboard visible", true);
     if (!authenticatedState) check("fresh browser authenticated through Keycloak", submittedFreshCredentials);
     contract("no Portal second login", !secondLogin);
-    const portalHeaderVersion = await assertHeader(page, "Portal", check);
+    portalHeaderVersion = await assertHeader(page, "Portal", check);
     if (!authenticatedState) authenticatedState = await context.storageState();
 
     await action({
@@ -282,6 +286,15 @@ async function journey(name, action, { metadataOnly = false } = {}) {
     // Persist only the bounded, credential- and capability-redacted message.
     check("journey completed", false, true,
       `${error?.name || "Error"}: ${sanitizeDiagnostic(error?.message, [user, pass])}`);
+  }
+
+  if (cleanup && context && page) {
+    try {
+      await cleanup({ page, context, check, contract });
+    } catch (error) {
+      check("journey cleanup completed", false, true,
+        `${error?.name || "Error"}: ${sanitizeDiagnostic(error?.message, [user, pass])}`);
+    }
   }
 
   const outcome = contractOutcome({ mode, exists, observations, blocking });
@@ -513,29 +526,95 @@ async function closeOfficeToFiles(page, editor, fileId, label, portalHeaderVersi
     !page.frames().some((candidate) => candidate.url().includes("/cool.html")));
 }
 
-async function portalFilesOfficeLifecycle({ page, rawDocumentRequests, portalHeaderVersion, timeline, check, contract, setMissing, setPopup }) {
-  const fixture = process.env.SMOKE_OFFICE_FILE;
+async function openNextcloudFiles(page) {
+  await page.goto(`https://nextcloud.${domain}/apps/files/files`, { waitUntil: "domcontentloaded" });
+  await page.waitForURL((url) => url.origin === `https://nextcloud.${domain}`
+    && url.pathname.startsWith("/apps/files/"), { timeout: 45_000 });
+  await page.locator("#app-content-files, .files-list, [data-testid='files-list']").first()
+    .waitFor({ state: "visible", timeout: 45_000 });
+}
+
+async function createOfficeLifecycleFixture({ page, check }, fixture) {
+  await openNextcloudFiles(page);
+  const absentStatus = await page.evaluate(async (fileName) => {
+    const uid = OC.getCurrentUser().uid;
+    const response = await fetch(
+      `/remote.php/dav/files/${encodeURIComponent(uid)}/${encodeURIComponent(fileName)}`,
+      { method: "HEAD", headers: { requesttoken: OC.requestToken } },
+    );
+    return response.status;
+  }, fixture.name);
+  check("unique DOCX fixture path is unused", absentStatus === 404, true, `status=${absentStatus}`);
+  if (absentStatus !== 404) throw new Error("refusing to replace an existing DOCX fixture path");
+
+  await page.getByRole("button", { name: "New", exact: true }).click();
+  await page.locator('[role="menuitem"], .v-popper__popper button, .v-popper__popper li')
+    .filter({ hasText: /^\s*Document\s*$/ }).first().click();
+  const dialog = page.locator("[data-cy-files-new-node-dialog]").first();
+  await dialog.waitFor({ state: "visible" });
+  await dialog.getByRole("textbox", { name: /name/i }).fill(fixture.name.slice(0, -".docx".length));
+  fixture.cleanupRequired = true;
+  await dialog.getByRole("button", { name: "Create", exact: true }).click();
+
+  const editor = await waitForCollaboraFrame(page);
+  await waitForDocumentLoaded(page);
+  const created = await page.evaluate(async (fileName) => {
+    const uid = OC.getCurrentUser().uid;
+    const response = await fetch(
+      `/remote.php/dav/files/${encodeURIComponent(uid)}/${encodeURIComponent(fileName)}`,
+      { method: "HEAD", headers: { requesttoken: OC.requestToken } },
+    );
+    return {
+      status: response.status,
+      contentType: response.headers.get("content-type")?.split(";", 1)[0] || "",
+      length: Number.parseInt(response.headers.get("content-length") || "0", 10),
+    };
+  }, fixture.name);
+  const valid = created.status === 200
+    && created.contentType === "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+    && created.length > 0;
+  check("supported UI creates an ordinary valid DOCX fixture", valid, true,
+    `status=${created.status},type=${created.contentType},length=${created.length}`);
+  if (!valid) throw new Error("created DOCX fixture failed DAV validation");
+
+  await editor.locator("#closebutton").click();
+  await page.locator('iframe[data-cy="coolframe"], #loleafletframe')
+    .waitFor({ state: "detached", timeout: 30_000 });
+  await page.locator("#app-content-files, .files-list, [data-testid='files-list']").first()
+    .waitFor({ state: "visible", timeout: 30_000 });
+}
+
+async function cleanupOfficeLifecycleFixture({ page, context, check }, fixture) {
+  for (const candidate of context.pages()) {
+    if (candidate !== page) await candidate.close().catch(() => {});
+  }
+  if (!fixture.cleanupRequired) return;
+
+  await openNextcloudFiles(page);
+  const cleanup = await page.evaluate(async (fileName) => {
+    const uid = OC.getCurrentUser().uid;
+    const url = `/remote.php/dav/files/${encodeURIComponent(uid)}/${encodeURIComponent(fileName)}`;
+    const headers = { requesttoken: OC.requestToken };
+    const before = await fetch(url, { method: "HEAD", headers });
+    const deleted = await fetch(url, { method: "DELETE", headers });
+    const after = await fetch(url, { method: "HEAD", headers });
+    return { before: before.status, deleted: deleted.status, after: after.status };
+  }, fixture.name);
+  const clean = [200, 404].includes(cleanup.before)
+    && [200, 204, 404].includes(cleanup.deleted)
+    && cleanup.after === 404;
+  check("exact owned DOCX fixture is deleted and absent", clean, true,
+    `before=${cleanup.before},delete=${cleanup.deleted},after=${cleanup.after}`);
+  if (!clean) throw new Error("exact DOCX fixture cleanup failed");
+  fixture.cleanupRequired = false;
+}
+
+async function portalFilesOfficeLifecycle({ page, rawDocumentRequests, portalHeaderVersion, timeline, check, contract, setPopup }, fixture) {
   const widget = page.locator(".dashboard-item").filter({ has: page.getByRole("link", { name: "Files", exact: true }) }).first();
   const links = widget.locator('a[target="_blank"]');
-  const expected = fixture
-    ? links.getByText(fixture, { exact: true })
-    : links.filter({ hasText: /\.docx$/i }).first();
-  const candidateVisible = await expected.waitFor({ state: "visible", timeout: 30_000 })
-    .then(() => true, () => false);
-  if (!candidateVisible) {
-    setMissing();
-    contract("DOCX fixture/candidate exists", false);
-    return;
-  }
-  const names = (await links.allTextContents()).map((name) => name.trim()).filter(Boolean);
-  const candidate = chooseDocxCandidate(names, fixture);
-  if (!candidate) {
-    setMissing();
-    contract("DOCX fixture/candidate is valid", false);
-    return;
-  }
-
-  const target = links.getByText(candidate, { exact: true });
+  const target = links.getByText(fixture.name, { exact: true });
+  await target.waitFor({ state: "visible", timeout: 45_000 });
+  contract("Files widget renders the exact owned DOCX activity row", true);
   const href = await target.getAttribute("href");
   const parsedDurable = href && durableNextcloudFile(href, portalUrl);
   const durable = parsedDurable && new URL(parsedDurable.url).origin === `https://nextcloud.${domain}`
@@ -656,7 +735,19 @@ try {
     await journey("portal-chat", (state) => sameTab(state, "Chat", chat));
     await journey("portal-office-documents", officeDocuments);
     await journey("portal-calendar", (state) => sameTab(state, "Calendar", calendar));
-    await journey("portal-files-office-lifecycle", portalFilesOfficeLifecycle, { metadataOnly: true });
+    const officeFixture = {
+      name: officeLifecycleFixtureName(Date.now(), randomUUID()),
+      cleanupRequired: false,
+    };
+    await journey(
+      "portal-files-office-lifecycle",
+      (state) => portalFilesOfficeLifecycle(state, officeFixture),
+      {
+        metadataOnly: true,
+        beforePortal: (state) => createOfficeLifecycleFixture(state, officeFixture),
+        cleanup: (state) => cleanupOfficeLifecycleFixture(state, officeFixture),
+      },
+    );
 
     await journey("portal-files-whiteboard", async ({ page, rawDocumentRequests, portalHeaderVersion, check, contract, setMissing, setPopup }) => {
         const fixture = process.env.SMOKE_WHITEBOARD_FILE;
