@@ -8,14 +8,79 @@ import { chromium } from "playwright";
 const domain = process.env.MESSAGES_BENCHMARK_DOMAIN;
 const username = process.env.MESSAGES_BENCHMARK_USER;
 const password = process.env.MESSAGES_BENCHMARK_PASSWORD;
+const diagnostics = process.env.MESSAGES_BENCHMARK_DIAGNOSTICS;
+const chromiumLog = process.env.MESSAGES_BENCHMARK_CHROMIUM_LOG;
 const output = process.argv[2];
 if (!domain || !username || !password || !output) {
   throw new Error("set benchmark domain/user/password and pass an output path");
 }
 
-const browser = await chromium.launch();
+function safeUrl(value) {
+  try {
+    const url = new URL(value);
+    return {
+      origin: url.origin,
+      pathname: url.pathname,
+      searchKeys: [...url.searchParams.keys()].sort(),
+    };
+  } catch {
+    return { invalid: true };
+  }
+}
+
+let recordingFailed = false;
+function record(type, detail = {}) {
+  if (!diagnostics || recordingFailed) return;
+  try {
+    fs.appendFileSync(diagnostics, `${JSON.stringify({
+      observedAt: new Date().toISOString(),
+      type,
+      ...detail,
+    })}\n`);
+  } catch (error) {
+    recordingFailed = true;
+    console.error(`WARNING: browser diagnostics disabled: ${error.code ?? error.name}`);
+  }
+}
+
+function observePage(page, name) {
+  page.on("requestfailed", (request) => record("request-failed", {
+    page: name,
+    method: request.method(),
+    resourceType: request.resourceType(),
+    navigation: request.isNavigationRequest(),
+    url: safeUrl(request.url()),
+    errorText: request.failure()?.errorText,
+  }));
+  page.on("response", (response) => {
+    const request = response.request();
+    if (request.isNavigationRequest()) {
+      record("navigation-response", {
+        page: name,
+        status: response.status(),
+        url: safeUrl(response.url()),
+      });
+    }
+  });
+  page.on("framenavigated", (frame) => {
+    if (frame === page.mainFrame()) {
+      record("main-frame-navigated", { page: name, url: safeUrl(frame.url()) });
+    }
+  });
+}
+
+record("browser-launch-start");
+const browser = await chromium.launch({
+  args: chromiumLog ? [
+    "--enable-logging",
+    `--log-file=${chromiumLog}`,
+    "--vmodule=logging_network_change_observer=1",
+  ] : [],
+});
+record("browser-launched", { version: browser.version() });
 const context = await browser.newContext({ ignoreHTTPSErrors: true });
 const page = await context.newPage();
+observePage(page, "mail");
 const results = {};
 let mailboxThreadsLoaded;
 
@@ -82,6 +147,7 @@ try {
   results.logout_contract_verified = true;
 
   const matrixPage = await context.newPage();
+  observePage(matrixPage, "matrix");
   try {
     let firstSyncStarted;
     let firstSyncStatus;
@@ -182,6 +248,7 @@ try {
   // waiter while closing the browser so its rejection cannot hide the actual
   // error that caused the benchmark to abort.
   const pendingMailboxResponse = mailboxThreadsLoaded?.catch(() => null);
+  record("browser-closing", { finalUrl: safeUrl(page.url()) });
   await browser.close();
   await pendingMailboxResponse;
 }

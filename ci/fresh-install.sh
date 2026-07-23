@@ -189,10 +189,36 @@ collect_diagnostics() {
   } > "${diagnostics}/host.txt" 2>&1
   kubectl get nodes -o wide > "${diagnostics}/nodes.txt" 2>&1
   kubectl get deployment,statefulset,daemonset,pod,job -A -o wide > "${diagnostics}/workloads.txt" 2>&1
+  kubectl get ingress,service,endpoints,endpointslice -A -o wide > "${diagnostics}/network-objects.txt" 2>&1
+  kubectl get middleware.traefik.io -A -o yaml > "${diagnostics}/traefik-middlewares.yaml" 2>&1
   kubectl get events -A --sort-by=.lastTimestamp > "${diagnostics}/events.txt" 2>&1
   kubectl describe pods -A > "${diagnostics}/pod-descriptions.txt" 2>&1
   helm list -A > "${diagnostics}/helm-releases.txt" 2>&1
   journalctl -u k3s --no-pager -n 1500 > "${diagnostics}/k3s-journal.txt" 2>&1
+  {
+    date --utc --iso-8601=nanoseconds
+    ip -details address show
+    ip route show table all
+    ip rule show
+    ss -lntp '( sport = :80 or sport = :443 )'
+    echo "==> /etc/resolv.conf"
+    cat /etc/resolv.conf
+    for host in messages auth id bridge element; do
+      echo "==> ${host}.${DOMAIN}"
+      getent ahosts "${host}.${DOMAIN}" || true
+    done
+  } > "${diagnostics}/host-network.txt" 2>&1
+
+  while read -r namespace resource; do
+    kubectl logs -n "${namespace}" "${resource}" --all-containers --prefix --tail=500 \
+      > "${diagnostics}/pod-logs/${namespace}_${resource//\//_}.log" 2>&1
+  done <<'LOG_TARGETS'
+kube-system deployment/traefik
+mb-bureaublad deployment/opensuite-auth-gate
+mb-keycloak statefulset/keycloak-keycloak
+mb-messages deployment/messages-frontend
+mb-messages deployment/messages-backend
+LOG_TARGETS
 
   kubectl get pods -A -o json 2>/dev/null | python3 -c '
 import json, sys

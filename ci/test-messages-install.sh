@@ -88,6 +88,18 @@ grep -Fq 'tcpSocket:' <<<"${OPENSEARCH_LIVENESS_PROBE}"
 grep -Fq 'initialDelaySeconds: 60' <<<"${OPENSEARCH_LIVENESS_PROBE}"
 grep -Fq 'periodSeconds: 20' <<<"${OPENSEARCH_LIVENESS_PROBE}"
 
+# The host browser shares a Linux network namespace with k3s. Preserve both
+# sides of any Chromium network-change failure without retrying or suppressing
+# the original navigation error.
+grep -Fq 'ip -ts monitor link address route' "${REPO}/ci/messages-install-benchmark.sh"
+grep -Fq 'MESSAGES_BENCHMARK_DIAGNOSTICS=' "${REPO}/ci/messages-install-benchmark.sh"
+grep -Fq 'page.on("requestfailed"' "${REPO}/ci/messages-first-use-benchmark.mjs"
+grep -Fq 'searchKeys: [...url.searchParams.keys()].sort()' "${REPO}/ci/messages-first-use-benchmark.mjs"
+grep -Fq '"--vmodule=logging_network_change_observer=1"' "${REPO}/ci/messages-first-use-benchmark.mjs"
+grep -Fq 'recordingFailed = true' "${REPO}/ci/messages-first-use-benchmark.mjs"
+grep -Fq "grep -E 'Observed a (change to the network IP addresses|change to network connectivity state|network change to state)'" "${REPO}/ci/messages-install-benchmark.sh"
+grep -Fq 'rm -f "${CHROMIUM_LOG}"' "${REPO}/ci/messages-install-benchmark.sh"
+
 echo "Messages PostgreSQL, migration, logout, and OpenSearch probe contracts verified"
 
 if [ -n "${FRESH_INSTALL_ARTIFACT_DIR:-}" ]; then
