@@ -22,6 +22,8 @@ jobs:
           find . -type f -name '*.sh' -not -path './.git/*' -print0 | xargs -0 shellcheck --severity=warning
       - name: Check Nextcloud image source contracts
         run: bash images/nextcloud/test-source-shape.sh
+      - name: Check Collabora image source contracts
+        run: node ci/test-collabora-image-runtime.mjs
       - name: Test host state helpers
         run: bash ci/test-state.sh
       - name: Check JavaScript
