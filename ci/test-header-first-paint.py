@@ -1,14 +1,15 @@
 #!/usr/bin/env python3
-"""Static contract for the sidecar-rendered first-paint shell."""
+"""Static and rendered contracts for the shared-header sidecars."""
 
 import pathlib
 import re
 import sys
 
 
-infra = pathlib.Path(sys.argv[1]) if len(sys.argv) == 2 else None
+infra = pathlib.Path(sys.argv[1]) if len(sys.argv) in (2, 3) else None
 if infra is None:
-    raise SystemExit(f"Usage: {sys.argv[0]} <patched-infra-dir>")
+    raise SystemExit(f"Usage: {sys.argv[0]} <patched-infra-dir> [nextcloud-rendered-yaml]")
+nextcloud_rendered = pathlib.Path(sys.argv[2]) if len(sys.argv) == 3 else None
 
 repo = pathlib.Path(__file__).resolve().parents[1]
 header = (repo / "overlays/portal-header/opensuite-header.js").read_text()
@@ -70,6 +71,51 @@ for nextcloud_contract in (
     if nextcloud_contract not in nextcloud_source:
         raise AssertionError(f"nextcloud is missing first-paint contract: {nextcloud_contract}")
 
+# Nextcloud's Service is deliberately fronted by the header sidecar. Keep the
+# Kubernetes readiness owner on that same container and make its HTTP check traverse nginx
+# to Nextcloud; checking only either listening port would recreate the HPA
+# endpoint-publication race that this contract prevents.
+nextcloud_sidecar = nextcloud_source.split("\nsidecars:\n", 1)[1].split("\nextraContainerPorts:\n", 1)[0]
+for readiness_contract in (
+    "name: opensuite-header",
+    "readinessProbe:",
+    "path: /status.php",
+    "port: 8091",
+    'value: "{{ .Values.global.hostname.nextcloud }}.{{ .Values.global.domain }}"',
+):
+    if readiness_contract not in nextcloud_sidecar:
+        raise AssertionError(f"nextcloud sidecar is missing readiness contract: {readiness_contract}")
+
+nextcloud_service = (infra / "helmfile/apps/nextcloud/charts/nextcloud/templates/service.yaml").read_text()
+if "targetPort: {{ coalesce .Values.service.targetPortOverride .Values.containerPorts.http }}" not in nextcloud_service:
+    raise AssertionError("nextcloud Service does not render its configured sidecar target")
+if "targetPortOverride: 8091" not in nextcloud_source:
+    raise AssertionError("nextcloud Service target does not align with sidecar readiness port 8091")
+
+if nextcloud_rendered is not None:
+    documents = nextcloud_rendered.read_text().split("\n---\n")
+    service = next(
+        document for document in documents
+        if "# Source: nextcloud/templates/service.yaml" in document
+    )
+    deployment = next(
+        document for document in documents
+        if "# Source: nextcloud/templates/deployment.yaml" in document
+    )
+    if not re.search(r"ports:\s+- name: http\s+port: 8080\s+targetPort: 8091", service):
+        raise AssertionError("rendered Nextcloud Service does not target sidecar port 8091")
+    rendered_sidecar = deployment.split("name: opensuite-header", 1)[1].split("volumeMounts:", 1)[0]
+    for readiness_contract in (
+        "readinessProbe:",
+        "path: /status.php",
+        "port: 8091",
+        "value: nextcloud.example.test",
+    ):
+        if readiness_contract not in rendered_sidecar:
+            raise AssertionError(
+                f"rendered Nextcloud sidecar is missing readiness contract: {readiness_contract}"
+            )
+
 for contract in (
     "mount();\n  if (!document.body || !document.getElementById(HEADER_ID))",
     "var bar = existing || document.createElement(\"nav\")",
@@ -104,4 +150,4 @@ for path in configs.values():
     if "sub_filter_once off;" in path.read_text():
         raise AssertionError(f"{path} can inject duplicate shell markup")
 
-print("first-paint shell, Office route, nonce, hydration, geometry, and Calendar return contracts verified")
+print("shared-header first paint and Nextcloud service/readiness alignment verified")

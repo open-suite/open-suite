@@ -488,10 +488,8 @@ async function assertOfficeHeaderGeometry(page, label, portalHeaderVersion, chec
 }
 
 async function invokeFirstInsertImage(page, editor, label, contract) {
-  const menu = editor.locator("#menu-insert > a");
-  await menu.waitFor({ state: "visible", timeout: 30_000 });
-  await menu.click();
-  await editor.getByText(/^(Image|Image\.\.\.|Insert Image)$/i).last().click();
+  await editor.locator("#menu-insert > a").click({ timeout: 30_000 });
+  await editor.locator("#menu-insertgraphicremote > a").click();
   const picker = page.getByRole("dialog").filter({ hasText: "Insert file from Open Suite" }).last();
   await picker.waitFor({ state: "visible", timeout: 15_000 });
   contract(`${label} first Insert Image click opens picker`, true);
