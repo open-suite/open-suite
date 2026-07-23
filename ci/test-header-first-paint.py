@@ -72,7 +72,7 @@ for nextcloud_contract in (
         raise AssertionError(f"nextcloud is missing first-paint contract: {nextcloud_contract}")
 
 # Nextcloud's Service is deliberately fronted by the header sidecar. Keep the
-# readiness owner on that same container and make its HTTP check traverse nginx
+# Kubernetes readiness owner on that same container and make its HTTP check traverse nginx
 # to Nextcloud; checking only either listening port would recreate the HPA
 # endpoint-publication race that this contract prevents.
 nextcloud_sidecar = nextcloud_source.split("\nsidecars:\n", 1)[1].split("\nextraContainerPorts:\n", 1)[0]
