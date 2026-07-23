@@ -97,6 +97,8 @@ grep -Fq 'page.on("requestfailed"' "${REPO}/ci/messages-first-use-benchmark.mjs"
 grep -Fq 'searchKeys: [...url.searchParams.keys()].sort()' "${REPO}/ci/messages-first-use-benchmark.mjs"
 grep -Fq '"--vmodule=logging_network_change_observer=1"' "${REPO}/ci/messages-first-use-benchmark.mjs"
 grep -Fq 'recordingFailed = true' "${REPO}/ci/messages-first-use-benchmark.mjs"
+grep -Fq "grep -E 'Observed a (change to the network IP addresses|change to network connectivity state|network change to state)'" "${REPO}/ci/messages-install-benchmark.sh"
+grep -Fq 'rm -f "${CHROMIUM_LOG}"' "${REPO}/ci/messages-install-benchmark.sh"
 
 echo "Messages PostgreSQL, migration, logout, and OpenSearch probe contracts verified"
 
