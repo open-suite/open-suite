@@ -23,6 +23,8 @@ MEET_TAG="${MEET_TAG:-sha-bdd09c6}"
 NEXTCLOUD_TAG="${NEXTCLOUD_TAG:-sha-693c013}"
 # Open Suite Element Web image tag: pinned immutable suite build.
 ELEMENT_TAG="${ELEMENT_TAG:-sha-20c68fa}"
+# Open Suite Collabora CODE build with the SmartMenus lifecycle fix.
+COLLABORA_TAG="${COLLABORA_TAG:-sha-6cbf822}"
 # TLS mode: letsencrypt (default; needs public DNS + ports) or selfsigned
 # (local VMs: every chart generates its own cert, no cert-manager, no ACME).
 OPEN_SUITE_TLS_MODE="${OPEN_SUITE_TLS_MODE:-letsencrypt}"
@@ -139,8 +141,8 @@ fi
 # PORTAL_SHA is the 7-char image tag the portal publish-images workflow uses.
 PORTAL_SHA="${PORTAL_REF:0:7}"
 # shellcheck disable=SC2090 # INGRESS_ANNOTATIONS intentionally contains YAML quotes
-export DOMAIN TLS_SELF_SIGNED INGRESS_ANNOTATIONS NEXTCLOUD_TAG PORTAL_SHA MEET_TAG ELEMENT_TAG KC_BACKCHANNEL
-envsubst '${DOMAIN} ${TLS_SELF_SIGNED} ${INGRESS_ANNOTATIONS} ${NEXTCLOUD_TAG} ${PORTAL_SHA} ${MEET_TAG} ${ELEMENT_TAG} ${KC_BACKCHANNEL}' \
+export DOMAIN TLS_SELF_SIGNED INGRESS_ANNOTATIONS NEXTCLOUD_TAG PORTAL_SHA MEET_TAG ELEMENT_TAG COLLABORA_TAG KC_BACKCHANNEL
+envsubst '${DOMAIN} ${TLS_SELF_SIGNED} ${INGRESS_ANNOTATIONS} ${NEXTCLOUD_TAG} ${PORTAL_SHA} ${MEET_TAG} ${ELEMENT_TAG} ${COLLABORA_TAG} ${KC_BACKCHANNEL}' \
   < "${REPO_ROOT}/helmfile/demo-values.yaml.tmpl" \
   > helmfile/environments/demo/mijnbureau.yaml.gotmpl
 

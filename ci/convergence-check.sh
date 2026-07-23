@@ -17,6 +17,7 @@ EXPECTED_AUTH_GATE_IMAGE="${AUTH_GATE_IMAGE:-ghcr.io/open-suite/auth-gate:sha-dc
 EXPECTED_PORTAL_REF="${PORTAL_REF:-6d094166c61a3178b428e8f0d0cb8d3b2352f73b}"
 EXPECTED_PORTAL_TAG="sha-${EXPECTED_PORTAL_REF:0:7}"
 EXPECTED_NEXTCLOUD_TAG="${NEXTCLOUD_TAG:-sha-693c013}"
+EXPECTED_COLLABORA_TAG="${COLLABORA_TAG:-sha-6cbf822}"
 source "${REPO}/scripts/lib/state.sh"
 
 MASTER_PASSWORD="$(opensuite_read_master_password)" || exit 2
@@ -87,6 +88,14 @@ probe_nextcloud_image() {
     && echo 1 || echo 0
 }
 
+probe_collabora_image() {
+  local image
+  image="$(kubectl -n mb-collabora get deploy collabora-online \
+    -o jsonpath='{.spec.template.spec.containers[?(@.name=="collabora")].image}' 2>/dev/null)"
+  [ "${image}" = "ghcr.io/open-suite/collabora:${EXPECTED_COLLABORA_TAG}" ] \
+    && echo 1 || echo 0
+}
+
 expected_public_ip() {
   if [ -n "${OPEN_SUITE_PUBLIC_IP:-}" ]; then
     printf '%s' "${OPEN_SUITE_PUBLIC_IP}"
@@ -145,6 +154,7 @@ PROBES=(
   sidecar_headers
   portal_images
   nextcloud_image
+  collabora_image
   livekit_public_ip
   auth_gate
   apex_redirect

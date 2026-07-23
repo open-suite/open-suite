@@ -5,7 +5,7 @@
 # helmfile/environments/demo/mijnbureau.yaml.gotmpl inside the infra checkout.
 # Only the variables listed in 01's envsubst call are substituted:
 #   DOMAIN TLS_SELF_SIGNED INGRESS_ANNOTATIONS NEXTCLOUD_TAG PORTAL_SHA
-#   MEET_TAG ELEMENT_TAG KC_BACKCHANNEL
+#   MEET_TAG ELEMENT_TAG COLLABORA_TAG KC_BACKCHANNEL
 # Everything else (including any literal $ that isn't one of those) is left
 # verbatim. The rendered file carries no gotmpl directives; the .gotmpl name is
 # only so helmfile treats it as an environment values template.
@@ -143,6 +143,10 @@ application:
 # publish-images workflow). Declared here so helmfile owns the images and a
 # re-apply can never revert them to upstream (which a kubectl-patch pin did).
 container:
+  collabora:
+    registry: "ghcr.io"
+    repository: "open-suite/collabora"
+    tag: "${COLLABORA_TAG}"
   nextcloud:
     registry: "ghcr.io"
     repository: "open-suite/nextcloud"

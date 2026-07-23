@@ -17,6 +17,7 @@ const upstreamBundleSha256 =
 const patchedBundleSha256 =
     "2818e5e970ce5eefb069df393f034d54b4327b935d759185a6398618556b6a5e";
 const bundlePath = "/usr/share/coolwsd/browser/dist/bundle.js";
+const openSuiteImageTag = "sha-6cbf822";
 
 const dockerfile = fs.readFileSync("images/collabora/Dockerfile", "utf8");
 const sourcePatch = fs.readFileSync(
@@ -81,6 +82,56 @@ for (const fragment of [
     "node ci/test-collabora-image-runtime.mjs --verify-final-image",
 ]) {
     assert.ok(imageWorkflow.includes(fragment), `missing workflow contract: ${fragment}`);
+}
+
+const demoValues = fs.readFileSync("helmfile/demo-values.yaml.tmpl", "utf8");
+const deployScript = fs.readFileSync(
+    "scripts/single-vps-deploy/01-deploy.sh",
+    "utf8",
+);
+const convergenceCheck = fs.readFileSync("ci/convergence-check.sh", "utf8");
+for (const fragment of [
+    '  collabora:\n    registry: "ghcr.io"\n    repository: "open-suite/collabora"\n' +
+        '    tag: "${COLLABORA_TAG}"',
+    "MEET_TAG ELEMENT_TAG COLLABORA_TAG KC_BACKCHANNEL",
+]) {
+    assert.ok(demoValues.includes(fragment), `missing demo values contract: ${fragment}`);
+}
+for (const fragment of [
+    `COLLABORA_TAG="\${COLLABORA_TAG:-${openSuiteImageTag}}"`,
+    "export DOMAIN TLS_SELF_SIGNED INGRESS_ANNOTATIONS NEXTCLOUD_TAG PORTAL_SHA MEET_TAG ELEMENT_TAG COLLABORA_TAG KC_BACKCHANNEL",
+    "${ELEMENT_TAG} ${COLLABORA_TAG} ${KC_BACKCHANNEL}",
+]) {
+    assert.ok(deployScript.includes(fragment), `missing deploy pin contract: ${fragment}`);
+}
+for (const fragment of [
+    `EXPECTED_COLLABORA_TAG="\${COLLABORA_TAG:-${openSuiteImageTag}}"`,
+    'ghcr.io/open-suite/collabora:${EXPECTED_COLLABORA_TAG}',
+    "collabora_image",
+]) {
+    assert.ok(convergenceCheck.includes(fragment), `missing convergence contract: ${fragment}`);
+}
+
+for (const smokeFile of [
+    "ci/smoke/authenticated.mjs",
+    "ci/smoke/visual-transitions.mjs",
+]) {
+    const smoke = fs.readFileSync(smokeFile, "utf8");
+    assert.equal(
+        smoke.split('locator("#menu-insert > a").click').length - 1,
+        1,
+        `${smokeFile} must click the Insert menu exactly once`,
+    );
+    assert.equal(
+        smoke.split('locator("#menu-insertgraphicremote > a").click').length - 1,
+        1,
+        `${smokeFile} must click the exact remote-image leaf exactly once`,
+    );
+    assert.doesNotMatch(
+        smoke,
+        /getByText\(\/\^\(Image\|Image\\\.\\\.\\\.\|Insert Image\)/,
+        `${smokeFile} must not select a translated image label`,
+    );
 }
 
 function count(haystack, needle) {
@@ -172,6 +223,54 @@ function sha256(file) {
     return createHash("sha256").update(fs.readFileSync(file)).digest("hex");
 }
 
+function verifyRenderedValues(valuesFile, expectedTag) {
+    const values = fs.readFileSync(valuesFile, "utf8");
+    const image = [
+        "  collabora:",
+        '    registry: "ghcr.io"',
+        '    repository: "open-suite/collabora"',
+        `    tag: "${expectedTag}"`,
+    ].join("\n");
+    assert.equal(count(values, image), 1, "rendered values must pin one Collabora image");
+    assert.doesNotMatch(values, /\$\{COLLABORA_TAG\}/, "Collabora tag was not rendered");
+    console.log(`${valuesFile}: rendered Collabora image ${expectedTag} verified`);
+}
+
+function verifyInfra(infraRoot) {
+    const chartRoot = path.join(
+        infraRoot,
+        "helmfile/apps/collabora/charts/collabora",
+    );
+    const appValues = fs.readFileSync(
+        path.join(infraRoot, "helmfile/apps/collabora/values-collabora.yaml.gotmpl"),
+        "utf8",
+    );
+    for (const fragment of [
+        "registry: {{ coalesce .Values.container.collabora.registry .Values.container.default.registry | quote }}",
+        "repository: {{ .Values.container.collabora.repository }}",
+        "tag: {{ .Values.container.collabora.tag }}",
+    ]) {
+        assert.ok(appValues.includes(fragment), `missing upstream image value contract: ${fragment}`);
+    }
+
+    const exactTemplates = {
+        "templates/service.yaml":
+            "76d89341dd4aa731075685b71a84c9cb564580f5ab0ee07b1654a1daae7de7e7",
+        "templates/deployment.yaml":
+            "927e7dadfa886ddb5cc67593f09e45c4166b0c5a1461ccf1446a598c78a1a51d",
+        "templates/_helpers.tpl":
+            "444d3c2f3f84e0e767dfae8c92ea5e04e73e2f72ca40a007fdc7eea3ebcd87d1",
+    };
+    for (const [relative, digest] of Object.entries(exactTemplates)) {
+        assert.equal(
+            sha256(path.join(chartRoot, relative)),
+            digest,
+            `${relative} drifted from the pinned chart contract`,
+        );
+    }
+    console.log(`${infraRoot}: Collabora image, Deployment, and Service contracts verified`);
+}
+
 function verifySource(sourceFile) {
     const source = fs.readFileSync(sourceFile, "utf8");
     assertLifecycle(source, false);
@@ -231,6 +330,20 @@ if (process.argv[2] === "--verify-source") {
         "usage: test-collabora-image-runtime.mjs --verify-source SOURCE_FILE",
     );
     verifySource(process.argv[3]);
+} else if (process.argv[2] === "--verify-rendered-values") {
+    assert.equal(
+        process.argv.length,
+        5,
+        "usage: test-collabora-image-runtime.mjs --verify-rendered-values VALUES_FILE EXPECTED_TAG",
+    );
+    verifyRenderedValues(...process.argv.slice(3));
+} else if (process.argv[2] === "--verify-infra") {
+    assert.equal(
+        process.argv.length,
+        4,
+        "usage: test-collabora-image-runtime.mjs --verify-infra INFRA_ROOT",
+    );
+    verifyInfra(process.argv[3]);
 } else if (process.argv[2] === "--verify-final-image") {
     assert.equal(
         process.argv.length,
@@ -240,5 +353,5 @@ if (process.argv[2] === "--verify-source") {
     verifyFinalImage(...process.argv.slice(3));
 } else {
     assert.equal(process.argv.length, 2, "unknown arguments");
-    console.log("Collabora image source, bundle, and workflow contracts verified");
+    console.log("Collabora image source, bundle, workflow, deployment, and smoke contracts verified");
 }

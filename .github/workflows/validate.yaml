@@ -47,10 +47,13 @@ jobs:
           PORTAL_SHA: "34512e5"
           MEET_TAG: v1.20.0
           ELEMENT_TAG: sha-a11ee66
+          COLLABORA_TAG: sha-6cbf822
           KC_BACKCHANNEL: http://keycloak-keycloak.mb-keycloak
         run: |
-          envsubst '${DOMAIN} ${TLS_SELF_SIGNED} ${INGRESS_ANNOTATIONS} ${NEXTCLOUD_TAG} ${PORTAL_SHA} ${MEET_TAG} ${ELEMENT_TAG} ${KC_BACKCHANNEL}' \
+          envsubst '${DOMAIN} ${TLS_SELF_SIGNED} ${INGRESS_ANNOTATIONS} ${NEXTCLOUD_TAG} ${PORTAL_SHA} ${MEET_TAG} ${ELEMENT_TAG} ${COLLABORA_TAG} ${KC_BACKCHANNEL}' \
             < helmfile/demo-values.yaml.tmpl > /tmp/opensuite-values.yaml
+          node ci/test-collabora-image-runtime.mjs --verify-rendered-values \
+            /tmp/opensuite-values.yaml "$COLLABORA_TAG"
           python3 - <<'PY'
           import os, pathlib
           rendered = pathlib.Path('/tmp/opensuite-values.yaml').read_text()
@@ -77,6 +80,8 @@ jobs:
           for patch in patches/local/*.patch; do
             git -C /tmp/infra apply --3way "$GITHUB_WORKSPACE/$patch"
           done
+      - name: Validate Collabora chart image and Service contracts
+        run: node ci/test-collabora-image-runtime.mjs --verify-infra /tmp/infra
       - name: Validate rendered Nextcloud Whiteboard backend
         run: bash ci/test-nextcloud-whiteboard.sh /tmp/infra
       - name: Validate Docs v5.2.1 performance patches
