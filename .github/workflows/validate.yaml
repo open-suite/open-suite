@@ -59,7 +59,12 @@ jobs:
           rendered = pathlib.Path('/tmp/opensuite-values.yaml').read_text()
           if '${' in rendered:
               raise SystemExit('unrendered variable in demo values')
-          for expected in ('example.test', f"sha-{os.environ['PORTAL_SHA']}", '34.0.0-apache'):
+          for expected in (
+              'example.test',
+              f"sha-{os.environ['PORTAL_SHA']}",
+              '34.0.0-apache',
+              os.environ['COLLABORA_TAG'],
+          ):
               if expected not in rendered:
                   raise SystemExit(f'missing rendered value: {expected}')
           PY
