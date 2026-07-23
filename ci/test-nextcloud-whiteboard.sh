@@ -11,6 +11,8 @@ backend_patch="${repo}/patches/local/nextcloud-whiteboard-backend.patch"
 config_hook="${repo}/images/nextcloud/hooks/20-opensuite-whiteboard.sh"
 demo_values="${repo}/helmfile/demo-values.yaml.tmpl"
 smoke="${repo}/ci/smoke/authenticated.mjs"
+HELM_VERSION="3.18.4"
+HELMFILE_VERSION="1.1.7"
 
 require_literal() {
   local file="$1" literal="$2"
@@ -107,14 +109,11 @@ if [ "$#" -eq 1 ]; then
   chart="${infra}/helmfile/apps/nextcloud/charts/nextcloud"
 
   # Render the actual pinned chart, not a copied fixture, and assert the command
-  # produces the secured, immutable backend and same-origin route.
-  command -v helm >/dev/null || {
-    echo "ERROR: helm is required for rendered Whiteboard validation" >&2
-    exit 1
-  }
-  helm dependency build "${chart}" >/dev/null
+  # produces the secured, immutable backend and same-origin route. Pin Helm and
+  # Helmfile as one compatible toolchain; the runner's ambient Helm may be v4,
+  # whose CLI is incompatible with Helmfile 1.1.7.
+  tools="$(mktemp -d)"
   rendered="$(mktemp)"
-  tools=""
   assembled=""
   cleanup_rendered() {
     rm -f "${rendered}"
@@ -122,7 +121,14 @@ if [ "$#" -eq 1 ]; then
     [ -z "${tools}" ] || rm -rf "${tools}"
   }
   trap cleanup_rendered EXIT
-  helm template opensuite-nextcloud "${chart}" \
+  curl -fsSL "https://get.helm.sh/helm-v${HELM_VERSION}-linux-amd64.tar.gz" \
+    | tar -xz -C "${tools}" --strip-components=1 linux-amd64/helm
+  curl -fsSL "https://github.com/helmfile/helmfile/releases/download/v${HELMFILE_VERSION}/helmfile_${HELMFILE_VERSION}_linux_amd64.tar.gz" \
+    | tar -xz -C "${tools}" helmfile
+  helm_bin="${tools}/helm"
+  helmfile_bin="${tools}/helmfile"
+  "${helm_bin}" dependency build "${chart}" >/dev/null
+  "${helm_bin}" template opensuite-nextcloud "${chart}" \
     --set cluster.routingMode=ingress \
     --set cluster.ingress.type=traefik \
     --set ingress.hostname=nextcloud.example.test \
@@ -146,13 +152,6 @@ if [ "$#" -eq 1 ]; then
   # Nextcloud Service targets the shared-header sidecar, so its readiness gate
   # must remain aligned in the assembled distribution rather than merely
   # existing as disconnected values text.
-  helmfile_bin="$(command -v helmfile || true)"
-  if [ -z "${helmfile_bin}" ]; then
-    tools="$(mktemp -d)"
-    curl -fsSL https://github.com/helmfile/helmfile/releases/download/v1.1.7/helmfile_1.1.7_linux_amd64.tar.gz \
-      | tar -xz -C "${tools}" helmfile
-    helmfile_bin="${tools}/helmfile"
-  fi
   python3 - "${repo}/helmfile/demo-values.yaml.tmpl" "${infra}/helmfile/environments/demo/mijnbureau.yaml.gotmpl" <<'PY'
 from pathlib import Path
 import sys
@@ -177,7 +176,8 @@ PY
   assembled="$(mktemp)"
   (
     cd "${infra}"
-    MIJNBUREAU_MASTER_PASSWORD=test-password \
+    PATH="${tools}:${PATH}" \
+      MIJNBUREAU_MASTER_PASSWORD=test-password \
       MIJNBUREAU_CREATE_NAMESPACES=false \
       "${helmfile_bin}" -e demo --selector name=nextcloud template --skip-deps --skip-needs \
       >"${assembled}"
