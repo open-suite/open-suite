@@ -475,7 +475,7 @@ index 706e9e2..e2e5fd1 100644
     {{- if .Values.metric.enabled }}
     # Allow the in-namespace metrics exporter pod to reach Nextcloud's
     # serverinfo endpoint. Prometheus itself scrapes the exporter pod, not
-@@ -241,10 +246,40 @@ metrics:
+@@ -241,10 +246,54 @@ metrics:
    serviceMonitor:
      enabled: {{ .Values.metric.serviceMonitor.enabled | default false }}
  
@@ -489,6 +489,20 @@ index 706e9e2..e2e5fd1 100644
 +    image: nginxinc/nginx-unprivileged:1.27-alpine
 +    resources:
 +      requests: { cpu: 10m, memory: 16Mi }
++    # Readiness follows the Service's real target and traverses nginx to
++    # Nextcloud. A socket-only or port-8080 probe can publish a scale-up pod
++    # while the externally served proxy path still refuses connections.
++    readinessProbe:
++      httpGet:
++        path: /status.php
++        port: 8091
++        httpHeaders:
++          - name: Host
++            value: "{{ .Values.global.hostname.nextcloud }}.{{ .Values.global.domain }}"
++      periodSeconds: 2
++      timeoutSeconds: 1
++      failureThreshold: 3
++      successThreshold: 1
 +    volumeMounts:
 +      - name: opensuite-header-conf
 +        mountPath: /etc/nginx/nginx.conf
@@ -516,7 +530,7 @@ index 706e9e2..e2e5fd1 100644
    - name: bureaublad-button-app
      configMap:
        name: nextcloud-bureaublad-button-app
-@@ -265,6 +298,77 @@ extraVolumeMounts:
+@@ -265,6 +312,77 @@ extraVolumeMounts:
      readOnly: true
  
  extraDeploy:
