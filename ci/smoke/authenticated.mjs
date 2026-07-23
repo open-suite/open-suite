@@ -980,7 +980,8 @@ try {
               : null;
             try {
               await cool.locator("#menu-insert > a").click({ timeout: 5000 });
-              await cool.locator("#menu-insertgraphicremote > a").click({ timeout: 5000 });
+              const imageCommand = cool.getByText(/^(Image|Image\.\.\.|Insert Image)$/i).last();
+              await imageCommand.click({ timeout: 5000 });
             } catch (error) {
               const visible = (await cool.locator("body").innerText().catch(() => "")).slice(0, 1000);
               throw new Error(`could not invoke Collabora Insert > Image: ${error.message}; frame text=${JSON.stringify(visible)}`);

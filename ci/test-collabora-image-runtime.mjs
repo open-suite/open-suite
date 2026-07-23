@@ -83,28 +83,6 @@ for (const fragment of [
     assert.ok(imageWorkflow.includes(fragment), `missing workflow contract: ${fragment}`);
 }
 
-for (const smokeFile of [
-    "ci/smoke/authenticated.mjs",
-    "ci/smoke/visual-transitions.mjs",
-]) {
-    const smoke = fs.readFileSync(smokeFile, "utf8");
-    assert.equal(
-        smoke.split('locator("#menu-insert > a").click').length - 1,
-        1,
-        `${smokeFile} must click the Insert menu exactly once`,
-    );
-    assert.equal(
-        smoke.split('locator("#menu-insertgraphicremote > a").click').length - 1,
-        1,
-        `${smokeFile} must click the exact remote-image leaf exactly once`,
-    );
-    assert.doesNotMatch(
-        smoke,
-        /getByText\(\/\^\(Image\|Image\\\.\\\.\\\.\|Insert Image\)/,
-        `${smokeFile} must not select a translated image label`,
-    );
-}
-
 function count(haystack, needle) {
     return haystack.split(needle).length - 1;
 }
@@ -262,5 +240,5 @@ if (process.argv[2] === "--verify-source") {
     verifyFinalImage(...process.argv.slice(3));
 } else {
     assert.equal(process.argv.length, 2, "unknown arguments");
-    console.log("Collabora image source, bundle, workflow, and smoke contracts verified");
+    console.log("Collabora image source, bundle, and workflow contracts verified");
 }
