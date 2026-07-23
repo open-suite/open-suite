@@ -9,7 +9,31 @@ ARTIFACT_DIR="${1:?Usage: $0 <artifact-dir> [domain]}"
 DOMAIN="${2:-127.0.0.1.sslip.io}"
 CSV="${ARTIFACT_DIR}/milestones.csv"
 FIRST_USE="${ARTIFACT_DIR}/first-use.json"
+NETWORK_EVENTS="${ARTIFACT_DIR}/host-network-events.log"
+BROWSER_EVENTS="${ARTIFACT_DIR}/browser-network-events.jsonl"
+CHROMIUM_LOG=""
 export KUBECONFIG="${KUBECONFIG:-/etc/rancher/k3s/k3s.yaml}"
+
+NETWORK_MONITOR_PID=""
+
+stop_network_monitor() {
+  if [ -n "${NETWORK_MONITOR_PID}" ]; then
+    kill "${NETWORK_MONITOR_PID}" 2>/dev/null || true
+    wait "${NETWORK_MONITOR_PID}" 2>/dev/null || true
+    NETWORK_MONITOR_PID=""
+  fi
+}
+
+finish_network_diagnostics() {
+  stop_network_monitor
+  if [ -n "${CHROMIUM_LOG}" ] && [ -s "${CHROMIUM_LOG}" ]; then
+    grep -E 'Observed a (change to the network IP addresses|change to network connectivity state|network change to state)' \
+      "${CHROMIUM_LOG}" > "${ARTIFACT_DIR}/chromium-network-change.log" || true
+  fi
+  if [ -n "${CHROMIUM_LOG}" ]; then
+    rm -f "${CHROMIUM_LOG}"
+  fi
+}
 
 install -d -m 0755 "${ARTIFACT_DIR}"
 kubectl -n mb-messages wait --for=condition=Ready pod/messages-cluster-rw-0 \
@@ -199,10 +223,40 @@ SH
 # captured, so it cannot influence the startup distribution.
 npm install --no-save --no-package-lock playwright@1.61.1
 npx playwright install chromium
+
+# Chromium aborts in-flight requests when Linux reports a network change. A
+# single-node k3s runner also creates and removes host veth interfaces as pods
+# turn over, so retain the host netlink stream and a sanitized browser request
+# timeline together. This is diagnostic-only: it does not retry navigation or
+# alter Chromium's network-change handling.
+{
+  date --utc --iso-8601=nanoseconds
+  ip -details address show
+  ip route show table all
+  ip rule show
+  ss -lntp '( sport = :80 or sport = :443 )'
+} > "${ARTIFACT_DIR}/host-network-before.txt" 2>&1
+{
+  date --utc --iso-8601=nanoseconds
+  cat /etc/resolv.conf
+  for host in messages auth id bridge element; do
+    echo "==> ${host}.${DOMAIN}"
+    getent ahosts "${host}.${DOMAIN}" || true
+  done
+} > "${ARTIFACT_DIR}/host-dns-before.txt" 2>&1
+CHROMIUM_LOG="$(mktemp /tmp/opensuite-chromium-network.XXXXXX.log)"
+stdbuf -oL -eL ip -ts monitor link address route > "${NETWORK_EVENTS}" 2>&1 &
+NETWORK_MONITOR_PID=$!
+trap finish_network_diagnostics EXIT
+
 MESSAGES_BENCHMARK_DOMAIN="${DOMAIN}" \
 MESSAGES_BENCHMARK_USER="messages-benchmark" \
 MESSAGES_BENCHMARK_PASSWORD="messagesBenchmarkPassword123" \
+MESSAGES_BENCHMARK_DIAGNOSTICS="${BROWSER_EVENTS}" \
+MESSAGES_BENCHMARK_CHROMIUM_LOG="${CHROMIUM_LOG}" \
 node "${REPO}/ci/messages-first-use-benchmark.mjs" "${FIRST_USE}"
+finish_network_diagnostics
+trap - EXIT
 
 python3 "${REPO}/ci/messages-benchmark-report.py" \
   "${CSV}" "${FIRST_USE}" "${ARTIFACT_DIR}/report.md"
