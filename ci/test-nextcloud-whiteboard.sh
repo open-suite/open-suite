@@ -114,7 +114,14 @@ if [ "$#" -eq 1 ]; then
   }
   helm dependency build "${chart}" >/dev/null
   rendered="$(mktemp)"
-  trap 'rm -f "${rendered}"' EXIT
+  tools=""
+  assembled=""
+  cleanup_rendered() {
+    rm -f "${rendered}"
+    [ -z "${assembled}" ] || rm -f "${assembled}"
+    [ -z "${tools}" ] || rm -rf "${tools}"
+  }
+  trap cleanup_rendered EXIT
   helm template opensuite-nextcloud "${chart}" \
     --set cluster.routingMode=ingress \
     --set cluster.ingress.type=traefik \
@@ -134,6 +141,48 @@ if [ "$#" -eq 1 ]; then
     'app.kubernetes.io/name: traefik'; do
     require_literal "${rendered}" "${literal}"
   done
+
+  # Render the actual demo values path as well as the chart fixture above. The
+  # Nextcloud Service targets the shared-header sidecar, so its readiness gate
+  # must remain aligned in the assembled distribution rather than merely
+  # existing as disconnected values text.
+  helmfile_bin="$(command -v helmfile || true)"
+  if [ -z "${helmfile_bin}" ]; then
+    tools="$(mktemp -d)"
+    curl -fsSL https://github.com/helmfile/helmfile/releases/download/v1.1.7/helmfile_1.1.7_linux_amd64.tar.gz \
+      | tar -xz -C "${tools}" helmfile
+    helmfile_bin="${tools}/helmfile"
+  fi
+  python3 - "${repo}/helmfile/demo-values.yaml.tmpl" "${infra}/helmfile/environments/demo/mijnbureau.yaml.gotmpl" <<'PY'
+from pathlib import Path
+import sys
+
+rendered = Path(sys.argv[1]).read_text()
+values = {
+    'DOMAIN': 'example.test',
+    'TLS_SELF_SIGNED': 'true',
+    'INGRESS_ANNOTATIONS': '',
+    'NEXTCLOUD_TAG': 'sha-test',
+    'PORTAL_SHA': '34512e5',
+    'MEET_TAG': 'v1.20.0',
+    'ELEMENT_TAG': 'sha-test',
+    'KC_BACKCHANNEL': 'http://keycloak-keycloak.mb-keycloak',
+}
+for name, value in values.items():
+    rendered = rendered.replace('${' + name + '}', value)
+destination = Path(sys.argv[2])
+destination.parent.mkdir(parents=True, exist_ok=True)
+destination.write_text(rendered)
+PY
+  assembled="$(mktemp)"
+  (
+    cd "${infra}"
+    MIJNBUREAU_MASTER_PASSWORD=test-password \
+      MIJNBUREAU_CREATE_NAMESPACES=false \
+      "${helmfile_bin}" -e demo --selector name=nextcloud template --skip-deps --skip-needs \
+      >"${assembled}"
+  )
+  python3 "${repo}/ci/test-header-first-paint.py" "${infra}" "${assembled}"
 fi
 
-echo "Nextcloud Whiteboard source and rendered contracts verified"
+echo "Nextcloud Whiteboard and sidecar-readiness source/rendered contracts verified"
