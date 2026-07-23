@@ -1,0 +1,37 @@
+diff --git a/browser/src/control/Control.Menubar.ts b/browser/src/control/Control.Menubar.ts
+--- a/browser/src/control/Control.Menubar.ts
++++ b/browser/src/control/Control.Menubar.ts
+@@ -1565,6 +1565,10 @@ class Menubar extends window.L.Control {
+ 		this._map.off('updatemodificationindicator', this._onUpdateModificationIndicator, this);
+ 		app.events.off('updatepermission', this._onRefresh);
+ 
++		var $mainMenu = $('#main-menu');
++		if ($mainMenu.data('smartmenus'))
++			$mainMenu.smartmenus('destroy');
++
+ 		this._menubarCont?.remove();
+ 		this._menubarCont = null;
+ 	}
+@@ -1754,8 +1758,13 @@ class Menubar extends window.L.Control {
+ 		if (!this._initialized) {
+ 			this._initialized = true;
+ 			this._onDocLayerInit();
++			return;
+ 		}
+ 
++		var $mainMenu = $('#main-menu');
++		if ($mainMenu.data('smartmenus'))
++			$mainMenu.smartmenus('destroy');
++
+ 		// clear initial menu
+ 		if (this._menubarCont)
+ 			window.L.DomUtil.removeChildNodes(this._menubarCont);
+@@ -1777,7 +1786,7 @@ class Menubar extends window.L.Control {
+ 		}
+ 
+ 		// initialize menubar plugin
+-		$('#main-menu').smartmenus({
++		$mainMenu.smartmenus({
+ 			hideOnClick: true,
+ 			showOnClick: true,
+ 			hideTimeout: 0,
