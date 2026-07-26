@@ -11,6 +11,7 @@ import json
 import os
 import re
 import secrets
+import threading
 import time
 import urllib.error
 import urllib.parse
@@ -52,6 +53,26 @@ END_SESSION_ENDPOINT = f"{ISSUER}/protocol/openid-connect/logout"
 JWKS_ENDPOINT = f"{ISSUER}/protocol/openid-connect/certs"
 
 SESSIONS: dict[str, dict[str, object]] = {}
+
+# One lock per session, so a burst of parallel forwarded requests refreshes the
+# session's tokens exactly once. The realm rotates refresh tokens
+# (revokeRefreshToken), and Keycloak treats any reuse of a rotated token as
+# theft: it invalidates the whole SSO session, logging the user out of every
+# app at once.
+_REFRESH_LOCKS: dict[str, threading.Lock] = {}
+_REFRESH_LOCKS_GUARD = threading.Lock()
+
+
+def _refresh_lock(sid: str) -> threading.Lock:
+    with _REFRESH_LOCKS_GUARD:
+        return _REFRESH_LOCKS.setdefault(sid, threading.Lock())
+
+
+def drop_session(sid: str) -> dict[str, object] | None:
+    session = SESSIONS.pop(sid, None)
+    with _REFRESH_LOCKS_GUARD:
+        _REFRESH_LOCKS.pop(sid, None)
+    return session
 
 # Only these public hosts are attached to the gate. Treating an arbitrary suite
 # subdomain as a protected destination would turn forwarded-host spoofing into
@@ -470,6 +491,12 @@ def update_session_tokens(session: dict[str, object], tokens: dict[str, object],
     if tokens.get("id_token"):
         session["id_token"] = str(tokens["id_token"])
     session["token_exp"] = now + int(tokens.get("expires_in", 0))
+    # Slide the gate session with the rotated refresh token so the edge session
+    # tracks Keycloak's SSO idle window instead of expiring a fixed TTL after
+    # login while the Keycloak session is still alive.
+    refresh_ttl = int(tokens.get("refresh_expires_in", 0))
+    if refresh_ttl > 0:
+        session["exp"] = now + min(SESSION_TTL, refresh_ttl)
 
 
 def make_session(
@@ -503,19 +530,35 @@ def valid_session(cookie_value: str | None) -> dict[str, object] | None:
     if not session:
         return None
     if int(session.get("exp", 0)) <= int(time.time()):
-        SESSIONS.pop(sid, None)
+        drop_session(sid)
         return None
     now = int(time.time())
     try:
         if int(session.get("token_exp", 0)) <= now + REFRESH_SKEW:
-            refresh_token = str(session.get("refresh_token", ""))
-            if not refresh_token:
-                SESSIONS.pop(sid, None)
-                return None
-            update_session_tokens(session, refresh_tokens(refresh_token), now)
+            with _refresh_lock(sid):
+                # Re-check under the lock: a concurrent request may have
+                # already rotated the tokens while this one waited.
+                now = int(time.time())
+                if int(session.get("token_exp", 0)) <= now + REFRESH_SKEW:
+                    refresh_token = str(session.get("refresh_token", ""))
+                    if not refresh_token:
+                        drop_session(sid)
+                        return None
+                    try:
+                        update_session_tokens(session, refresh_tokens(refresh_token), now)
+                    except urllib.error.HTTPError as err:
+                        if err.code in (400, 401):
+                            # invalid_grant: the refresh token is spent or the
+                            # Keycloak session is gone. Retrying the same token
+                            # later would trip Keycloak's reuse detection and
+                            # invalidate the whole SSO session. Drop the record;
+                            # the next navigation re-authenticates silently.
+                            drop_session(sid)
+                            return None
+                        raise
         if now - int(session.get("validated_at", 0)) >= VALIDATION_INTERVAL:
             if not token_is_active(str(session.get("access_token", ""))):
-                SESSIONS.pop(sid, None)
+                drop_session(sid)
                 return None
             session["validated_at"] = now
     except (
@@ -736,7 +779,7 @@ class Handler(http.server.BaseHTTPRequestHandler):
         cookies = parse_cookies(self.headers.get("Cookie"))
         auth_cookie = cookies.get(COOKIE_NAME).value if cookies.get(COOKIE_NAME) else None
         sid = unsign(auth_cookie) if auth_cookie else None
-        session = SESSIONS.pop(sid, None) if sid else None
+        session = drop_session(sid) if sid else None
         rd = safe_redirect_target(params.get("rd", [""])[0])
         logout_params = {"client_id": CLIENT_ID, "post_logout_redirect_uri": rd}
         if session and session.get("id_token"):
@@ -759,7 +802,7 @@ class Handler(http.server.BaseHTTPRequestHandler):
             and len(oidc_sids) == 1
             and oidc_sids[0] == session.get("oidc_sid")
         ):
-            SESSIONS.pop(sid, None)
+            drop_session(sid)
             self.send_empty(
                 HTTPStatus.NO_CONTENT,
                 {"Cache-Control": "no-store", "Set-Cookie": clear_cookie_header(COOKIE_NAME)},
