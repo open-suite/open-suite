@@ -196,7 +196,7 @@ collect_diagnostics() {
   helm list -A > "${diagnostics}/helm-releases.txt" 2>&1
   journalctl -u k3s --no-pager -n 1500 > "${diagnostics}/k3s-journal.txt" 2>&1
   {
-    date --utc --iso-8601=nanoseconds
+    date --utc --iso-8601=ns
     ip -details address show
     ip route show table all
     ip rule show
