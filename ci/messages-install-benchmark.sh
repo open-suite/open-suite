@@ -230,14 +230,14 @@ npx playwright install chromium
 # timeline together. This is diagnostic-only: it does not retry navigation or
 # alter Chromium's network-change handling.
 {
-  date --utc --iso-8601=nanoseconds
+  date --utc --iso-8601=ns
   ip -details address show
   ip route show table all
   ip rule show
   ss -lntp '( sport = :80 or sport = :443 )'
 } > "${ARTIFACT_DIR}/host-network-before.txt" 2>&1
 {
-  date --utc --iso-8601=nanoseconds
+  date --utc --iso-8601=ns
   cat /etc/resolv.conf
   for host in messages auth id bridge element; do
     echo "==> ${host}.${DOMAIN}"
