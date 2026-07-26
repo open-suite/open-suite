@@ -501,8 +501,23 @@ async function assertOfficeHeaderGeometry(page, label, portalHeaderVersion, chec
 }
 
 async function invokeFirstInsertImage(page, editor, label, contract) {
-  await editor.locator("#menu-insert > a").click({ timeout: 30_000 });
-  await editor.locator("#menu-insertgraphicremote > a").click();
+  // SmartMenus animates the Insert dropdown open; Playwright's stability check
+  // can time out mid-animation, and a stray hover can close the menu again.
+  // Reopen the menu and retry rather than failing the whole lifecycle on one
+  // unstable frame.
+  const item = editor.locator("#menu-insertgraphicremote > a");
+  for (let attempt = 1; ; attempt += 1) {
+    try {
+      await editor.locator("#menu-insert > a").click({ timeout: 30_000 });
+      await item.waitFor({ state: "visible", timeout: 10_000 });
+      await item.click({ timeout: 10_000 });
+      break;
+    } catch (error) {
+      if (attempt >= 3) throw error;
+      await page.keyboard.press("Escape").catch(() => null);
+      await page.waitForTimeout(500);
+    }
+  }
   const picker = page.getByRole("dialog").filter({ hasText: "Insert file from Open Suite" }).last();
   await picker.waitFor({ state: "visible", timeout: 15_000 });
   contract(`${label} first Insert Image click opens picker`, true);
