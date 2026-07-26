@@ -79,12 +79,19 @@ const browser = await chromium.launch({
 });
 record("browser-launched", { version: browser.version() });
 const context = await browser.newContext({ ignoreHTTPSErrors: true });
-const page = await context.newPage();
+let page = await context.newPage();
 observePage(page, "mail");
 const results = {};
 let mailboxThreadsLoaded;
 
-try {
+// Chromium aborts every in-flight request with net::ERR_NETWORK_CHANGED when
+// the host reports a network change, and a single-node k3s runner emits those
+// constantly as pod veths churn. The captured netlink/browser timelines
+// confirmed this as the only navigation killer, so the first-use attempt
+// retries on exactly that error — each retry is recorded and reported.
+const MAIL_ATTEMPTS = 3;
+
+async function attemptMailFirstUse() {
   const mailStarted = performance.now();
   mailboxThreadsLoaded = page.waitForResponse((response) => {
     const url = new URL(response.url());
@@ -115,7 +122,27 @@ try {
     state: "visible",
     timeout: 30_000,
   });
-  results.mail_first_usable_ms = Math.round(performance.now() - mailStarted);
+  return Math.round(performance.now() - mailStarted);
+}
+
+try {
+  for (let attempt = 1; ; attempt += 1) {
+    try {
+      results.mail_first_usable_ms = await attemptMailFirstUse();
+      results.mail_first_use_attempts = attempt;
+      break;
+    } catch (error) {
+      const networkChanged = String(error?.message ?? "").includes("ERR_NETWORK_CHANGED");
+      if (!networkChanged || attempt >= MAIL_ATTEMPTS) throw error;
+      record("network-change-retry", { attempt, error: String(error.message).split("\n")[0] });
+      // Settle the orphaned response waiter, then restart on a fresh page so
+      // no listener or pending navigation from the aborted attempt leaks in.
+      await mailboxThreadsLoaded?.catch(() => null);
+      await page.close().catch(() => null);
+      page = await context.newPage();
+      observePage(page, "mail");
+    }
+  }
 
   const cookies = await context.cookies();
   const gateCookie = cookies.find((cookie) => cookie.name === "opensuite_auth");
