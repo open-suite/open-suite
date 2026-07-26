@@ -229,7 +229,19 @@ body#keycloak-bg {
     formBody.prepend(panel);
   }
 
-  document.addEventListener('DOMContentLoaded', insertDemoPanel);
+  function defaultRememberMe() {
+    // Pre-check remember me so KEYCLOAK_IDENTITY becomes a persistent cookie.
+    // Without it the SSO anchor dies with every browser restart while per-app
+    // artifacts (Element localStorage, Docs' 12h cookie, restored tabs)
+    // survive, leaving the suite half logged in. Users can still untick it.
+    const box = document.getElementById('rememberMe');
+    if (box && !box.checked) box.checked = true;
+  }
+
+  document.addEventListener('DOMContentLoaded', () => {
+    insertDemoPanel();
+    defaultRememberMe();
+  });
 })();
 " \
   --dry-run=client -o yaml | kubectl apply -f -
