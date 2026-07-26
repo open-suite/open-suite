@@ -183,6 +183,7 @@ authentication:
     # in-cluster plain-HTTP service instead. issuer and the browser-facing
     # endpoints above stay on the public https host either way.
     token_endpoint: "${KC_BACKCHANNEL}/realms/mijnbureau/protocol/openid-connect/token"
+    revocation_endpoint: "${KC_BACKCHANNEL}/realms/mijnbureau/protocol/openid-connect/revoke"
     introspection_endpoint: "${KC_BACKCHANNEL}/realms/mijnbureau/protocol/openid-connect/token/introspect"
     userinfo_endpoint: "${KC_BACKCHANNEL}/realms/mijnbureau/protocol/openid-connect/userinfo"
     jwks_uri: "${KC_BACKCHANNEL}/realms/mijnbureau/protocol/openid-connect/certs"

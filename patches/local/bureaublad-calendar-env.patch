@@ -1,11 +1,8 @@
 diff --git a/helmfile/apps/bureaublad/values.yaml.gotmpl b/helmfile/apps/bureaublad/values.yaml.gotmpl
-index d78c692..e932c80 100644
+index d78c692..b5f0058 100644
 --- a/helmfile/apps/bureaublad/values.yaml.gotmpl
 +++ b/helmfile/apps/bureaublad/values.yaml.gotmpl
-@@ -43,9 +43,23 @@ backend:
-   networkPolicy:
-     extraEgress:
-       # External https access
+@@ -46,6 +46,20 @@ backend:
        - ports:
            - port: 443
              protocol: TCP
@@ -26,10 +23,11 @@ index d78c692..e932c80 100644
        {{- if .Values.ai.llm.endpoint.isInternal }}
        # AI connectivity
        - ports:
-@@ -69,6 +83,23 @@ backend:
+@@ -69,7 +83,29 @@ backend:
      OIDC_POST_LOGIN_REDIRECT_URI: {{ $baseUrl }}
      OIDC_POST_LOGOUT_REDIRECT_URI: {{ $baseUrl }}
      OIDC_TOKEN_ENDPOINT: {{ .Values.authentication.oidc.token_endpoint | quote }}
+-    OIDC_REVOCATION_ENDPOINT: {{ .Values.authentication.oidc.end_session_endpoint | quote }}
 +    OIDC_INTROSPECTION_ENDPOINT: {{ .Values.authentication.oidc.introspection_endpoint | quote }}
 +    # Open Suite integrations consumed by the portal fork.
 +    CALENDAR_URL: "https://{{ .Values.global.hostname.nextcloud | default "nextcloud" }}.{{ .Values.global.domain }}/apps/calendar"
@@ -47,6 +45,12 @@ index d78c692..e932c80 100644
 +    # outbound client (OIDC code exchange, CalDAV) cannot verify TLS.
 +    HTTP_TLS_INSECURE: "1"
 +    {{- end }}
-     OIDC_REVOCATION_ENDPOINT: {{ .Values.authentication.oidc.end_session_endpoint | quote }}
++    # RFC 7009 revocation, not the end-session endpoint. Posting a refresh
++    # token to end-session is a back-channel logout that can kill the whole
++    # Keycloak SSO session; here it only produced daily
++    # "Parameter 'client_id' not present" LOGIN_ERRORs and left the refresh
++    # token unrevoked.
++    OIDC_REVOCATION_ENDPOINT: {{ .Values.authentication.oidc.revocation_endpoint | default "" | quote }}
      OIDC_JWKS_ENDPOINT: {{ .Values.authentication.oidc.jwks_uri | quote }}
      OIDC_ISSUER: {{ .Values.authentication.oidc.issuer | quote }}
+     OIDC_AUDIENCE: "bureaublad"

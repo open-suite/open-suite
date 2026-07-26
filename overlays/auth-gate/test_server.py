@@ -4,6 +4,7 @@ from pathlib import Path
 import threading
 import types
 import unittest
+import urllib.error
 from unittest import mock
 
 
@@ -115,6 +116,89 @@ class SessionTests(unittest.TestCase):
         self.assertEqual(session["refresh_token"], "refresh-2")
         self.assertEqual(session["id_token"], "id-1")
         self.assertEqual(session["token_exp"], 1_300)
+
+    def test_refresh_slides_session_expiry_with_the_rotated_token(self) -> None:
+        cookie, session = self.make_session()
+        session["token_exp"] = 1_010
+        refreshed = {
+            "access_token": "access-2",
+            "refresh_token": "refresh-2",
+            "expires_in": 300,
+            "refresh_expires_in": 3_600,
+        }
+
+        with (
+            mock.patch.object(server.time, "time", return_value=2_000),
+            mock.patch.object(server, "refresh_tokens", return_value=refreshed),
+            mock.patch.object(server, "token_is_active", return_value=True),
+        ):
+            self.assertIs(server.valid_session(cookie), session)
+
+        self.assertEqual(session["exp"], 5_600)
+
+    def test_concurrent_requests_refresh_the_rotated_token_exactly_once(self) -> None:
+        # The realm rotates refresh tokens; a second presentation of the same
+        # token makes Keycloak invalidate the whole SSO session. A burst of
+        # parallel forwarded requests must therefore refresh exactly once.
+        cookie, session = self.make_session()
+        session["token_exp"] = 1_010
+        calls: list[str] = []
+        started = threading.Barrier(5, timeout=5)
+
+        def slow_refresh(refresh_token: str) -> dict[str, object]:
+            calls.append(refresh_token)
+            return {
+                "access_token": "access-2",
+                "refresh_token": "refresh-2",
+                "expires_in": 300,
+            }
+
+        def worker(results: list[object]) -> None:
+            started.wait()
+            results.append(server.valid_session(cookie))
+
+        results: list[object] = []
+        with (
+            mock.patch.object(server.time, "time", return_value=1_000),
+            mock.patch.object(server, "refresh_tokens", side_effect=slow_refresh),
+            mock.patch.object(server, "token_is_active", return_value=True),
+        ):
+            threads = [threading.Thread(target=worker, args=(results,)) for _ in range(5)]
+            for thread in threads:
+                thread.start()
+            for thread in threads:
+                thread.join()
+
+        self.assertEqual(calls, ["refresh-1"])
+        self.assertEqual([session] * 5, results)
+        self.assertEqual(session["refresh_token"], "refresh-2")
+
+    def test_spent_refresh_token_drops_the_session_instead_of_retrying(self) -> None:
+        # invalid_grant is permanent: retrying the same token later trips
+        # Keycloak's reuse detection and kills the SSO session for every app.
+        cookie, session = self.make_session()
+        session["token_exp"] = 1_010
+        rejection = urllib.error.HTTPError(server.TOKEN_ENDPOINT, 400, "Bad Request", None, None)  # type: ignore[arg-type]
+
+        with (
+            mock.patch.object(server.time, "time", return_value=1_000),
+            mock.patch.object(server, "refresh_tokens", side_effect=rejection),
+        ):
+            self.assertIsNone(server.valid_session(cookie))
+
+        self.assertNotIn(server.unsign(cookie), server.SESSIONS)
+
+    def test_transient_refresh_failure_keeps_the_session_for_recovery(self) -> None:
+        cookie, session = self.make_session()
+        session["token_exp"] = 1_010
+
+        with (
+            mock.patch.object(server.time, "time", return_value=1_000),
+            mock.patch.object(server, "refresh_tokens", side_effect=urllib.error.URLError("down")),
+        ):
+            self.assertIsNone(server.valid_session(cookie))
+
+        self.assertIn(server.unsign(cookie), server.SESSIONS)
 
     def test_logout_clears_session_and_skips_keycloak_confirmation(self) -> None:
         cookie, _ = self.make_session()
