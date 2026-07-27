@@ -148,7 +148,7 @@ try {
   // --- Rendered global navigation on every app surface -----------------------
   await assertGlobalHeader("bridge");
 
-  const expectedTopLevel = ["Home", "Mail", "Chat", "Meet", "Office", "Calendar", "More"];
+  const expectedTopLevel = ["Home", "Mail", "Chat", "Meet", "Office", "Calendar", "Projects", "More"];
   const desktopTopLevel = await page
     .locator("#ko-portal-header .ko-desktop-nav > .ko-item > .ko-link")
     .evaluateAll((items) => items.map((item) => item.textContent.replace("▾", "").trim()));
@@ -164,6 +164,17 @@ try {
     ok("Chat uses Element's canonical home entry route");
   else fail("Chat entry route", `unexpected href: ${chatHref}`);
 
+  const projectsHref = await page
+    .locator("#ko-portal-header")
+    .getByRole("link", { name: "Projects", exact: true })
+    .getAttribute("href");
+  if (projectsHref === `https://nextcloud.${DOMAIN}/apps/deck/`)
+    ok("Projects uses Nextcloud Deck's durable app route");
+  else fail("Projects entry route", `unexpected href: ${projectsHref}`);
+
+  const dropdownOfficeButton = page
+    .locator("#ko-portal-header .ko-desktop-nav")
+    .getByRole("button", { name: "Office ▾", exact: true });
   const moreButton = page
     .locator("#ko-portal-header .ko-desktop-nav")
     .getByRole("button", { name: "More ▾", exact: true });
@@ -172,6 +183,21 @@ try {
   if (JSON.stringify(moreItems) === JSON.stringify(["Tables", "Wiki", "Contacts"]))
     ok("suite More menu has the canonical order");
   else fail("suite More menu order", `got ${moreItems}`);
+
+  await dropdownOfficeButton.click();
+  if ((await dropdownOfficeButton.getAttribute("aria-expanded")) === "true" &&
+      (await moreButton.getAttribute("aria-expanded")) === "false")
+    ok("opening Office closes the More menu");
+  else fail("desktop dropdown exclusivity", "Office and More state diverged after opening Office");
+  await moreButton.click();
+  if ((await dropdownOfficeButton.getAttribute("aria-expanded")) === "false" &&
+      (await moreButton.getAttribute("aria-expanded")) === "true")
+    ok("opening More closes the Office menu");
+  else fail("desktop dropdown exclusivity", "Office and More state diverged after opening More");
+  await moreButton.click();
+  if ((await moreButton.getAttribute("aria-expanded")) === "false")
+    ok("clicking the active desktop dropdown closes it");
+  else fail("desktop dropdown toggle", "More remained open after its active trigger was clicked");
 
   const logoutLink = page
     .locator("#ko-portal-header")
