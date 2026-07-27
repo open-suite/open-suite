@@ -2,8 +2,8 @@
 # Usage: ./seed-demo.sh
 #
 # Resets the stateful public-demo fixtures and refreshes the idempotent ones:
-# upcoming calendar events, La Suite Docs, a clean unread Mail inbox, and a
-# fresh unread chat thread between Jane and John.
+# upcoming calendar events, La Suite Docs, a clean unread Mail inbox, a Deck
+# project board, and a fresh unread chat thread between Jane and John.
 #
 # Requires (env or the `demo-seed` secret in mb-bureaublad):
 #   DOMAIN     e.g. suite.example.com
@@ -127,7 +127,7 @@ kubectl -n mb-nextcloud exec nextcloud-cluster-rw-0 -c postgresql -- \
   -c "DELETE FROM oc_activity WHERE file ~ '/Document( \\(\\d+\\))?\\.docx$'" >/dev/null || \
   echo "    !! activity purge failed (non-fatal)"
 
-echo "==> [1/4] Calendar — upcoming events (each with a Meet link)"
+echo "==> [1/5] Calendar — upcoming events (each with a Meet link)"
 # Meet is OIDC-native; mint johndoe a token (direct-access grant on the meet
 # client) so we can create a room per event. Its URL goes in the event location,
 # which the portal surfaces as a "Join" button.
@@ -216,7 +216,7 @@ put_event demo-standup-os 1 09 1 dmo-stnd-upx "Team standup"
 put_event demo-review-os  3 14 1 dmo-rviw-qtr "Q3 deck review with Jane"
 put_event demo-1on1-os    5 11 1 dmo-oneo-one "1:1 John and Jane"
 
-echo "==> [2/4] Docs — La Suite documents"
+echo "==> [2/5] Docs — La Suite documents"
 # La Suite Docs is OIDC-native; mint johndoe a token via Keycloak direct-access
 # grant on the docs client (ensure that grant is enabled first).
 DOCS_CID=$(kubectl -n mb-keycloak get secret keycloak-keycloak-config-cli -o jsonpath="{.data.MB_CLIENT_SECRET_DOCS}" | base64 -d)
@@ -243,7 +243,7 @@ else
   echo "    !! could not obtain a Docs token — skipping"
 fi
 
-echo "==> [3/4] Mail — reset demo inbox and add unread messages"
+echo "==> [3/5] Mail — reset demo inbox and add unread messages"
 if kubectl -n mb-messages get deploy messages-backend >/dev/null 2>&1; then
   # Delete only threads visible to the named public-demo mailboxes. This uses
   # the application's ORM so cascade and blob lifecycle rules stay intact.
@@ -348,7 +348,93 @@ else
   echo "    messages app is disabled — skipping"
 fi
 
-echo "==> [4/4] Chat — reset Jane ↔ John direct message"
+echo "==> [4/5] Projects — Open Suite launch board"
+DECK_API="http://${NC_SVC}:8080/index.php/apps/deck/api/v1.0"
+DECK_OCS="http://${NC_SVC}:8080/ocs/v2.php/apps/deck/api/v1.0"
+deck_request() { # method path [JSON body] [base URL]
+  local method="$1" path="$2" body="${3:-}" base="${4:-$DECK_API}" response status payload
+  local args=(-sS --max-time 20 -u "${NC_LOGIN}:${NC_PASS}" -H "Host: ${NC_HOST}" \
+    -H "OCS-APIRequest: true" -H "Accept: application/json")
+  if [ -n "$body" ]; then
+    args+=(-H "Content-Type: application/json" --data-binary "$body")
+  fi
+  response=$(curl "${args[@]}" -X "$method" -w $'\n%{http_code}' "${base}${path}")
+  status=${response##*$'\n'}
+  payload=${response%$'\n'*}
+  case "$status" in
+    2*) printf '%s' "$payload" ;;
+    *) echo "!! seed-demo: Deck ${method} ${path} returned HTTP ${status}" >&2; return 1 ;;
+  esac
+}
+
+DECK_BOARD_TITLE="Open Suite website launch"
+boards=$(deck_request GET "/boards")
+board_id=$(printf '%s' "$boards" | python3 -c "import json,sys
+login, title = sys.argv[1:]
+for board in json.load(sys.stdin):
+    owner = board.get('owner') or {}
+    if board.get('title') == title and owner.get('uid') == login and not board.get('archived', False):
+        print(board['id'])
+        break" "$NC_LOGIN" "$DECK_BOARD_TITLE")
+if [ -z "$board_id" ]; then
+  board_id=$(deck_request POST "/boards" \
+    "{\"title\":\"${DECK_BOARD_TITLE}\",\"color\":\"E85D4A\"}" |
+    python3 -c "import json,sys; print(json.load(sys.stdin)['id'])")
+  echo "    + ${DECK_BOARD_TITLE}"
+else
+  echo "    = ${DECK_BOARD_TITLE} (exists)"
+fi
+
+stacks=$(deck_request GET "/boards/${board_id}/stacks")
+ensure_stack() { # title order
+  local title="$1" order="$2" id
+  id=$(printf '%s' "$stacks" | python3 -c "import json,sys
+title = sys.argv[1]
+for stack in json.load(sys.stdin):
+    if stack.get('title') == title and not stack.get('deletedAt', 0):
+        print(stack['id'])
+        break" "$title")
+  if [ -z "$id" ]; then
+    id=$(deck_request POST "/boards/${board_id}/stacks" \
+      "{\"title\":\"${title}\",\"order\":${order}}" |
+      python3 -c "import json,sys; print(json.load(sys.stdin)['id'])")
+    echo "    + ${title} list" >&2
+  fi
+  printf '%s' "$id"
+}
+todo_id=$(ensure_stack "To do" 0)
+doing_id=$(ensure_stack "In progress" 1)
+done_id=$(ensure_stack "Done" 2)
+
+# Refresh after list creation so card checks see the current server state.
+stacks=$(deck_request GET "/boards/${board_id}/stacks")
+ensure_card() { # stack id, title, description
+  local stack_id="$1" title="$2" description="$3" exists
+  exists=$(printf '%s' "$stacks" | python3 -c "import json,sys
+stack_id, title = int(sys.argv[1]), sys.argv[2]
+for stack in json.load(sys.stdin):
+    if stack.get('id') == stack_id:
+        print('yes' if any(card.get('title') == title and not card.get('deletedAt', 0) for card in stack.get('cards', [])) else 'no')
+        break
+else:
+    print('no')" "$stack_id" "$title")
+  if [ "$exists" = "yes" ]; then return; fi
+  deck_request POST "/boards/${board_id}/stacks/${stack_id}/cards" \
+    "{\"title\":\"${title}\",\"description\":\"${description}\"}" >/dev/null
+  echo "    + ${title}"
+}
+ensure_card "$todo_id" "Finalise accessibility review" "Check keyboard navigation and contrast before launch."
+ensure_card "$todo_id" "Prepare launch announcement" "Draft the public launch note for the team."
+ensure_card "$doing_id" "Review onboarding guide" "Make the first-run path clear for new colleagues."
+ensure_card "$done_id" "Choose hosting region" "EU-hosted infrastructure selected."
+ensure_card "$done_id" "Connect team mail" "Mail is available from the shared Open Suite header."
+
+# Mark the final list as Deck's semantic done column. This is idempotent and
+# also marks cards in that list complete, which powers the portal progress.
+deck_request PUT "/stacks/${done_id}/done" \
+  "{\"boardId\":${board_id},\"isDone\":true}" "$DECK_OCS" >/dev/null
+
+echo "==> [5/5] Chat — reset Jane ↔ John direct message"
 SYN=$(kubectl -n mb-element get pods -o name | grep -i "synapse-" | grep -iv keygen | head -1)
 # Mint a run-scoped Synapse admin token. Password login is disabled (OIDC-only
 # Synapse), so shared-secret registration is unusable; bootstrap a seedadmin

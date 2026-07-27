@@ -151,6 +151,8 @@ for key, item in patched.items():
     assert list(data) == [expected_key]
     assert "Open Suite portal header" in data[expected_key]
     assert '{ label: "Chat", sub: "element", path: "/#/home" }' in data[expected_key]
+    assert '{ label: "Projects", sub: "nextcloud", path: "/apps/deck/" }' in data[expected_key]
+    assert 'function closeDesktopMenus(bar, except)' in data[expected_key]
     assert 'var HEADER_VERSION = "source";' not in data[expected_key]
 
 execs = [item for item in operations if item["kind"] == "exec"]

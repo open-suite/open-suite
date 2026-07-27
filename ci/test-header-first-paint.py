@@ -131,6 +131,10 @@ for contract in (
     'history[addHistory ? "pushState" : "replaceState"]',
     'e.preventDefault()',
     'new MutationObserver(synchronizeOfficeNavigation)',
+    '{ label: "Projects", sub: "nextcloud", path: "/apps/deck/" }',
+    'function closeDesktopMenus(bar, except)',
+    'closeDesktopMenus(wrap.parentNode, wrap)',
+    'wrap.classList.toggle("ko-open", !wasOpen)',
 ):
     if contract not in header:
         raise AssertionError(f"canonical asset is missing contract: {contract}")

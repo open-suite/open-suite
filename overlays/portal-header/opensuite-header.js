@@ -117,6 +117,7 @@
     { label: "Meet", sub: "meet" },
     { label: "Office", sub: "nextcloud", children: OFFICE_CHILDREN },
     { label: "Calendar", sub: "nextcloud", path: "/apps/calendar" },
+    { label: "Projects", sub: "nextcloud", path: "/apps/deck/" },
     { label: "More", children: MORE_CHILDREN },
   ];
 
@@ -273,6 +274,15 @@
     if (height > 0) document.documentElement.style.setProperty(HEADER_HEIGHT_VAR, height + "px");
   }
 
+  function closeDesktopMenus(bar, except) {
+    Array.prototype.forEach.call(bar.querySelectorAll(".ko-item.ko-open"), function (item) {
+      if (item === except) return;
+      item.classList.remove("ko-open");
+      var trigger = item.querySelector("button.ko-link");
+      if (trigger) trigger.setAttribute("aria-expanded", "false");
+    });
+  }
+
   function buildItem(item) {
     var wrap = document.createElement("div");
     wrap.className = "ko-item";
@@ -285,8 +295,10 @@
       btn.innerHTML = item.label + ' <span class="ko-caret">▾</span>';
       btn.addEventListener("click", function (e) {
         e.stopPropagation();
-        wrap.classList.toggle("ko-open");
-        btn.setAttribute("aria-expanded", wrap.classList.contains("ko-open") ? "true" : "false");
+        var wasOpen = wrap.classList.contains("ko-open");
+        closeDesktopMenus(wrap.parentNode, wrap);
+        wrap.classList.toggle("ko-open", !wasOpen);
+        btn.setAttribute("aria-expanded", wasOpen ? "false" : "true");
       });
       wrap.appendChild(btn);
 
@@ -413,8 +425,7 @@
 
     // Close menus when clicking elsewhere or pressing Escape.
     document.addEventListener("click", function (e) {
-      var open = bar.querySelector(".ko-item.ko-open");
-      if (open) open.classList.remove("ko-open");
+      closeDesktopMenus(bar);
       if (!bar.contains(e.target)) {
         bar.classList.remove("ko-mobile-open");
         mobileToggle.setAttribute("aria-expanded", "false");
@@ -423,6 +434,7 @@
     });
     document.addEventListener("keydown", function (e) {
       if (e.key !== "Escape") return;
+      closeDesktopMenus(bar);
       bar.classList.remove("ko-mobile-open");
       mobileToggle.setAttribute("aria-expanded", "false");
       mobileToggle.setAttribute("aria-label", "Open navigation");
