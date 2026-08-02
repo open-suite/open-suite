@@ -138,6 +138,20 @@ def validate_values_source(infra):
     browser_ingress = root_section(source, "ingress")
     assert "opensuite-auth-gate" in browser_ingress
 
+    backend = root_section(source, "backend")
+    settings_patch = yaml_block(backend, "initContainers")
+    assert settings_patch.count("patch-collaboration-read-only-setting") == 1
+    assert settings_patch.count(
+        "COLLABORATION_WS_NOT_CONNECTED_READY_ONLY = values.BooleanValue("
+    ) == 3
+    assert settings_patch.count(
+        "COLLABORATION_WS_NOT_CONNECTED_READ_ONLY = values.BooleanValue("
+    ) == 2
+    assert (
+        "settings.COLLABORATION_WS_NOT_CONNECTED_READ_ONLY" in settings_patch
+    )
+    assert 'COLLABORATION_WS_NOT_CONNECTED_READY_ONLY: "true"' in backend
+
 
 def validate_infra_dependencies(infra):
     source = (infra / "helmfile/apps/docs/helmfile-child.yaml.gotmpl").read_text()
@@ -187,6 +201,20 @@ def validate_rendered_chart(infra, scratch):
             fileContent: '{}'
         """
     ).rstrip()
+    # Render the exact runtime source patch blocks from the distribution values
+    # (only replacing the Helmfile image expression with a chart-test image).
+    backend_source = root_section(
+        (infra / "helmfile/apps/docs/values.yaml.gotmpl").read_text(), "backend"
+    )
+    runtime_patch_values = "\n".join(
+        f"{name}:\n{textwrap.indent(textwrap.dedent(yaml_block(backend_source, name)), '  ')}"
+        for name in ("initContainers", "extraVolumes", "extraVolumeMounts")
+    )
+    runtime_patch_values = re.sub(
+        r'(?m)^(\s*image:) \{\{.*$', r'\1 "docs-backend:v5.2.1"',
+        runtime_patch_values,
+    )
+    values["backend"] += f"\n\n{runtime_patch_values}"
     override.write_text(
         textwrap.dedent(
             """
@@ -234,6 +262,22 @@ def validate_rendered_chart(infra, scratch):
             path=expected["startup_path"], delay=10, period=10, timeout=5,
             failures=3,
         )
+
+    backend_deployment = run(
+        "helm", "template", "docs", str(chart), "-f", str(override),
+        "--show-only", "templates/backend-deployment.yaml",
+    )
+    for expected in (
+        "name: patch-collaboration-read-only-setting",
+        "source=/app/impress/settings.py",
+        "consumer=/app/core/api/viewsets.py",
+        "settings.COLLABORATION_WS_NOT_CONNECTED_READ_ONLY",
+        "COLLABORATION_WS_NOT_CONNECTED_READY_ONLY = values.BooleanValue(",
+        "mountPath: /app/impress/settings.py",
+        "subPath: settings.py",
+    ):
+        assert expected in backend_deployment
+    assert backend_deployment.count("name: opensuite-docs-settings") == 3
 
     collaboration_ingress = run(
         "helm", "template", "docs", str(chart), "-f", str(override),
