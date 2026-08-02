@@ -66,17 +66,21 @@ try {
   assert.equal((await dav("HEAD")).status, 404);
 
   let aborted = 0;
+  let finishAbort;
+  const abortFinished = new Promise((resolve) => { finishAbort = resolve; });
   await page.route("**/dist/7497-7497.js*", async (route) => {
     assert.equal(chunkRequest(route.request()), true);
     aborted += 1;
-    await route.abort("failed");
+    try {
+      await route.abort("failed");
+    } finally {
+      finishAbort();
+    }
   });
-  const chunkFailure = page.waitForEvent("requestfailed", {
-    predicate: chunkRequest,
-    timeout: 30_000,
-  });
+  const exactAbortedChunk = page.waitForRequest(chunkRequest, { timeout: 30_000 });
   await initiateDocument();
-  assert.equal(chunkRequest(await chunkFailure), true);
+  assert.equal(chunkRequest(await exactAbortedChunk), true);
+  await abortFinished;
   assert.equal(aborted, 1);
   assert.equal(createPosts, 0);
   assert.equal((await dav("HEAD")).status, 404);
