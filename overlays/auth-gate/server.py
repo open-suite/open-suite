@@ -45,6 +45,11 @@ STATE_TTL = int(os.environ.get("STATE_TTL_SECONDS", "600"))
 VALIDATION_INTERVAL = int(os.environ.get("OIDC_VALIDATION_INTERVAL_SECONDS", "15"))
 REFRESH_SKEW = int(os.environ.get("OIDC_REFRESH_SKEW_SECONDS", "30"))
 
+REQUEST_ID_HEADER = "X-Open-Suite-Request-ID"
+SERVER_TIMING_HEADER = "Server-Timing"
+REQUEST_ID_PATTERN = re.compile(r"^[0-9a-f]{32}$")
+_LOG_RECORD_LOCK = threading.Lock()
+
 AUTH_ENDPOINT = f"{ISSUER}/protocol/openid-connect/auth"
 TOKEN_ENDPOINT = f"{ISSUER}/protocol/openid-connect/token"
 USERINFO_ENDPOINT = f"{ISSUER}/protocol/openid-connect/userinfo"
@@ -301,6 +306,21 @@ def single_header(handler: http.server.BaseHTTPRequestHandler, name: str) -> str
         return None
     value = values[0].strip()
     return value if value and "\r" not in value and "\n" not in value else None
+
+
+def observed_request_id(handler: http.server.BaseHTTPRequestHandler) -> str:
+    """Return one bounded correlation ID, replacing untrusted input."""
+    values = handler.headers.get_all(REQUEST_ID_HEADER, [])
+    candidate = values[0] if len(values) == 1 else ""
+    if REQUEST_ID_PATTERN.fullmatch(candidate):
+        return candidate
+    return secrets.token_hex(16)
+
+
+def emit_log_record(record: str) -> None:
+    """Write one complete physical log line under concurrent request load."""
+    with _LOG_RECORD_LOCK:
+        print(record, flush=True)
 
 
 def forwarded_request(handler: http.server.BaseHTTPRequestHandler) -> tuple[str, str, str] | None:
@@ -579,13 +599,45 @@ class Handler(http.server.BaseHTTPRequestHandler):
     server_version = "opensuite-auth-gate/1.0"
 
     def log_message(self, fmt: str, *args: object) -> None:
-        print(f"{self.address_string()} - {fmt % args}", flush=True)
+        emit_log_record(f"{self.address_string()} - {fmt % args}")
 
     def log_request(self, code: int | str = "-", size: int | str = "-") -> None:
         # Authorization codes, state and WOPI access tokens can appear in query
         # strings. Never emit them to pod logs, including on failed exchanges.
         path = urllib.parse.urlsplit(self.path).path
+        # ForwardAuth requests have their own bounded, privacy-safe decision
+        # event. Avoid logging a second line with client or request data.
+        if path == "/auth":
+            return
         self.log_message('"%s %s %s" %s %s', self.command, path, self.request_version, code, size)
+
+    def send_auth_response(
+        self,
+        status: int,
+        started_ns: int,
+        request_id: str,
+        outcome: str,
+        headers: dict[str, str] | None = None,
+    ) -> None:
+        duration_ms = max(0, time.perf_counter_ns() - started_ns) / 1_000_000
+        response_headers = dict(headers or {})
+        # These values are generated here, never accepted from branch-specific
+        # response data or copied from an unvalidated inbound header.
+        response_headers[REQUEST_ID_HEADER] = request_id
+        response_headers[SERVER_TIMING_HEADER] = f"opensuite_auth;dur={duration_ms:.1f}"
+        self.send_empty(status, response_headers)
+        emit_log_record(
+            json.dumps(
+                {
+                    "event": "auth_gate",
+                    "request_id": request_id,
+                    "outcome": outcome,
+                    "status": int(status),
+                    "duration_ms": round(duration_ms, 1),
+                },
+                separators=(",", ":"),
+            )
+        )
 
     def send_empty(self, status: int, headers: dict[str, str] | None = None) -> None:
         self.send_response(status)
@@ -593,7 +645,7 @@ class Handler(http.server.BaseHTTPRequestHandler):
             self.send_header(key, value)
         self.end_headers()
 
-    def send_preflight(self) -> None:
+    def preflight_headers(self) -> dict[str, str]:
         origin = allowed_origin(self.headers.get("Origin"))
         headers: dict[str, str] = {"Vary": "Origin"}
         if origin:
@@ -610,7 +662,10 @@ class Handler(http.server.BaseHTTPRequestHandler):
                         "Access-Control-Max-Age": "600",
                     }
                 )
-        self.send_empty(HTTPStatus.NO_CONTENT, headers)
+        return headers
+
+    def send_preflight(self) -> None:
+        self.send_empty(HTTPStatus.NO_CONTENT, self.preflight_headers())
 
     def redirect(self, location: str, headers: dict[str, str] | None = None) -> None:
         self.send_response(HTTPStatus.FOUND)
@@ -657,13 +712,23 @@ class Handler(http.server.BaseHTTPRequestHandler):
         self.send_preflight()
 
     def handle_auth(self) -> None:
+        started_ns = time.perf_counter_ns()
+        request_id = observed_request_id(self)
         if self.headers.get("Access-Control-Request-Method"):
-            self.send_preflight()
+            self.send_auth_response(
+                HTTPStatus.NO_CONTENT,
+                started_ns,
+                request_id,
+                "preflight",
+                self.preflight_headers(),
+            )
             return
 
         request = forwarded_request(self)
         if not request:
-            self.send_empty(HTTPStatus.BAD_REQUEST)
+            self.send_auth_response(
+                HTTPStatus.BAD_REQUEST, started_ns, request_id, "reject"
+            )
             return
 
         # Collabora's WOPI callbacks (CheckFileInfo, contents) and one-use
@@ -672,11 +737,15 @@ class Handler(http.server.BaseHTTPRequestHandler):
         # (wopi_allowlist). Without this pass-through document open or Insert
         # Image fails before Nextcloud can validate those credentials.
         if is_wopi_request(request):
-            self.send_empty(HTTPStatus.NO_CONTENT, {})
+            self.send_auth_response(
+                HTTPStatus.NO_CONTENT, started_ns, request_id, "allow"
+            )
             return
 
         if is_logout_callback(request):
-            self.send_empty(HTTPStatus.NO_CONTENT, {})
+            self.send_auth_response(
+                HTTPStatus.NO_CONTENT, started_ns, request_id, "allow"
+            )
             return
 
         # Service-to-service API calls behind gated ingresses pass through on a
@@ -686,8 +755,11 @@ class Handler(http.server.BaseHTTPRequestHandler):
         if authorization.lower().startswith("bearer "):
             claims = valid_bearer(authorization[7:].strip(), request[0])
             if claims:
-                self.send_empty(
+                self.send_auth_response(
                     HTTPStatus.NO_CONTENT,
+                    started_ns,
+                    request_id,
+                    "allow",
                     {
                         "X-Open-Suite-User": str(claims.get("sub", "")),
                         "X-Open-Suite-Email": str(claims.get("email", "")),
@@ -700,8 +772,11 @@ class Handler(http.server.BaseHTTPRequestHandler):
         auth_cookie = cookies.get(COOKIE_NAME).value if cookies.get(COOKIE_NAME) else None
         session = valid_session(auth_cookie)
         if session:
-            self.send_empty(
+            self.send_auth_response(
                 HTTPStatus.NO_CONTENT,
+                started_ns,
+                request_id,
+                "allow",
                 {
                     "X-Open-Suite-User": str(session.get("sub", "")),
                     "X-Open-Suite-Email": str(session.get("email", "")),
@@ -711,7 +786,13 @@ class Handler(http.server.BaseHTTPRequestHandler):
             return
 
         rd = urllib.parse.quote(request_url(request), safe="")
-        self.redirect(f"https://{AUTH_HOST}/login?rd={rd}")
+        self.send_auth_response(
+            HTTPStatus.FOUND,
+            started_ns,
+            request_id,
+            "redirect",
+            {"Location": f"https://{AUTH_HOST}/login?rd={rd}"},
+        )
 
     def handle_login(self, params: dict[str, list[str]]) -> None:
         rd = safe_redirect_target(params.get("rd", [""])[0])
