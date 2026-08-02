@@ -987,6 +987,17 @@ try {
 
           const cool = page.frames().find(f => f.url().includes("cool.html"));
           if (!cool) throw new Error("Collabora frame disappeared before Insert Image automation");
+          await cool.locator("#menu-file > a").click({ timeout: 5000 });
+          const saveMenuItem = cool.locator("#menu-file > ul > #menu-save > a");
+          await saveMenuItem.waitFor({ state: "visible", timeout: 5000 });
+          await cool.evaluate(() => {
+            JSDialog.RefreshScrollables();
+            return new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve)));
+          });
+          if (!(await saveMenuItem.isVisible()))
+            throw new Error("Collabora File menu closed during scrollable refresh");
+          ok("Collabora first File click keeps Save visible through scrollable refresh");
+          await page.keyboard.press("Escape");
           await cool.evaluate(() => {
             window.__openSuiteInsertGraphicMessages = [];
             window.addEventListener("message", event => {

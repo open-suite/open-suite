@@ -1,7 +1,12 @@
+import contextlib
 import http.client
+import io
+import json
 import os
 from pathlib import Path
+import re
 import threading
+import time
 import types
 import unittest
 import urllib.error
@@ -16,13 +21,23 @@ os.environ.setdefault("COOKIE_SECRET", "cookie-secret")
 import server  # noqa: E402
 
 
-def request(path: str, headers: dict[str, str] | None = None, method: str = "GET") -> http.client.HTTPResponse:
+def request(
+    path: str,
+    headers: dict[str, str] | list[tuple[str, str]] | None = None,
+    method: str = "GET",
+) -> http.client.HTTPResponse:
     httpd = server.http.server.ThreadingHTTPServer(("127.0.0.1", 0), server.Handler)
     thread = threading.Thread(target=httpd.serve_forever)
     thread.start()
     try:
         connection = http.client.HTTPConnection("127.0.0.1", httpd.server_port)
-        connection.request(method, path, headers=headers or {})
+        if isinstance(headers, list):
+            connection.putrequest(method, path)
+            for name, value in headers:
+                connection.putheader(name, value)
+            connection.endheaders()
+        else:
+            connection.request(method, path, headers=headers or {})
         response = connection.getresponse()
         response.read()
         return response
@@ -581,13 +596,227 @@ class DeployScriptTests(unittest.TestCase):
             "Origin",
             "Access-Control-Request-Method",
             "Access-Control-Request-Headers",
+            "X-Open-Suite-Request-ID",
         ):
             self.assertIn(f"      - {header}", middleware_stage)
+        for header in (
+            "X-Open-Suite-User",
+            "X-Open-Suite-Email",
+            "X-Open-Suite-Name",
+            "X-Open-Suite-Request-ID",
+            "Server-Timing",
+        ):
+            self.assertIn(f"      - {header}", middleware_stage)
+        self.assertNotIn("authResponseHeadersRegex", middleware_stage)
         self.assertIn('[[ "${ACTUAL_TRUST_FORWARD_HEADER}" == "false" ]]', script)
         self.assertIn(
             "{range .spec.forwardAuth.authRequestHeaders[*]}{@}", script
         )
         self.assertIn('[[ "${ACTUAL_AUTH_REQUEST_HEADERS}" == "${EXPECTED_AUTH_REQUEST_HEADERS}" ]]', script)
+        self.assertIn(
+            "{range .spec.forwardAuth.authResponseHeaders[*]}{@}", script
+        )
+        self.assertIn('[[ "${ACTUAL_AUTH_RESPONSE_HEADERS}" == "${EXPECTED_AUTH_RESPONSE_HEADERS}" ]]', script)
+
+
+class ObservabilityTests(unittest.TestCase):
+    request_id_pattern = re.compile(r"^[0-9a-f]{32}$")
+    timing_pattern = re.compile(r"^opensuite_auth;dur=(?:0|[1-9][0-9]*)(?:\.[0-9])$")
+
+    def assert_observability_headers(self, response: http.client.HTTPResponse) -> None:
+        request_ids = [
+            value
+            for name, value in response.getheaders()
+            if name.lower() == "x-open-suite-request-id"
+        ]
+        timings = [
+            value
+            for name, value in response.getheaders()
+            if name.lower() == "server-timing"
+        ]
+        self.assertEqual(len(request_ids), 1)
+        self.assertEqual(len(timings), 1)
+        self.assertRegex(request_ids[0], self.request_id_pattern)
+        self.assertRegex(timings[0], self.timing_pattern)
+
+    def test_success_redirect_and_rejection_keep_status_and_headers(self) -> None:
+        forwarded = forwarded_headers("docs.example.test", "/private?q=1")
+        success_headers = dict(forwarded)
+        success_headers["Authorization"] = "Bearer service-token"
+
+        with mock.patch.object(
+            server,
+            "valid_bearer",
+            return_value={"sub": "user-1", "email": "user@example.test", "name": "Example User"},
+        ):
+            success = request("/auth", success_headers)
+        redirect = request("/auth", forwarded)
+        rejection = request("/auth")
+
+        self.assertEqual(success.status, 204)
+        self.assertEqual(success.getheader("X-Open-Suite-User"), "user-1")
+        self.assertEqual(success.getheader("X-Open-Suite-Email"), "user@example.test")
+        self.assertEqual(success.getheader("X-Open-Suite-Name"), "Example User")
+        self.assertEqual(redirect.status, 302)
+        query = server.urllib.parse.parse_qs(
+            server.urllib.parse.urlsplit(redirect.getheader("Location")).query
+        )
+        self.assertEqual(query["rd"], ["https://docs.example.test/private?q=1"])
+        self.assertEqual(rejection.status, 400)
+        for response in (success, redirect, rejection):
+            self.assert_observability_headers(response)
+
+    def test_timing_uses_monotonic_milliseconds_with_one_decimal(self) -> None:
+        with mock.patch.object(
+            server.time,
+            "perf_counter_ns",
+            side_effect=(1_000_000_000, 1_012_340_000),
+        ):
+            response = request("/auth")
+
+        self.assertEqual(response.status, 400)
+        self.assertEqual(response.getheader("Server-Timing"), "opensuite_auth;dur=12.3")
+
+    def test_valid_request_id_is_preserved_and_invalid_values_are_replaced(self) -> None:
+        valid = "0123456789abcdef0123456789abcdef"
+        valid_response = request("/auth", {server.REQUEST_ID_HEADER: valid})
+        self.assertEqual(valid_response.getheader(server.REQUEST_ID_HEADER), valid)
+
+        for invalid in (
+            "short",
+            valid.upper(),
+            f"{valid}, {valid}",
+            f" {valid} ",
+            valid + "00",
+            "secret-token-value-that-is-not-an-id",
+        ):
+            with self.subTest(invalid=invalid):
+                response = request("/auth", {server.REQUEST_ID_HEADER: invalid})
+                generated = response.getheader(server.REQUEST_ID_HEADER)
+                self.assertRegex(generated, self.request_id_pattern)
+                self.assertNotEqual(generated, invalid)
+                self.assertNotEqual(generated, valid)
+
+    def test_duplicate_physical_request_id_headers_are_replaced(self) -> None:
+        valid = "0123456789abcdef0123456789abcdef"
+
+        with mock.patch.object(server.secrets, "token_hex", return_value="f" * 32):
+            response = request(
+                "/auth",
+                [
+                    (server.REQUEST_ID_HEADER, valid),
+                    (server.REQUEST_ID_HEADER, valid),
+                ],
+            )
+
+        self.assertEqual(response.status, 400)
+        self.assertEqual(response.getheader(server.REQUEST_ID_HEADER), "f" * 32)
+
+    def test_concurrent_log_records_remain_exact_schema_json_lines(self) -> None:
+        class YieldingStream:
+            def __init__(self) -> None:
+                self.characters: list[str] = []
+
+            def write(self, value: str) -> int:
+                for character in value:
+                    self.characters.append(character)
+                    time.sleep(0)
+                return len(value)
+
+            def flush(self) -> None:
+                return None
+
+            def getvalue(self) -> str:
+                return "".join(self.characters)
+
+        request_count = 12
+        started = threading.Barrier(request_count)
+        statuses: list[int] = []
+        failures: list[BaseException] = []
+        output = YieldingStream()
+        httpd = server.http.server.ThreadingHTTPServer(("127.0.0.1", 0), server.Handler)
+        server_thread = threading.Thread(target=httpd.serve_forever)
+
+        def worker() -> None:
+            try:
+                started.wait(timeout=5)
+                connection = http.client.HTTPConnection("127.0.0.1", httpd.server_port)
+                connection.request("GET", "/auth")
+                response = connection.getresponse()
+                response.read()
+                statuses.append(response.status)
+                connection.close()
+            except BaseException as error:
+                failures.append(error)
+
+        with contextlib.redirect_stdout(output):
+            server_thread.start()
+            try:
+                threads = [threading.Thread(target=worker) for _ in range(request_count)]
+                for thread in threads:
+                    thread.start()
+                for thread in threads:
+                    thread.join()
+            finally:
+                httpd.shutdown()
+                httpd.server_close()
+                server_thread.join()
+
+        self.assertFalse(failures)
+        self.assertEqual(statuses, [400] * request_count)
+        lines = output.getvalue().splitlines()
+        self.assertEqual(len(lines), request_count)
+        expected_keys = {"event", "request_id", "outcome", "status", "duration_ms"}
+        for line in lines:
+            event = json.loads(line)
+            self.assertEqual(set(event), expected_keys)
+            self.assertEqual(event["event"], "auth_gate")
+            self.assertRegex(event["request_id"], self.request_id_pattern)
+            self.assertEqual(event["outcome"], "reject")
+            self.assertEqual(event["status"], 400)
+            self.assertIsInstance(event["duration_ms"], float)
+
+    def test_logs_and_observability_headers_exclude_sensitive_request_data(self) -> None:
+        sentinels = (
+            "secret-bearer-token",
+            "secret-cookie-value",
+            "secret-wopi-token",
+            "nextcloud.example.test",
+            "/apps/richdocuments/wopi/files/42_instance/contents",
+        )
+        headers = forwarded_headers(
+            "nextcloud.example.test",
+            "/apps/richdocuments/wopi/files/42_instance/contents?access_token=secret-wopi-token",
+        )
+        headers.update(
+            {
+                "Authorization": "Bearer secret-bearer-token",
+                "Cookie": "opensuite_auth=secret-cookie-value",
+            }
+        )
+        output = io.StringIO()
+
+        with contextlib.redirect_stdout(output):
+            response = request("/auth", headers)
+
+        self.assertEqual(response.status, 204)
+        event = json.loads(output.getvalue().strip())
+        self.assertEqual(
+            set(event),
+            {"event", "request_id", "outcome", "status", "duration_ms"},
+        )
+        self.assertEqual(event["event"], "auth_gate")
+        self.assertEqual(event["outcome"], "allow")
+        rendered_event = json.dumps(event)
+        observability_headers = " ".join(
+            (
+                response.getheader(server.REQUEST_ID_HEADER),
+                response.getheader(server.SERVER_TIMING_HEADER),
+            )
+        )
+        for sentinel in sentinels:
+            self.assertNotIn(sentinel, rendered_event)
+            self.assertNotIn(sentinel, observability_headers)
 
 
 class PreflightTests(unittest.TestCase):
