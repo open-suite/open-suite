@@ -97,8 +97,17 @@ test("parses normal, retry, and internal-redirect upstream timing values", () =>
   ]);
 });
 
+test("preserves attempts without completed upstream headers as null", () => {
+  assert.deepEqual(parseUpstreamHeaderTime("-"), [[null]]);
+  assert.deepEqual(parseUpstreamHeaderTime("-, 0.042"), [[null, 0.042]]);
+  assert.deepEqual(parseUpstreamHeaderTime("-, 0.031 : 0.044"), [
+    [null, 0.031],
+    [0.044],
+  ]);
+});
+
 test("rejects malformed upstream timing values", () => {
-  for (const value of ["", "-", "0.1,", ": 0.1", "0.1 :", "0.1ms"]) {
+  for (const value of ["", "0.1,", ": 0.1", "0.1 :", "0.1ms", "--"]) {
     assert.throws(() => parseUpstreamHeaderTime(value));
   }
 });

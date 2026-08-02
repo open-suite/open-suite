@@ -27,15 +27,22 @@ export const parseNonNegativeNumber = (value, fallback, name) => {
 };
 
 export const parseUpstreamHeaderTime = (value) => {
+  if (typeof value !== "string") {
+    throw new Error(`invalid X-Upstream-Header-Time value: ${value}`);
+  }
+  const groups = value
+    .split(":")
+    .map((group) => group.split(",").map((entry) => entry.trim()));
   if (
-    typeof value !== "string" ||
-    !/^\d+(?:\.\d+)?(?:\s*,\s*\d+(?:\.\d+)?)*(?:\s*:\s*\d+(?:\.\d+)?(?:\s*,\s*\d+(?:\.\d+)?)*)*$/.test(value)
+    groups.some((group) =>
+      group.some((entry) => !/^(?:-|\d+(?:\.\d+)?)$/.test(entry)),
+    )
   ) {
     throw new Error(`invalid X-Upstream-Header-Time value: ${value}`);
   }
-  return value
-    .split(":")
-    .map((group) => group.split(",").map((entry) => Number(entry.trim())));
+  return groups.map((group) =>
+    group.map((entry) => (entry === "-" ? null : Number(entry))),
+  );
 };
 
 export const assertSingleUpstreamHeaderTime = (headers) => {

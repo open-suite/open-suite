@@ -120,12 +120,15 @@ Protocol:
 - For Portal, Docs, Grist, Nextcloud and Messages, the shared sidecar emits one
   `X-Upstream-Header-Time` field. Its value is normally one numeric duration in
   seconds; retries are comma-separated and internal redirects separate groups
-  with a colon (for example `0.123, 0.456 : 0.789`). The benchmark validates
-  this grammar and requires exactly one field on each measured main-document
-  response from a covered sidecar app using Playwright's raw response-header
-  array. This is automation/CDP observability, not an API for cross-origin page
-  JavaScript; the header is not CORS-exposed and the benchmark must not broaden
-  CORS to read it.
+  with a colon (for example `0.123, 0.456 : 0.789`). An entry can be `-` when
+  that attempt did not complete its upstream response headers, including valid
+  sequences such as `-, 0.042` and `-, 0.031 : 0.044`; the parser preserves
+  those entries explicitly as `null` rather than treating them as malformed.
+  The benchmark validates this grammar and requires exactly one field on each
+  measured main-document response from a covered sidecar app using Playwright's
+  raw response-header array. This is automation/CDP observability, not an API
+  for cross-origin page JavaScript; the header is not CORS-exposed and the
+  benchmark must not broaden CORS to read it.
 - Raw JSON and cluster snapshots are local artifacts. Summaries and anomalous
   discarded attempts are committed here.
 
