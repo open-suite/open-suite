@@ -12,7 +12,7 @@ docker run --rm --pull=never --entrypoint cat "${image}" \
   > "${tmp}/files-init-opensuite-tp2.js"
 node --check "${tmp}/files-init-opensuite-tp2.js"
 test "$(sha256sum "${tmp}/files-init-opensuite-tp2.js" | cut -d ' ' -f 1)" \
-  = acfadb5f2529f25b6c121b04609499cba0ed516a59b557349c65316c1499698a
+  = 3a2afc0ea1650d1073b14284e27d772a7709c028f1a1a724e041c4f863c3e7d7
 grep -Fq 'sourceMappingURL=files-init-opensuite-tp2.js.map?v=' \
   "${tmp}/files-init-opensuite-tp2.js"
 

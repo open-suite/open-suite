@@ -52,8 +52,9 @@ require_literal "${template_picker_patch}" "const TEMPLATE_PICKER_MAP_FILE = '74
 require_literal "${template_picker_patch}" "const TEMPLATE_PICKER_RUNTIME_URL = '7497-7497.js?v=94a5bd32402d33b444dc';"
 require_literal "${template_picker_patch}" "str_ends_with(\$source, 'apps/files/src/views/TemplatePicker.vue')"
 require_literal "${template_picker_patch}" "throw new RuntimeException('expected exactly one physical NC34 TemplatePicker source map');"
-require_literal "${template_picker_patch}" "const PATCHED_BUNDLE_SHA256 = 'acfadb5f2529f25b6c121b04609499cba0ed516a59b557349c65316c1499698a';"
+require_literal "${template_picker_patch}" "const PATCHED_BUNDLE_SHA256 = '3a2afc0ea1650d1073b14284e27d772a7709c028f1a1a724e041c4f863c3e7d7';"
 require_literal "${template_picker_patch}" 'opensuiteTemplatePickerLoader=()=>Promise.all([t.e(4208),t.e(7497)]).then(t.bind(t,27497))'
+require_literal "${template_picker_patch}" ';let tn=null;const opensuiteTemplatePickerLoader='
 require_literal "${template_picker_patch}" 'tn||=opensuiteTemplatePickerLoader()'
 require_literal "${template_picker_patch}" 'const{default:i}=await tn;if(!nn)'
 require_literal "${template_picker_patch}" "const NEW_CONTROLLER = \"\\t\\tUtil::addInitScript('files', 'init-opensuite-tp2');\";"

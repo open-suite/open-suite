@@ -10,7 +10,7 @@ const TEMPLATE_PICKER_CHUNK_MAP_SHA256 = 'fdce7694964d98df40e135d37a26d92d3d7a2e
 const TEMPLATE_PICKER_MAP_FILE = '7497-7497.js?v=4c13f30ae7ab10413c2e';
 const TEMPLATE_PICKER_RUNTIME_URL = '7497-7497.js?v=94a5bd32402d33b444dc';
 const VIEW_CONTROLLER_SHA256 = '809cb4156b66c9460ca20137ca3b8768ea241c2968e2accd5f72a4417eb82c79';
-const PATCHED_BUNDLE_SHA256 = 'acfadb5f2529f25b6c121b04609499cba0ed516a59b557349c65316c1499698a';
+const PATCHED_BUNDLE_SHA256 = '3a2afc0ea1650d1073b14284e27d772a7709c028f1a1a724e041c4f863c3e7d7';
 
 const OLD_IMPORT = "import Vue, { defineAsyncComponent } from 'vue';";
 const NEW_IMPORT = "import Vue from 'vue';";
@@ -81,8 +81,8 @@ async function getTemplatePicker(context) {
 }
 SOURCE;
 
-const OLD_BUNDLE = 'tn=(0,x.$V)(()=>Promise.all([t.e(4208),t.e(7497)]).then(t.bind(t,27497)));let nn=null;';
-const NEW_BUNDLE = 'tn=null,opensuiteTemplatePickerLoader=()=>Promise.all([t.e(4208),t.e(7497)]).then(t.bind(t,27497));let nn=null;';
+const OLD_BUNDLE = ',tn=(0,x.$V)(()=>Promise.all([t.e(4208),t.e(7497)]).then(t.bind(t,27497)));let nn=null;';
+const NEW_BUNDLE = ';let tn=null;const opensuiteTemplatePickerLoader=()=>Promise.all([t.e(4208),t.e(7497)]).then(t.bind(t,27497));let nn=null;';
 const OLD_FACTORY = 'const n=async function(e){if(null===nn){const s=document.createElement("div");s.id="template-picker",document.body.appendChild(s),nn=new x.Ay({render:s=>s(tn,{ref:"picker",props:{parent:e}}),methods:{open(...e){this.$refs.picker.open(...e)}},el:s})}return nn}(s)';
 const NEW_FACTORY = 'const n=async function(e){tn||=Promise.all([t.e(4208),t.e(7497)]).then(t.bind(t,27497));const{default:i}=await tn;if(!nn){const s=document.createElement("div");s.id="template-picker",document.body.append(s),nn=new x.Ay({render:s=>s(i,{ref:"picker",props:{parent:e}}),methods:{open(...e){this.$refs.picker.open(...e)}},el:s})}return nn}(s)';
 const OLD_CONTROLLER = "\t\tUtil::addInitScript('files', 'init');";
