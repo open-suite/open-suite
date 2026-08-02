@@ -143,13 +143,33 @@ probe_apex_redirect() {
 }
 
 probe_networking() {
-  local ns
+  local ns component policy selector destination_namespace destination_component port
   kubectl -n kube-system get cm coredns-custom >/dev/null 2>&1 || { echo 0; return; }
   for ns in mb-keycloak mb-grist mb-element mb-collabora mb-nextcloud \
-            mb-livekit mb-meet mb-docs mb-bureaublad; do
+            mb-livekit mb-meet mb-docs mb-messages mb-bureaublad; do
     kubectl -n "${ns}" get networkpolicy allow-egress-traefik >/dev/null 2>&1 \
       || { echo 0; return; }
   done
+  while read -r ns component; do
+    policy="allow-egress-keycloak-backchannel"
+    selector="$(kubectl -n "${ns}" get networkpolicy "${policy}" \
+      -o jsonpath='{.spec.podSelector.matchLabels.app\.kubernetes\.io/component}' 2>/dev/null)"
+    destination_namespace="$(kubectl -n "${ns}" get networkpolicy "${policy}" \
+      -o jsonpath='{.spec.egress[0].to[0].namespaceSelector.matchLabels.kubernetes\.io/metadata\.name}' 2>/dev/null)"
+    destination_component="$(kubectl -n "${ns}" get networkpolicy "${policy}" \
+      -o jsonpath='{.spec.egress[0].to[0].podSelector.matchLabels.app\.kubernetes\.io/component}' 2>/dev/null)"
+    port="$(kubectl -n "${ns}" get networkpolicy "${policy}" \
+      -o jsonpath='{.spec.egress[0].ports[0].port}' 2>/dev/null)"
+    [ "${selector}" = "${component}" ] \
+      && [ "${destination_namespace}" = "mb-keycloak" ] \
+      && [ "${destination_component}" = "keycloak" ] \
+      && [ "${port}" = "8080" ] || { echo 0; return; }
+  done <<'EOF'
+mb-bureaublad bureaublad-backend
+mb-docs backend
+mb-meet meet-backend
+mb-messages backend
+EOF
   echo 1
 }
 
@@ -231,11 +251,42 @@ OPEN_SUITE_DEMO_ADMIN_USERNAME="$(cat /etc/mijnbureau/demo-admin-username 2>/dev
 export OPEN_SUITE_DEMO_MODE OPEN_SUITE_DEMO_USERNAME OPEN_SUITE_DEMO_PASSWORD
 export OPEN_SUITE_DEMO_ADMIN_USERNAME
 export OPEN_SUITE_PUBLIC_IP="${OPEN_SUITE_PUBLIC_IP:-$(expected_public_ip)}"
+
+capture_docs_workload_logs() {
+  local step="$1" component pod
+  [ -n "${OPEN_SUITE_CONVERGENCE_LOG_DIR:-}" ] || return 0
+
+  for component in backend y-provider; do
+    kubectl logs -n mb-docs "deployment/docs-${component}" \
+      --all-pods=true --all-containers --prefix --tail=500 \
+      >"${OPEN_SUITE_CONVERGENCE_LOG_DIR}/${step}-docs-${component}.log" 2>&1 || true
+    kubectl get pods -n mb-docs \
+      -l "app.kubernetes.io/component=${component},app.kubernetes.io/instance=docs" \
+      -o name 2>/dev/null | while read -r pod; do
+        [ -n "${pod}" ] || continue
+        kubectl logs -n mb-docs "${pod}" --all-containers --prefix --tail=500 --previous \
+          >"${OPEN_SUITE_CONVERGENCE_LOG_DIR}/${step}-${pod#pod/}.previous.log" 2>&1 || true
+      done
+  done
+}
+
 HEAL_FAILED=""
 for step in 02-networking 03-restart-oidc-apps 04-nextcloud-office \
             08-open-suite-portal 09-portal-header 10-keycloak-login 12-auth-gate; do
   echo "  -> ${step}"
-  bash "${DIR}/${step}.sh" >/dev/null 2>&1 || HEAL_FAILED="${HEAL_FAILED} ${step}"
+  step_rc=0
+  if [ -n "${OPEN_SUITE_CONVERGENCE_LOG_DIR:-}" ]; then
+    install -d -m 0755 "${OPEN_SUITE_CONVERGENCE_LOG_DIR}"
+    bash "${DIR}/${step}.sh" \
+      >"${OPEN_SUITE_CONVERGENCE_LOG_DIR}/${step}.log" 2>&1 \
+      || step_rc=$?
+  else
+    bash "${DIR}/${step}.sh" >/dev/null 2>&1 || step_rc=$?
+  fi
+  if [ "${step_rc}" -ne 0 ]; then
+    HEAL_FAILED="${HEAL_FAILED} ${step}"
+    capture_docs_workload_logs "${step}"
+  fi
 done
 
 echo "== 5/5 final snapshot =="

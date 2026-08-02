@@ -6,6 +6,8 @@ on:
     paths:
       - .github/workflows/fresh-install.yaml
       - ci/fresh-install.sh
+      - ci/smoke/authenticated.mjs
+      - ci/smoke/smoke.sh
       - deploy.sh
       - helmfile/**
       - overlays/**
@@ -32,20 +34,32 @@ jobs:
     timeout-minutes: 300
     steps:
       - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
 
       - name: Install host prerequisites
         run: |
           sudo apt-get update -qq
           sudo apt-get install -y -qq gettext-base
 
+      - name: Install pinned browser for Docs persistence smoke
+        env:
+          PLAYWRIGHT_BROWSERS_PATH: ${{ runner.temp }}/ms-playwright
+        run: |
+          npm i --no-save playwright@1.55.1
+          npx playwright install --with-deps chromium
+
       - name: Deploy the complete stack twice and verify convergence
         env:
           FRESH_INSTALL_ARTIFACT_DIR: ${{ runner.temp }}/opensuite-fresh-install
+          PLAYWRIGHT_BROWSERS_PATH: ${{ runner.temp }}/ms-playwright
         run: |
           sudo env \
             "PATH=$PATH" \
             "GITHUB_STEP_SUMMARY=$GITHUB_STEP_SUMMARY" \
             "FRESH_INSTALL_ARTIFACT_DIR=$FRESH_INSTALL_ARTIFACT_DIR" \
+            "PLAYWRIGHT_BROWSERS_PATH=$PLAYWRIGHT_BROWSERS_PATH" \
             bash ci/fresh-install.sh run
 
       - name: Upload measurements and failure diagnostics

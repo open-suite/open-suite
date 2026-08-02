@@ -210,12 +210,14 @@ collect_diagnostics() {
   } > "${diagnostics}/host-network.txt" 2>&1
 
   while read -r namespace resource; do
-    kubectl logs -n "${namespace}" "${resource}" --all-containers --prefix --tail=500 \
+    kubectl logs -n "${namespace}" "${resource}" --all-pods=true --all-containers --prefix --tail=500 \
       > "${diagnostics}/pod-logs/${namespace}_${resource//\//_}.log" 2>&1
   done <<'LOG_TARGETS'
 kube-system deployment/traefik
 mb-bureaublad deployment/opensuite-auth-gate
 mb-keycloak statefulset/keycloak-keycloak
+mb-docs deployment/docs-backend
+mb-docs deployment/docs-y-provider
 mb-messages deployment/messages-frontend
 mb-messages deployment/messages-backend
 LOG_TARGETS
@@ -360,6 +362,65 @@ assert_complete_stack() {
   kubectl get deployment,statefulset -A -o wide
 }
 
+provision_docs_smoke_user() {
+  kubectl -n mb-docs exec -i deployment/docs-backend -- python manage.py shell <<'PY'
+from django.db import transaction
+
+from core.models import User
+
+email = "johndoe@example.com"
+with transaction.atomic():
+    if User.objects.filter(email__iexact=email).exists():
+        raise RuntimeError("refusing to reuse an existing Docs smoke user")
+    user = User(
+        email=email,
+        full_name="John Doe",
+        short_name="John",
+        is_staff=False,
+        is_superuser=False,
+    )
+    user.set_unusable_password()
+    user.save()
+PY
+}
+
+cleanup_docs_smoke_user() {
+  kubectl -n mb-docs exec -i deployment/docs-backend -- python manage.py shell <<'PY'
+from django.db import transaction
+
+from core.models import Document, User
+
+email = "johndoe@example.com"
+with transaction.atomic():
+    user = User.objects.get(email__iexact=email)
+    Document.objects.filter(creator=user).delete()
+    user.delete()
+PY
+}
+
+wait_for_docs_oidc_token_endpoint() {
+  local attempt
+  for attempt in $(seq 1 24); do
+    if kubectl -n mb-docs exec deployment/docs-backend -- python -c '
+import requests
+
+response = requests.post(
+    "http://keycloak-keycloak.mb-keycloak:80/realms/mijnbureau/protocol/openid-connect/token",
+    data={"grant_type": "client_credentials", "client_id": "opensuite-readiness-probe"},
+    timeout=5,
+)
+raise SystemExit(0 if 400 <= response.status_code < 500 else 1)
+' >/dev/null 2>&1; then
+      echo "ok   Docs can reach the internal Keycloak token endpoint"
+      return 0
+    fi
+    echo "Docs internal Keycloak token endpoint not ready (${attempt}/24); retrying in 5 seconds"
+    sleep 5
+  done
+  echo "ERROR: Docs cannot reach the internal Keycloak token endpoint" >&2
+  return 1
+}
+
 assert_deck_calendar_default() {
   local value
   value="$(kubectl -n mb-nextcloud exec deploy/nextcloud -c nextcloud -- \
@@ -409,13 +470,36 @@ assert_docs_missing_static_asset_not_immutable() {
 }
 
 local_conformance() {
-  local label="$1"
+  local label="$1" smoke_rc=0 cleanup_rc=0
   wait_for_cluster "${label}"
   assert_k3s_admin_kubeconfig_permissions
   assert_complete_stack
   assert_docs_missing_static_asset_not_immutable
   assert_deck_calendar_default
-  SMOKE_INSECURE=1 bash "${REPO}/ci/smoke/smoke.sh" "${DOMAIN}"
+  SMOKE_INSECURE=1 SMOKE_DOCS_COLLABORATION_BOUNDARY=1 \
+    bash "${REPO}/ci/smoke/smoke.sh" "${DOMAIN}"
+
+  if [ "${label}" = "final" ]; then
+    # Use the fresh install's generated test-user credentials without placing
+    # either value on the command line or in output. The smoke owns and removes
+    # its uniquely named document after the final raw Helmfile convergence.
+    wait_for_docs_oidc_token_endpoint
+    provision_docs_smoke_user
+    SMOKE_DOMAIN="${DOMAIN}" \
+      SMOKE_USER="$(cat /etc/mijnbureau/demo-username)" \
+      SMOKE_PASS="$(cat /etc/mijnbureau/demo-password)" \
+      SMOKE_INSECURE=1 \
+      SMOKE_DOCS_TITLE_ONLY=1 \
+      SMOKE_DIAGNOSTICS_PATH="${ARTIFACT_DIR}/docs-title-browser-diagnostics.jsonl" \
+      node "${REPO}/ci/smoke/authenticated.mjs" || smoke_rc=$?
+    cleanup_docs_smoke_user || cleanup_rc=$?
+    if [ "${smoke_rc}" -ne 0 ]; then
+      return "${smoke_rc}"
+    fi
+    if [ "${cleanup_rc}" -ne 0 ]; then
+      return "${cleanup_rc}"
+    fi
+  fi
 }
 
 run_bounded() {
@@ -466,7 +550,8 @@ run_full_test() {
   local_conformance second-deploy
 
   # Then exercise a raw Helmfile re-apply and verify procedural state heals.
-  run_bounded helmfile-convergence 40m "${REPO}/ci/convergence-check.sh"
+  OPEN_SUITE_CONVERGENCE_LOG_DIR="${ARTIFACT_DIR}/convergence-step-logs" \
+    run_bounded helmfile-convergence 40m "${REPO}/ci/convergence-check.sh"
   set_phase final-conformance
   bash "${REPO}/ci/test-selfsigned-tls.sh" /root/mijn-bureau-infra "${DOMAIN}" \
     "${ARTIFACT_DIR}/selfsigned-tls-fingerprints.sha256"

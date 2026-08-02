@@ -146,6 +146,26 @@ def validate_values_source(infra):
     )[0]
     assert 'add_header Cache-Control "no-cache";' in shared_header_location
 
+    backend_values = root_section(source, "backend")
+    assert 'COLLABORATION_API_URL: "http://docs-y-provider:80/collaboration/api/"' in backend_values
+    # v5.2.1 declares this setting as an untyped values.Value. Supplying the
+    # redundant environment override turns 120 into a string, which Redis
+    # rejects as its PX expiry; omitting it preserves the integer default.
+    assert "NO_WEBSOCKET_CACHE_TIMEOUT:" not in backend_values
+
+    # The backend calls this machine-to-machine endpoint with the y-provider's
+    # own Authorization secret. Sending it through the browser auth gate makes
+    # requests follow the OIDC redirect and receive HTML instead of JSON.
+    collaboration_api = root_section(source, "ingressCollaborationApi")
+    assert (
+        "traefik.ingress.kubernetes.io/router.middlewares: "
+        "'{{ .Release.Namespace }}-hsts-header@kubernetescrd'"
+    ) in collaboration_api
+    assert "opensuite-auth-gate" not in collaboration_api
+
+    browser_ingress = root_section(source, "ingress")
+    assert "opensuite-auth-gate" in browser_ingress
+
 
 def validate_infra_dependencies(infra):
     source = (infra / "helmfile/apps/docs/helmfile-child.yaml.gotmpl").read_text()
@@ -187,6 +207,7 @@ def validate_rendered_chart(infra, scratch):
             DB_PASSWORD: app-password
             DJANGO_SECRET_KEY: django-secret
             REDIS_URL: redis://docs-redis:6379
+            COLLABORATION_API_URL: http://docs-y-provider:80/collaboration/api/
           migrateDbCredentials:
             DB_USER: postgres
             DB_PASSWORD: admin-password
@@ -195,16 +216,44 @@ def validate_rendered_chart(infra, scratch):
             fileContent: '{}'
         """
     ).rstrip()
+    values["yProvider"] += textwrap.dedent(
+        """
+
+          service:
+            ports:
+              http: 80
+        """
+    ).rstrip()
     override.write_text(
-        "cluster:\n  ingress:\n    type: nginx\n" +
-        "\n".join(f"{name}:\n{textwrap.indent(value, '  ')}\n" for name, value in values.items())
+        textwrap.dedent(
+            """
+            cluster:
+              routingMode: ingress
+              ingress:
+                type: traefik
+            ingress:
+              enabled: true
+              hostname: docs.example.test
+              annotations:
+                traefik.ingress.kubernetes.io/router.middlewares: mb-docs-hsts-header@kubernetescrd,mb-bureaublad-opensuite-auth-gate@kubernetescrd
+            ingressCollaborationApi:
+              enabled: true
+              hostname: docs.example.test
+              path: /collaboration/api/
+              annotations:
+                traefik.ingress.kubernetes.io/router.middlewares: mb-docs-hsts-header@kubernetescrd
+            """
+        ).lstrip()
+        + "\n".join(f"{name}:\n{textwrap.indent(value, '  ')}\n" for name, value in values.items())
     )
 
+    rendered_deployments = {}
     for component, expected in EXPECTED_PROBES.items():
         rendered = run(
             "helm", "template", "docs", str(chart), "-f", str(override),
             "--show-only", expected["template"],
         )
+        rendered_deployments[component] = rendered
         assert_probe(
             yaml_block(rendered, "startupProbe"),
             path=expected["startup_path"], delay=0,
@@ -224,6 +273,59 @@ def validate_rendered_chart(infra, scratch):
             path=expected["startup_path"], delay=10, period=10, timeout=5,
             failures=3,
         )
+
+    backend_deployment = rendered_deployments["backend"]
+    collaboration_api_url = re.search(
+        r'(?m)^\s*- name:\s*"?COLLABORATION_API_URL"?\s*\n'
+        r'\s*value:\s*([^\s#]+)',
+        backend_deployment,
+    )
+    assert collaboration_api_url
+    assert collaboration_api_url.group(1).strip('"') == (
+        "http://docs-y-provider:80/collaboration/api/"
+    )
+    assert "NO_WEBSOCKET_CACHE_TIMEOUT" not in backend_deployment
+
+    y_provider_service = run(
+        "helm", "template", "docs", str(chart), "-f", str(override),
+        "--show-only", "templates/yprovider-service.yaml",
+    )
+    service_port = re.search(
+        r"(?ms)^\s*ports:\s*$.*?^\s*- name:\s*http\s*$"
+        r".*?^\s*port:\s*(\d+)\s*$.*?^\s*targetPort:\s*(\d+)\s*$",
+        y_provider_service,
+    )
+    assert service_port and service_port.groups() == ("80", "4444")
+
+    collaboration_ingress = run(
+        "helm", "template", "docs", str(chart), "-f", str(override),
+        "--namespace", "mb-docs",
+        "--show-only", "templates/ingress-collaboration-api.yaml",
+    )
+    assert re.search(r"(?m)^\s*- host:\s+docs\.example\.test\s*$", collaboration_ingress)
+    assert re.search(
+        r"(?ms)^\s*- path:\s+/collaboration/api/\s*$.*?"
+        r"^\s+name:\s+docs-y-provider\s*$.*?^\s+name:\s+http\s*$",
+        collaboration_ingress,
+    )
+    collaboration_annotations = yaml_block(collaboration_ingress, "annotations")
+    assert "mb-docs-hsts-header@kubernetescrd" in collaboration_annotations
+    assert "opensuite-auth-gate" not in collaboration_annotations
+
+    browser_ingress = run(
+        "helm", "template", "docs", str(chart), "-f", str(override),
+        "--namespace", "mb-docs",
+        "--show-only", "templates/ingress.yaml",
+    )
+    assert re.search(r"(?m)^\s*- host:\s+docs\.example\.test\s*$", browser_ingress)
+    assert re.search(
+        r"(?ms)^\s*- path:\s+/\s*$.*?"
+        r"^\s+name:\s+docs-frontend\s*$.*?^\s+name:\s+http\s*$",
+        browser_ingress,
+    )
+    browser_annotations = yaml_block(browser_ingress, "annotations")
+    assert "mb-docs-hsts-header@kubernetescrd" in browser_annotations
+    assert "mb-bureaublad-opensuite-auth-gate@kubernetescrd" in browser_annotations
 
     rendered_jobs = run(
         "helm", "template", "docs", str(chart), "-f", str(override),

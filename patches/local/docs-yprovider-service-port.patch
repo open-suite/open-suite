@@ -1,8 +1,26 @@
 diff --git a/helmfile/apps/docs/values.yaml.gotmpl b/helmfile/apps/docs/values.yaml.gotmpl
-index ce4df2c..8cb3003 100644
+index ce4df2c..f45a7a1 100644
 --- a/helmfile/apps/docs/values.yaml.gotmpl
 +++ b/helmfile/apps/docs/values.yaml.gotmpl
-@@ -199,7 +199,7 @@ backend:
+@@ -117,7 +117,7 @@ backend:
+     API_USERS_LIST_THROTTLE_RATE_BURST: "30/minute"
+     API_USERS_LIST_THROTTLE_RATE_SUSTAINED: "180/hour"
+     CACHES_DEFAULT_TIMEOUT: "30"
+-    COLLABORATION_API_URL: {{ printf "http%s://%s%s" $sslPostfix $hostname "/collaboration/api/" | quote }}
++    COLLABORATION_API_URL: "http://docs-y-provider:80/collaboration/api/"
+     COLLABORATION_SERVER_SECRET: {{ .Values.application.docs.collaboration.secret | quote }}
+     COLLABORATION_WS_URL: {{ printf "ws%s://%s%s" $sslPostfix $hostname "/collaboration/ws/" | quote }}
+     COLLABORATION_WS_NOT_CONNECTED_READY_ONLY: "true"
+@@ -170,8 +170,7 @@ backend:
+     LOGOUT_REDIRECT_URL: {{ $baseUrl | quote }}
+     MALWARE_DETECTION_BACKEND: "lasuite.malware_detection.backends.dummy.DummyBackend"
+     MALWARE_DETECTION_PARAMETERS: '{"callback_path": "core.malware_detection.malware_detection_callback",}'
+     MEDIA_BASE_URL: {{ $baseUrl | quote }}
+-    NO_WEBSOCKET_CACHE_TIMEOUT: "120"
+     OIDC_ALLOW_DUPLICATE_EMAILS: "false"
+     OIDC_AUTH_REQUEST_EXTRA_PARAMS: "{}"
+     OIDC_CREATE_USER: "false"
+@@ -199,7 +198,7 @@ backend:
      THEME_CUSTOMIZATION_CACHE_TIMEOUT: "86400"
      THEME_CUSTOMIZATION_FILE_PATH: ""
      USER_OIDC_ESSENTIAL_CLAIMS: ""
@@ -11,7 +29,7 @@ index ce4df2c..8cb3003 100644
      Y_PROVIDER_API_KEY: {{ .Values.application.docs.yProvider.key | quote }}
    themeCustomization:
      enabled: true
-@@ -433,6 +433,12 @@ docspec:
+@@ -433,6 +432,12 @@ docspec:
      hpa: {{ .Values.autoscaling.horizontal.docs.docspec | toYaml | nindent 6 }}
  
  yProvider:
