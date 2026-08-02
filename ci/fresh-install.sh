@@ -396,6 +396,29 @@ with transaction.atomic():
 PY
 }
 
+wait_for_docs_oidc_token_endpoint() {
+  local attempt
+  for attempt in $(seq 1 24); do
+    if kubectl -n mb-docs exec deployment/docs-backend -- python -c '
+import requests
+
+response = requests.post(
+    "http://keycloak-keycloak.mb-keycloak:80/realms/mijnbureau/protocol/openid-connect/token",
+    data={"grant_type": "client_credentials", "client_id": "opensuite-readiness-probe"},
+    timeout=5,
+)
+raise SystemExit(0 if 400 <= response.status_code < 500 else 1)
+' >/dev/null 2>&1; then
+      echo "ok   Docs can reach the internal Keycloak token endpoint"
+      return 0
+    fi
+    echo "Docs internal Keycloak token endpoint not ready (${attempt}/24); retrying in 5 seconds"
+    sleep 5
+  done
+  echo "ERROR: Docs cannot reach the internal Keycloak token endpoint" >&2
+  return 1
+}
+
 assert_deck_calendar_default() {
   local value
   value="$(kubectl -n mb-nextcloud exec deploy/nextcloud -c nextcloud -- \
@@ -430,6 +453,7 @@ local_conformance() {
     # Use the fresh install's generated test-user credentials without placing
     # either value on the command line or in output. The smoke owns and removes
     # its uniquely named document after the final raw Helmfile convergence.
+    wait_for_docs_oidc_token_endpoint
     provision_docs_smoke_user
     SMOKE_DOMAIN="${DOMAIN}" \
       SMOKE_USER="$(cat /etc/mijnbureau/demo-username)" \
