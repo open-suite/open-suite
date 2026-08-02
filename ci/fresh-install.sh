@@ -396,9 +396,20 @@ with transaction.atomic():
 PY
 }
 
+assert_k3s_admin_kubeconfig_permissions() {
+  local ownership
+  ownership="$(stat -c '%a %U %G' /etc/rancher/k3s/k3s.yaml)"
+  if [ "${ownership}" != "600 root root" ]; then
+    echo "ERROR: k3s system:admin kubeconfig must be mode 600 and owned by root:root; got ${ownership}" >&2
+    return 1
+  fi
+  echo "ok   k3s system:admin kubeconfig is root-only"
+}
+
 local_conformance() {
   local label="$1" smoke_rc=0 cleanup_rc=0
   wait_for_cluster "${label}"
+  assert_k3s_admin_kubeconfig_permissions
   assert_complete_stack
   SMOKE_INSECURE=1 SMOKE_DOCS_COLLABORATION_BOUNDARY=1 \
     bash "${REPO}/ci/smoke/smoke.sh" "${DOMAIN}"
