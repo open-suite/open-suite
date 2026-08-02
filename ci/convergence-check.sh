@@ -96,6 +96,13 @@ probe_collabora_image() {
     && echo 1 || echo 0
 }
 
+probe_deck_calendar_default() {
+  local value
+  value="$(kubectl -n mb-nextcloud exec deploy/nextcloud -c nextcloud -- \
+    sh -c 'cd /var/www/html && php occ config:app:get deck calendar' 2>/dev/null)"
+  [ "${value}" = "no" ] && echo 1 || echo 0
+}
+
 expected_public_ip() {
   if [ -n "${OPEN_SUITE_PUBLIC_IP:-}" ]; then
     printf '%s' "${OPEN_SUITE_PUBLIC_IP}"
@@ -155,6 +162,7 @@ PROBES=(
   portal_images
   nextcloud_image
   collabora_image
+  deck_calendar_default
   livekit_public_ip
   auth_gate
   apex_redirect

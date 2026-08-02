@@ -23,6 +23,15 @@ for app in calendar deck contacts; do
     sh -c "cd /var/www/html && (php occ app:install $app || php occ app:enable $app)"
 done
 
+# Deck exposes every board as a virtual CalDAV calendar by default. Open Suite
+# keeps that projection default-off unless explicit per-user/per-board choices
+# enable it. This preserves Deck and its boards/cards while avoiding a DAV
+# REPORT per projected board whenever Calendar loads. App config is persistent,
+# and setting the same default on every deploy makes fresh installs and upgrades
+# converge safely without rewriting user preferences.
+kubectl -n mb-nextcloud exec deploy/nextcloud -c nextcloud -- \
+  sh -c "cd /var/www/html && php occ config:app:set deck calendar --value=no"
+
 # meetcal ships in the image (synced onto custom_apps by an entrypoint hook)
 # and the chart's post-install occ enable races that sync on a FRESH install —
 # the files don't exist yet, the enable no-ops, and the app sits disabled.
