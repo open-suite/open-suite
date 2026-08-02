@@ -17,7 +17,7 @@ EXPECTED_AUTH_GATE_IMAGE="${AUTH_GATE_IMAGE:-ghcr.io/open-suite/auth-gate:sha-31
 EXPECTED_PORTAL_REF="${PORTAL_REF:-1870c55ca0fbf2f5aa2bf50ad4c9c67dbbfcfab1}"
 EXPECTED_PORTAL_TAG="sha-${EXPECTED_PORTAL_REF:0:7}"
 EXPECTED_NEXTCLOUD_TAG="${NEXTCLOUD_TAG:-sha-693c013}"
-EXPECTED_COLLABORA_TAG="${COLLABORA_TAG:-sha-6cbf822}"
+EXPECTED_COLLABORA_TAG="${COLLABORA_TAG:-sha-8a7faae}"
 source "${REPO}/scripts/lib/state.sh"
 
 MASTER_PASSWORD="$(opensuite_read_master_password)" || exit 2
