@@ -522,7 +522,8 @@ run_full_test() {
   local_conformance second-deploy
 
   # Then exercise a raw Helmfile re-apply and verify procedural state heals.
-  run_bounded helmfile-convergence 40m "${REPO}/ci/convergence-check.sh"
+  OPEN_SUITE_CONVERGENCE_LOG_DIR="${ARTIFACT_DIR}/convergence-step-logs" \
+    run_bounded helmfile-convergence 40m "${REPO}/ci/convergence-check.sh"
   set_phase final-conformance
   bash "${REPO}/ci/test-selfsigned-tls.sh" /root/mijn-bureau-infra "${DOMAIN}" \
     "${ARTIFACT_DIR}/selfsigned-tls-fingerprints.sha256"

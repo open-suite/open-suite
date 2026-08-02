@@ -255,7 +255,15 @@ HEAL_FAILED=""
 for step in 02-networking 03-restart-oidc-apps 04-nextcloud-office \
             08-open-suite-portal 09-portal-header 10-keycloak-login 12-auth-gate; do
   echo "  -> ${step}"
-  bash "${DIR}/${step}.sh" >/dev/null 2>&1 || HEAL_FAILED="${HEAL_FAILED} ${step}"
+  if [ -n "${OPEN_SUITE_CONVERGENCE_LOG_DIR:-}" ]; then
+    install -d -m 0755 "${OPEN_SUITE_CONVERGENCE_LOG_DIR}"
+    bash "${DIR}/${step}.sh" \
+      >"${OPEN_SUITE_CONVERGENCE_LOG_DIR}/${step}.log" 2>&1 \
+      || HEAL_FAILED="${HEAL_FAILED} ${step}"
+  else
+    bash "${DIR}/${step}.sh" >/dev/null 2>&1 \
+      || HEAL_FAILED="${HEAL_FAILED} ${step}"
+  fi
 done
 
 echo "== 5/5 final snapshot =="
