@@ -119,8 +119,8 @@ function transformBundle(string $bundle): string {
 	requireCount($candidate, NEW_BUNDLE, 1, 'patched TemplatePicker loader');
 	requireCount($candidate, NEW_FACTORY, 1, 'patched TemplatePicker factory');
 	$candidate = str_replace(
-		'tn||=Promise.all([t.e(4208),t.e(7497)]).then(t.bind(t,27497))',
-		'tn||=opensuiteTemplatePickerLoader()',
+		'tn||=Promise.all([t.e(4208),t.e(7497)]).then(t.bind(t,27497));const{default:i}=await tn',
+		'tn||=opensuiteTemplatePickerLoader();const{default:i}=await tn',
 		$candidate,
 	);
 	requireCount($candidate, 'tn||=opensuiteTemplatePickerLoader();const{default:i}=await tn;if(!nn)', 1, 'cached lazy import readiness before wrapper construction');
@@ -216,8 +216,8 @@ if (file_put_contents($temporaryPath, transformBundle(readFileStrict($bundlePath
 		|| !rename($temporaryPath, $patchedPath)) {
 	throw new RuntimeException('could not atomically publish patched TemplatePicker bundle');
 }
-if (hash_file('sha256', $patchedPath) !== PATCHED_BUNDLE_SHA256) {
-	throw new RuntimeException('patched TemplatePicker bundle hash mismatch');
+if (($patchedBundleHash = hash_file('sha256', $patchedPath)) !== PATCHED_BUNDLE_SHA256) {
+	throw new RuntimeException("patched TemplatePicker bundle hash mismatch: {$patchedBundleHash}");
 }
 $encodedMap = json_encode($sourceMap, JSON_UNESCAPED_SLASHES | JSON_THROW_ON_ERROR);
 if (file_put_contents($patchedMapPath, $encodedMap) === false) {
