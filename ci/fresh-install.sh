@@ -442,11 +442,39 @@ assert_k3s_admin_kubeconfig_permissions() {
   echo "ok   k3s system:admin kubeconfig is root-only"
 }
 
+assert_docs_missing_static_asset_not_immutable() {
+  local pod response
+  pod="$(kubectl -n mb-docs get pods \
+    -l app.kubernetes.io/component=frontend \
+    -o jsonpath='{.items[0].metadata.name}')"
+  if [ -z "${pod}" ]; then
+    echo "ERROR: unable to find the Docs frontend pod" >&2
+    return 1
+  fi
+
+  response="$(kubectl -n mb-docs exec "${pod}" -c opensuite-header -- \
+    wget -S -O /dev/null \
+    http://127.0.0.1:8091/_next/static/chunks/opensuite-missing-9f1e2d3c4b5a6978.js \
+    2>&1 || true)"
+  if ! grep -Eq 'HTTP/[0-9.]+ 404' <<<"${response}"; then
+    echo "ERROR: missing hash-shaped Docs asset did not return HTTP 404" >&2
+    printf '%s\n' "${response}" >&2
+    return 1
+  fi
+  if grep -Eiq 'Cache-Control:.*(max-age=31536000|immutable)' <<<"${response}"; then
+    echo "ERROR: missing hash-shaped Docs asset received immutable caching" >&2
+    printf '%s\n' "${response}" >&2
+    return 1
+  fi
+  echo "ok   missing hash-shaped Docs asset is not cached immutably"
+}
+
 local_conformance() {
   local label="$1" smoke_rc=0 cleanup_rc=0
   wait_for_cluster "${label}"
   assert_k3s_admin_kubeconfig_permissions
   assert_complete_stack
+  assert_docs_missing_static_asset_not_immutable
   assert_deck_calendar_default
   SMOKE_INSECURE=1 SMOKE_DOCS_COLLABORATION_BOUNDARY=1 \
     bash "${REPO}/ci/smoke/smoke.sh" "${DOMAIN}"

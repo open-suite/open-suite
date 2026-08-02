@@ -2,8 +2,10 @@ import assert from "node:assert/strict";
 import test from "node:test";
 
 import {
+  assertSingleUpstreamHeaderTime,
   parseNonNegativeNumber,
   parsePositiveInteger,
+  parseUpstreamHeaderTime,
   quantile,
   sanitizeUrl,
   summarizeRuns,
@@ -82,4 +84,49 @@ test("URLs retain only origin and path", () => {
   assert.equal(sanitizeUrl("about:blank"), "about:blank");
   assert.equal(sanitizeUrl("data:text/plain,secret"), null);
   assert.equal(sanitizeUrl("not a URL"), null);
+});
+
+test("parses normal, retry, and internal-redirect upstream timing values", () => {
+  assert.deepEqual(parseUpstreamHeaderTime("0.123"), [[0.123]]);
+  assert.deepEqual(parseUpstreamHeaderTime("0.123, 0.456"), [
+    [0.123, 0.456],
+  ]);
+  assert.deepEqual(parseUpstreamHeaderTime("0.123, 0.456 : 0.789"), [
+    [0.123, 0.456],
+    [0.789],
+  ]);
+});
+
+test("preserves attempts without completed upstream headers as null", () => {
+  assert.deepEqual(parseUpstreamHeaderTime("-"), [[null]]);
+  assert.deepEqual(parseUpstreamHeaderTime("-, 0.042"), [[null, 0.042]]);
+  assert.deepEqual(parseUpstreamHeaderTime("-, 0.031 : 0.044"), [
+    [null, 0.031],
+    [0.044],
+  ]);
+});
+
+test("rejects malformed upstream timing values", () => {
+  for (const value of ["", "0.1,", ": 0.1", "0.1 :", "0.1ms", "--"]) {
+    assert.throws(() => parseUpstreamHeaderTime(value));
+  }
+});
+
+test("requires exactly one raw main-document timing header", () => {
+  assert.deepEqual(
+    assertSingleUpstreamHeaderTime([
+      { name: "content-type", value: "text/html" },
+      { name: "X-Upstream-Header-Time", value: "0.123, 0.456 : 0.789" },
+    ]),
+    [[0.123, 0.456], [0.789]],
+  );
+  assert.throws(() => assertSingleUpstreamHeaderTime([]), /returned 0/);
+  assert.throws(
+    () =>
+      assertSingleUpstreamHeaderTime([
+        { name: "X-Upstream-Header-Time", value: "0.123" },
+        { name: "x-upstream-header-time", value: "9.999" },
+      ]),
+    /returned 2/,
+  );
 });

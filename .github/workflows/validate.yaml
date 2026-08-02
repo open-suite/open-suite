@@ -36,6 +36,8 @@ jobs:
           node --check ci/smoke/visual-transitions.mjs
           node --check ci/smoke/visual-transition-helpers.mjs
           node --test ci/smoke/visual-transition-helpers.test.mjs
+          node --test images/nextcloud/test-template-picker-readiness.mjs
+          node --test performance/reporting.test.mjs
           node --check overlays/portal-header/opensuite-header.js
           node ci/test-element-quick-wins.mjs
           node ci/test-element-sync-migration.mjs

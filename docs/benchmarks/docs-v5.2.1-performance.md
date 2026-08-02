@@ -265,6 +265,18 @@ before installing Docs, as required by the existing chart contract.
 - the 60-second save assertion confirmed the edit was written through the
   document content endpoint.
 
+The Open Suite frontend sidecar also gives `/_next/static/` assets an explicit
+one-year `immutable` cache policy. This is safe for the pinned Docs production
+export because its assets are content-hashed and its stable manifests live
+under a per-build ID; it is not a universal Next.js guarantee and must be
+reverified whenever the Docs image is upgraded. The existing auth-gated
+Ingress remains unchanged, and HTML, APIs, collaboration, media,
+`service-worker.js`, and the unversioned `/opensuite-header.js` do not inherit
+that policy. The header is deliberately omitted from 404 and 5xx responses so
+missing or failed asset responses cannot be cached for a year. The deterministic
+test requires that omission, while fresh-install conformance requests a missing
+hash-shaped asset and verifies its 404 response is not cached immutably.
+
 Re-run the deterministic patch/chart checks with:
 
 ```bash
