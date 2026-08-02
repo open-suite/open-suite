@@ -89,11 +89,15 @@ grep -Fq 'initialDelaySeconds: 60' <<<"${OPENSEARCH_LIVENESS_PROBE}"
 grep -Fq 'periodSeconds: 20' <<<"${OPENSEARCH_LIVENESS_PROBE}"
 
 # The host browser shares a Linux network namespace with k3s. Preserve both
-# sides of any Chromium network-change failure without retrying or suppressing
-# the original navigation error.
+# sides of any Chromium network-change failure and retry only that exact error
+# in a fresh context, so an aborted one-time OIDC callback leaves no stale
+# app-local authentication state.
 grep -Fq 'ip -ts monitor link address route' "${REPO}/ci/messages-install-benchmark.sh"
 grep -Fq 'MESSAGES_BENCHMARK_DIAGNOSTICS=' "${REPO}/ci/messages-install-benchmark.sh"
 grep -Fq 'page.on("requestfailed"' "${REPO}/ci/messages-first-use-benchmark.mjs"
+grep -Fq 'request.failure()?.errorText === "net::ERR_NETWORK_CHANGED"' "${REPO}/ci/messages-first-use-benchmark.mjs"
+grep -Fq 'await context.close().catch(() => null)' "${REPO}/ci/messages-first-use-benchmark.mjs"
+grep -Fq 'context = await browser.newContext({ ignoreHTTPSErrors: true })' "${REPO}/ci/messages-first-use-benchmark.mjs"
 grep -Fq 'searchKeys: [...url.searchParams.keys()].sort()' "${REPO}/ci/messages-first-use-benchmark.mjs"
 grep -Fq '"--vmodule=logging_network_change_observer=1"' "${REPO}/ci/messages-first-use-benchmark.mjs"
 grep -Fq 'recordingFailed = true' "${REPO}/ci/messages-first-use-benchmark.mjs"
