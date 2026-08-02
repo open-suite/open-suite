@@ -35,6 +35,10 @@ const imageWorkflow = fs.readFileSync(
     ".github/workflows/collabora-image.yaml",
     "utf8",
 );
+const browserSmoke = fs.readFileSync(
+    "ci/test-collabora-image-browser.mjs",
+    "utf8",
+);
 
 for (const fragment of [
     `ARG COLLABORA_BASE=${collaboraRuntime}`,
@@ -88,8 +92,21 @@ for (const fragment of [
     "platforms: linux/amd64,linux/arm64",
     "node ci/test-collabora-image-runtime.mjs --verify-source",
     "node ci/test-collabora-image-runtime.mjs --verify-final-image",
+    "xvfb-run -a node ci/test-collabora-image-browser.mjs local/collabora-contract:amd64",
 ]) {
     assert.ok(imageWorkflow.includes(fragment), `missing workflow contract: ${fragment}`);
+}
+
+for (const fragment of [
+    '$("#main-menu").on("hideAll.smapi"',
+    "await page.waitForTimeout(350)",
+    "internal refresh must not emit hideAll.smapi",
+    "custom refresh must recalculate toolbar arrows",
+    "custom refresh must hide pressured status items",
+    "real resize must emit hideAll.smapi",
+    "real resize must collapse File",
+]) {
+    assert.ok(browserSmoke.includes(fragment), `missing candidate browser smoke contract: ${fragment}`);
 }
 
 const demoValues = fs.readFileSync("helmfile/demo-values.yaml.tmpl", "utf8");

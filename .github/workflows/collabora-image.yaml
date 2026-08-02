@@ -10,12 +10,14 @@ on:
     paths:
       - "images/collabora/**"
       - "ci/test-collabora-image-runtime.mjs"
+      - "ci/test-collabora-image-browser.mjs"
       - ".github/workflows/collabora-image.yaml"
   pull_request:
     branches: [main]
     paths:
       - "images/collabora/**"
       - "ci/test-collabora-image-runtime.mjs"
+      - "ci/test-collabora-image-browser.mjs"
       - ".github/workflows/collabora-image.yaml"
   workflow_dispatch:
 
@@ -82,6 +84,11 @@ jobs:
           node ci/test-collabora-image-runtime.mjs --verify-final-image
           "${COLLABORA_BASE}"
           local/collabora-contract:amd64
+      - name: Install the candidate-image browser smoke
+        run: npm install --no-save --no-package-lock playwright@1.55.1 && npx playwright install --with-deps chromium
+      - name: Verify File menu behavior in the amd64 candidate
+        timeout-minutes: 3
+        run: xvfb-run -a node ci/test-collabora-image-browser.mjs local/collabora-contract:amd64
       - name: Build multi-arch release image
         uses: docker/build-push-action@v6
         with:
