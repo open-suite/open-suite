@@ -11,7 +11,7 @@ const chunkRequest = (request) => {
   const url = new URL(request.url());
   return url.origin === baseUrl.origin
     && url.pathname === "/dist/7497-7497.js"
-    && /^[0-9a-f]+$/.test(url.searchParams.get("v") || "");
+    && /^[0-9a-f]+(?:-[0-9]+)?$/.test(url.searchParams.get("v") || "");
 };
 
 const browser = await chromium.launch({ headless: true });

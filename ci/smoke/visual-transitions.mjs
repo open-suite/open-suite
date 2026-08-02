@@ -573,7 +573,7 @@ async function createOfficeLifecycleFixture({ page, check }, fixture) {
     const url = new URL(typeof urlLike === "string" ? urlLike : urlLike.url());
     return url.origin === `https://nextcloud.${domain}`
       && url.pathname === "/dist/7497-7497.js"
-      && /^[0-9a-f]+$/.test(url.searchParams.get("v") || "");
+      && /^[0-9a-f]+(?:-[0-9]+)?$/.test(url.searchParams.get("v") || "");
   };
   let releaseChunk;
   let finishChunkContinuation;
