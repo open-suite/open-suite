@@ -7,12 +7,15 @@ COPY meetcal/ /usr/src/opensuite/meetcal/
 COPY user_oidc/ /usr/src/opensuite/user_oidc/
 COPY richdocuments/ /usr/src/opensuite/richdocuments/
 COPY whiteboard/ /usr/src/opensuite/whiteboard/
+COPY patch-template-picker.php /usr/local/bin/opensuite-patch-template-picker
 COPY hooks/10-opensuite-apps.sh /usr/local/bin/opensuite-sync-apps
 COPY hooks/20-opensuite-whiteboard.sh /usr/local/bin/opensuite-configure-whiteboard
 # The upstream entrypoint runs post-installation after pre-installation, and
 # `occ upgrade` after pre-upgrade. Put our baked app code in place before both;
 # before-starting remains the same-version image-update/restart fallback.
 RUN chmod +x /usr/local/bin/opensuite-sync-apps /usr/local/bin/opensuite-configure-whiteboard \
+ && php /usr/local/bin/opensuite-patch-template-picker /usr/src/nextcloud \
+ && php -l /usr/src/nextcloud/apps/files/lib/Controller/ViewController.php \
  && for phase in pre-installation pre-upgrade before-starting; do \
       ln -s /usr/local/bin/opensuite-sync-apps \
         "/docker-entrypoint-hooks.d/${phase}/10-opensuite-apps.sh"; \

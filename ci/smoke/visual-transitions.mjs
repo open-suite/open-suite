@@ -576,10 +576,20 @@ async function createOfficeLifecycleFixture({ page, check }, fixture) {
   await dialog.waitFor({ state: "visible" });
   await dialog.getByRole("textbox", { name: /name/i }).fill(fixture.name.slice(0, -".docx".length));
   fixture.cleanupRequired = true;
-  await dialog.getByRole("button", { name: "Create", exact: true }).click();
+  const creationResponsePromise = page.waitForResponse((response) => {
+    const url = new URL(response.url());
+    return response.request().method() === "POST"
+      && url.origin === `https://nextcloud.${domain}`
+      && url.pathname === "/ocs/v2.php/apps/files/api/v1/templates/create";
+  }, { timeout: 30_000 });
+  const [, creationResponse] = await Promise.all([
+    dialog.getByRole("button", { name: "Create", exact: true }).click(),
+    creationResponsePromise,
+  ]);
+  check("supported UI template creation request succeeds", creationResponse.status() === 200, true,
+    `status=${creationResponse.status()}`);
+  if (creationResponse.status() !== 200) throw new Error("DOCX template creation request failed");
 
-  const editor = await waitForCollaboraFrame(page);
-  await waitForDocumentLoaded(page);
   const created = await page.evaluate(async (fileName) => {
     const uid = OC.getCurrentUser().uid;
     const response = await fetch(
@@ -598,7 +608,10 @@ async function createOfficeLifecycleFixture({ page, check }, fixture) {
   check("supported UI creates an ordinary valid DOCX fixture", valid, true,
     `status=${created.status},type=${created.contentType},length=${created.length}`);
   if (!valid) throw new Error("created DOCX fixture failed DAV validation");
+  fixture.created = true;
 
+  const editor = await waitForCollaboraFrame(page);
+  await waitForDocumentLoaded(page);
   await editor.locator("#closebutton").click();
   await page.locator('iframe[data-cy="coolframe"], #loleafletframe')
     .waitFor({ state: "detached", timeout: 30_000 });
@@ -622,13 +635,16 @@ async function cleanupOfficeLifecycleFixture({ page, context, check }, fixture) 
     const after = await fetch(url, { method: "HEAD", headers });
     return { before: before.status, deleted: deleted.status, after: after.status };
   }, fixture.name);
-  const clean = [200, 404].includes(cleanup.before)
-    && [200, 204, 404].includes(cleanup.deleted)
-    && cleanup.after === 404;
-  check("exact owned DOCX fixture is deleted and absent", clean, true,
+  const deletedCreatedFixture = cleanup.before === 200 && cleanup.deleted === 204 && cleanup.after === 404;
+  const confirmedNeverCreated = cleanup.before === 404 && cleanup.deleted === 404 && cleanup.after === 404;
+  const clean = fixture.created ? deletedCreatedFixture : (deletedCreatedFixture || confirmedNeverCreated);
+  check(fixture.created
+    ? "exact created DOCX fixture cleanup is 200 to 204 to 404"
+    : "unproven DOCX fixture path is absent after cleanup", clean, true,
     `before=${cleanup.before},delete=${cleanup.deleted},after=${cleanup.after}`);
   if (!clean) throw new Error("exact DOCX fixture cleanup failed");
   fixture.cleanupRequired = false;
+  fixture.created = false;
 }
 
 async function portalFilesOfficeLifecycle({ page, rawDocumentRequests, portalHeaderVersion, timeline, check, contract, setPopup }, fixture) {
@@ -760,6 +776,7 @@ try {
     const officeFixture = {
       name: officeLifecycleFixtureName(Date.now(), randomUUID()),
       cleanupRequired: false,
+      created: false,
     };
     await journey(
       "portal-files-office-lifecycle",

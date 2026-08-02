@@ -76,7 +76,13 @@ jobs:
           find meetcal user_oidc/lib richdocuments/lib whiteboard/lib -name '*.php' -print0 | xargs -0 -n1 php -l
 
       - name: Verify exact Whiteboard source and lifecycle contracts
-        run: bash ci/test-nextcloud-whiteboard.sh
+        run: |
+          bash ci/test-nextcloud-whiteboard.sh
+          node --test images/nextcloud/test-template-picker-readiness.mjs
+          npm install --prefix /tmp/vue-compat-test --no-audit --no-fund --silent \
+            @vue/compat@3.5.34 jsdom@26.1.0
+          VUE_COMPAT_MODULE_ROOT=/tmp/vue-compat-test \
+            node images/nextcloud/test-template-picker-vue-compat.mjs
 
       - name: Build and verify the amd64 image artifact
         working-directory: images/nextcloud
