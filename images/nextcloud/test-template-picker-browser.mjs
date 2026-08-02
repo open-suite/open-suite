@@ -118,6 +118,30 @@ try {
   const documents = providers.filter((provider) => provider.app === "richdocuments"
     && provider.label === "Document" && provider.extension === ".docx");
   assert.equal(documents.length, 1, `template providers=${JSON.stringify(providers)}`);
+  const templateDirectory = await page.evaluate(async () => {
+    const response = await fetch("/ocs/v2.php/apps/files/api/v1/templates/path?format=json", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        "OCS-APIRequest": "true",
+        requesttoken: OC.requestToken,
+      },
+      body: JSON.stringify({
+        templatePath: "IntegrationTemplates",
+        copySystemTemplates: false,
+      }),
+    });
+    return { status: response.status, body: await response.json() };
+  });
+  assert.equal(templateDirectory.status, 200,
+    `template directory response=${JSON.stringify(templateDirectory.body)}`);
+  assert.deepEqual(templateDirectory.body.ocs.meta, {
+    status: "ok",
+    statuscode: 200,
+    message: "OK",
+  });
+  assert.equal(templateDirectory.body.ocs.data.template_path, "IntegrationTemplates");
+  assert.deepEqual(templateDirectory.body.ocs.data.templates, providers);
   const templates = await page.evaluate(async () => {
     const response = await fetch("/ocs/v2.php/apps/files/api/v1/templates?format=json", {
       headers: { "OCS-APIRequest": "true", requesttoken: OC.requestToken },
