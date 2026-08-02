@@ -14,7 +14,7 @@ REPO="$(cd "$(dirname "$0")/.." && pwd)"
 INFRA="${INFRA_DIR:-/root/mijn-bureau-infra}"
 DIR="${REPO}/scripts/single-vps-deploy"
 EXPECTED_AUTH_GATE_IMAGE="${AUTH_GATE_IMAGE:-ghcr.io/open-suite/auth-gate:sha-311389a}"
-EXPECTED_PORTAL_REF="${PORTAL_REF:-836f5b525e9b0b6dccb4d54b131e243e3ea37341}"
+EXPECTED_PORTAL_REF="${PORTAL_REF:-1870c55ca0fbf2f5aa2bf50ad4c9c67dbbfcfab1}"
 EXPECTED_PORTAL_TAG="sha-${EXPECTED_PORTAL_REF:0:7}"
 EXPECTED_NEXTCLOUD_TAG="${NEXTCLOUD_TAG:-sha-693c013}"
 EXPECTED_COLLABORA_TAG="${COLLABORA_TAG:-sha-6cbf822}"
@@ -96,6 +96,13 @@ probe_collabora_image() {
     && echo 1 || echo 0
 }
 
+probe_deck_calendar_default() {
+  local value
+  value="$(kubectl -n mb-nextcloud exec deploy/nextcloud -c nextcloud -- \
+    sh -c 'cd /var/www/html && php occ config:app:get deck calendar' 2>/dev/null)"
+  [ "${value}" = "no" ] && echo 1 || echo 0
+}
+
 expected_public_ip() {
   if [ -n "${OPEN_SUITE_PUBLIC_IP:-}" ]; then
     printf '%s' "${OPEN_SUITE_PUBLIC_IP}"
@@ -155,6 +162,7 @@ PROBES=(
   portal_images
   nextcloud_image
   collabora_image
+  deck_calendar_default
   livekit_public_ip
   auth_gate
   apex_redirect

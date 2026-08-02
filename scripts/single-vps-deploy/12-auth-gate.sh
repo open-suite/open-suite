@@ -128,10 +128,13 @@ spec:
       - Origin
       - Access-Control-Request-Method
       - Access-Control-Request-Headers
+      - X-Open-Suite-Request-ID
     authResponseHeaders:
       - X-Open-Suite-User
       - X-Open-Suite-Email
       - X-Open-Suite-Name
+      - X-Open-Suite-Request-ID
+      - Server-Timing
 MIDDLEWARE_YAML
 
 ACTUAL_TRUST_FORWARD_HEADER="$(kubectl -n "${NAMESPACE}" get middleware opensuite-auth-gate \
@@ -141,15 +144,28 @@ EXPECTED_AUTH_REQUEST_HEADERS="$(printf '%s\n' \
   Cookie \
   Origin \
   Access-Control-Request-Method \
-  Access-Control-Request-Headers)"
+  Access-Control-Request-Headers \
+  X-Open-Suite-Request-ID)"
 ACTUAL_AUTH_REQUEST_HEADERS="$(kubectl -n "${NAMESPACE}" get middleware opensuite-auth-gate \
   -o jsonpath='{range .spec.forwardAuth.authRequestHeaders[*]}{@}{"\n"}{end}')"
+EXPECTED_AUTH_RESPONSE_HEADERS="$(printf '%s\n' \
+  X-Open-Suite-User \
+  X-Open-Suite-Email \
+  X-Open-Suite-Name \
+  X-Open-Suite-Request-ID \
+  Server-Timing)"
+ACTUAL_AUTH_RESPONSE_HEADERS="$(kubectl -n "${NAMESPACE}" get middleware opensuite-auth-gate \
+  -o jsonpath='{range .spec.forwardAuth.authResponseHeaders[*]}{@}{"\n"}{end}')"
 [[ "${ACTUAL_TRUST_FORWARD_HEADER}" == "false" ]] || {
   echo "ERROR: refusing auth-gate rollout: Middleware trustForwardHeader is not false" >&2
   exit 1
 }
 [[ "${ACTUAL_AUTH_REQUEST_HEADERS}" == "${EXPECTED_AUTH_REQUEST_HEADERS}" ]] || {
   echo "ERROR: refusing auth-gate rollout: Middleware authRequestHeaders do not match the least-privilege set" >&2
+  exit 1
+}
+[[ "${ACTUAL_AUTH_RESPONSE_HEADERS}" == "${EXPECTED_AUTH_RESPONSE_HEADERS}" ]] || {
+  echo "ERROR: refusing auth-gate rollout: Middleware authResponseHeaders do not match the trusted set" >&2
   exit 1
 }
 
