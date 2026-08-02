@@ -157,8 +157,25 @@ try {
   });
   const documentTemplates = templates.find((provider) => provider.app === "richdocuments"
     && provider.label === "Document");
-  assert.deepEqual(documentTemplates?.templates, [],
-    `candidate Document templates=${JSON.stringify(documentTemplates?.templates)}`);
+  assert.deepEqual(documentTemplates?.templates.map((template) => template.basename).sort(), [
+    "Calendar.odt",
+    "Certificate.odt",
+    "Invoice.odt",
+    "Letter.odt",
+    "Menu.odt",
+    "Mother's day.odt",
+    "Party invitation.odt",
+    "Photo book.odt",
+    "Report.odt",
+    "Resume.odt",
+    "Syllabus.odt",
+  ]);
+  assert.ok(documentTemplates.templates.every((template) =>
+    template.templateType === "OCA\\Richdocuments\\Template\\CollaboraTemplateProvider"
+      && template.mime === "application/vnd.oasis.opendocument.text"
+      && template.size > 0));
+  assert.equal(new Set(documentTemplates.templates.map((template) => template.templateId)).size,
+    documentTemplates.templates.length);
 
   let aborted = 0;
   let finishAbort;
@@ -215,6 +232,10 @@ try {
   release();
   await continued;
   await page.unrouteAll({ behavior: "wait" });
+  const blankTemplate = page.locator("#template-picker--1");
+  await blankTemplate.waitFor({ state: "visible", timeout: 30_000 });
+  assert.equal(await blankTemplate.isChecked(), true);
+  await page.getByRole("button", { name: "Create a new file with the selected template" }).click();
   assert.equal((await createdResponse).status(), 200);
   const created = await dav("HEAD");
   assert.deepEqual({ status: created.status, type: created.type }, {
