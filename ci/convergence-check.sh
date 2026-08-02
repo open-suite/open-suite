@@ -251,18 +251,41 @@ OPEN_SUITE_DEMO_ADMIN_USERNAME="$(cat /etc/mijnbureau/demo-admin-username 2>/dev
 export OPEN_SUITE_DEMO_MODE OPEN_SUITE_DEMO_USERNAME OPEN_SUITE_DEMO_PASSWORD
 export OPEN_SUITE_DEMO_ADMIN_USERNAME
 export OPEN_SUITE_PUBLIC_IP="${OPEN_SUITE_PUBLIC_IP:-$(expected_public_ip)}"
+
+capture_docs_workload_logs() {
+  local step="$1" component pod
+  [ -n "${OPEN_SUITE_CONVERGENCE_LOG_DIR:-}" ] || return 0
+
+  for component in backend y-provider; do
+    kubectl logs -n mb-docs "deployment/docs-${component}" \
+      --all-pods=true --all-containers --prefix --tail=500 \
+      >"${OPEN_SUITE_CONVERGENCE_LOG_DIR}/${step}-docs-${component}.log" 2>&1 || true
+    kubectl get pods -n mb-docs \
+      -l "app.kubernetes.io/component=${component},app.kubernetes.io/instance=docs" \
+      -o name 2>/dev/null | while read -r pod; do
+        [ -n "${pod}" ] || continue
+        kubectl logs -n mb-docs "${pod}" --all-containers --prefix --tail=500 --previous \
+          >"${OPEN_SUITE_CONVERGENCE_LOG_DIR}/${step}-${pod#pod/}.previous.log" 2>&1 || true
+      done
+  done
+}
+
 HEAL_FAILED=""
 for step in 02-networking 03-restart-oidc-apps 04-nextcloud-office \
             08-open-suite-portal 09-portal-header 10-keycloak-login 12-auth-gate; do
   echo "  -> ${step}"
+  step_rc=0
   if [ -n "${OPEN_SUITE_CONVERGENCE_LOG_DIR:-}" ]; then
     install -d -m 0755 "${OPEN_SUITE_CONVERGENCE_LOG_DIR}"
     bash "${DIR}/${step}.sh" \
       >"${OPEN_SUITE_CONVERGENCE_LOG_DIR}/${step}.log" 2>&1 \
-      || HEAL_FAILED="${HEAL_FAILED} ${step}"
+      || step_rc=$?
   else
-    bash "${DIR}/${step}.sh" >/dev/null 2>&1 \
-      || HEAL_FAILED="${HEAL_FAILED} ${step}"
+    bash "${DIR}/${step}.sh" >/dev/null 2>&1 || step_rc=$?
+  fi
+  if [ "${step_rc}" -ne 0 ]; then
+    HEAL_FAILED="${HEAL_FAILED} ${step}"
+    capture_docs_workload_logs "${step}"
   fi
 done
 
