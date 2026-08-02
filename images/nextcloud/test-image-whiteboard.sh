@@ -16,7 +16,7 @@ test "$(sha256sum "${tmp}/files-init-opensuite-tp2.js" | cut -d ' ' -f 1)" \
 grep -Fq 'sourceMappingURL=files-init-opensuite-tp2.js.map?v=' \
   "${tmp}/files-init-opensuite-tp2.js"
 
-docker run --rm --pull=never --entrypoint sh "${image}" -ec '
+docker run --rm --pull=never --entrypoint sh "${image}" -exc '
   source=/usr/src/opensuite/whiteboard
   target=/var/www/html/custom_apps/whiteboard
 
