@@ -20,6 +20,10 @@ jobs:
         run: |
           find . -type f -name '*.sh' -not -path './.git/*' -print0 | xargs -0 -n1 bash -n
           find . -type f -name '*.sh' -not -path './.git/*' -print0 | xargs -0 shellcheck --severity=warning
+      - name: Keep the k3s admin kubeconfig root-only
+        run: |
+          grep -Fq 'INSTALL_K3S_EXEC="--write-kubeconfig-mode 600"' scripts/single-vps-deploy/01-deploy.sh
+          ! grep -Eq 'write-kubeconfig-mode[ =]+0?644' scripts/single-vps-deploy/01-deploy.sh
       - name: Check Nextcloud image source contracts
         run: bash images/nextcloud/test-source-shape.sh
       - name: Check Collabora image source contracts
