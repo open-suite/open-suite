@@ -133,10 +133,12 @@ def validate_values_source(infra):
     assert "proxy_pass http://127.0.0.1:8080;" in static_config
     assert "proxy_hide_header Cache-Control;" in static_config
     assert "proxy_hide_header Expires;" in static_config
+    immutable_cache = 'add_header Cache-Control "public, max-age=31536000, immutable";'
+    assert immutable_cache in static_config
     assert (
         'add_header Cache-Control "public, max-age=31536000, immutable" always;'
-        in static_config
-    )
+        not in static_config
+    ), "immutable caching must not apply to missing or failed asset responses"
     dynamic_location = source.split("location / {", 1)[1]
     assert "max-age=31536000" not in dynamic_location
     shared_header_location = source.split("location = /opensuite-header.js {", 1)[1].split(

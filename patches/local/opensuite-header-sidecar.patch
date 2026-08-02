@@ -276,9 +276,9 @@ index ce4df2c..3f3bea0 100644
 +          server {
 +            listen 8091;
 +            client_max_body_size 0;
-+            # Next fingerprints every file below this path. Cache those assets
-+            # permanently without changing HTML, API, service-worker, or shared
-+            # header behavior. The auth-gated Ingress remains the only route.
++            # The pinned Docs export content-hashes assets below this path and
++            # keeps stable manifests under a per-build ID. Reverify this policy
++            # on image upgrades; it is not a universal Next.js contract.
 +            location ^~ /_next/static/ {
 +              proxy_pass http://127.0.0.1:8080;
 +              proxy_http_version 1.1;
@@ -288,7 +288,7 @@ index ce4df2c..3f3bea0 100644
 +              proxy_set_header X-Forwarded-Proto $scheme;
 +              proxy_hide_header Cache-Control;
 +              proxy_hide_header Expires;
-+              add_header Cache-Control "public, max-age=31536000, immutable" always;
++              add_header Cache-Control "public, max-age=31536000, immutable";
 +            }
 +            location = /opensuite-header.js {
 +              default_type application/javascript;
