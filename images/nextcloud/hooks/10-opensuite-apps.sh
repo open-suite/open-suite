@@ -39,7 +39,8 @@ if [ ! -f "${nextcloud_root}/${chunk}" ] \
   exit 1
 fi
 for relative in \
-  dist/files-init-opensuite-tp1.js \
+  dist/files-init-opensuite-tp2.js \
+  dist/files-init-opensuite-tp2.js.map \
   apps/files/lib/Controller/ViewController.php; do
   source="${core_stage_root}/${relative}"
   target="${nextcloud_root}/${relative}"

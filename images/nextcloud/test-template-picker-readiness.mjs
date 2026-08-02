@@ -1,70 +1,74 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 
-function vulnerablePicker() {
-  const wrapper = { $refs: {}, open(...args) { return this.$refs.picker.open(...args); } };
-  return { get: async () => wrapper, wrapper };
-}
-
-function mountedPicker() {
+function vulnerablePicker(importPromise) {
   let wrapper;
-  let markMounted;
-  const mountedEvents = [];
-  const ready = new Promise((resolve) => { markMounted = resolve; });
-  const component = {
-    mixins: [{ mounted() { mountedEvents.push("upstream"); } }],
-  };
-  component.mixins = [
-    ...(component.mixins || []),
-    { mounted() { mountedEvents.push("ready"); markMounted(); } },
-  ];
   return {
     get: async () => {
-      await ready;
-      if (typeof wrapper?.$refs?.picker?.open !== "function") {
-        throw new Error("Template picker mounted without an open method");
+      if (!wrapper) {
+        wrapper = { $refs: {}, open(...args) { return this.$refs.picker.open(...args); } };
+        importPromise.then(({ default: child }) => { wrapper.$refs.picker = child; });
       }
       return wrapper;
     },
-    mount() {
-      wrapper = { $refs: { picker: { open: (name) => `opened:${name}` } } };
-      for (const mixin of component.mixins) mixin.mounted();
-    },
-    mountedEvents,
   };
 }
 
-test("NC34 immediate wrapper reproduces the lazy child open race", async () => {
-  const picker = vulnerablePicker();
+function importReadyPicker(load, construct) {
+  let importPromise;
+  let wrapper;
+  return async function get() {
+    importPromise ??= load();
+    const { default: component } = await importPromise;
+    if (!wrapper) wrapper = construct(component);
+    return wrapper;
+  };
+}
+
+test("NC34 immediate wrapper reproduces the unresolved lazy child open race", async () => {
+  const picker = vulnerablePicker(new Promise(() => {}));
   const wrapper = await picker.get();
   assert.throws(() => wrapper.open("fixture"), /reading 'open'/);
 });
 
-test("candidate shares child-mounted readiness across concurrent callers", async () => {
-  const picker = mountedPicker();
-  let settled = false;
-  const first = picker.get().then((value) => { settled = true; return value; });
-  const second = picker.get();
+test("candidate holds wrapper construction on one cached import for concurrent callers", async () => {
+  let releaseImport;
+  const importPromise = new Promise((resolve) => { releaseImport = resolve; });
+  let imports = 0;
+  let constructions = 0;
+  const get = importReadyPicker(() => { imports += 1; return importPromise; }, (component) => {
+    constructions += 1;
+    return { $refs: { picker: component } };
+  });
+  let settlements = 0;
+  const first = get().then((value) => { settlements += 1; return value; });
+  const second = get().then((value) => { settlements += 1; return value; });
   await Promise.resolve();
-  assert.equal(settled, false);
-  picker.mount();
+  assert.equal(settlements, 0);
+  assert.equal(imports, 1);
+  assert.equal(constructions, 0);
+
+  releaseImport({ default: { open: (name) => `opened:${name}` } });
   const [firstWrapper, secondWrapper] = await Promise.all([first, second]);
   assert.equal(firstWrapper, secondWrapper);
+  assert.equal(constructions, 1);
   assert.equal(firstWrapper.$refs.picker.open("fixture"), "opened:fixture");
-  assert.deepEqual(picker.mountedEvents, ["upstream", "ready"]);
 });
 
-test("candidate rejects a mounted child without the required open contract", async () => {
-  let markMounted;
-  const ready = new Promise((resolve) => { markMounted = resolve; });
-  const wrapper = { $refs: { picker: {} } };
-  const candidate = (async () => {
-    await ready;
-    if (typeof wrapper?.$refs?.picker?.open !== "function") {
-      throw new Error("Template picker mounted without an open method");
-    }
-    return wrapper;
-  })();
-  markMounted();
-  await assert.rejects(candidate, /mounted without an open method/);
+test("candidate import failure rejects every concurrent caller", async () => {
+  let rejectImport;
+  const importPromise = new Promise((resolve, reject) => { rejectImport = reject; });
+  let imports = 0;
+  let constructions = 0;
+  const get = importReadyPicker(() => { imports += 1; return importPromise; }, () => { constructions += 1; });
+  const first = get();
+  const second = get();
+  const chunkError = new Error("TemplatePicker chunk aborted");
+  rejectImport(chunkError);
+  const results = await Promise.allSettled([first, second]);
+  assert.deepEqual(results.map(({ status }) => status), ["rejected", "rejected"]);
+  assert.equal(results[0].reason, chunkError);
+  assert.equal(results[1].reason, chunkError);
+  assert.equal(imports, 1);
+  assert.equal(constructions, 0);
 });

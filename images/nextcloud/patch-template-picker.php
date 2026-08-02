@@ -8,7 +8,18 @@ const FILES_INIT_MAP_SHA256 = '208945a2b732e8e863915e98544bac78ea6958898d149c3f2
 const TEMPLATE_PICKER_CHUNK_SHA256 = '0400acc742f52d27ad940a2fdc3cb216b1181e35d05882e7797ad24e991d9710';
 const TEMPLATE_PICKER_CHUNK_MAP_SHA256 = 'fdce7694964d98df40e135d37a26d92d3d7a2e167da6697c0f4b88e3e1fe7ecc';
 const VIEW_CONTROLLER_SHA256 = '809cb4156b66c9460ca20137ca3b8768ea241c2968e2accd5f72a4417eb82c79';
-const PATCHED_BUNDLE_SHA256 = 'f3140718058e3b5c75f3e1383d8c9cabadfde32eb52ae56f93117ffc0e7c2031';
+const PATCHED_BUNDLE_SHA256 = 'd0c0c4e579d36ccdcbccccb9bdcd483c04e945a2bcc71c99524431bd9df88f3c';
+
+const OLD_IMPORT = "import Vue, { defineAsyncComponent } from 'vue';";
+const NEW_IMPORT = "import Vue from 'vue';";
+const OLD_SOURCE_LOADER = <<<'SOURCE'
+// async to reduce bundle size
+const TemplatePickerVue = defineAsyncComponent(() => import('../views/TemplatePicker.vue'));
+SOURCE;
+const NEW_SOURCE_LOADER = <<<'SOURCE'
+// Cache the first lazy import so every caller shares its resolution or rejection.
+let TemplatePickerVue = null;
+SOURCE;
 
 const VULNERABLE_SOURCE = <<<'SOURCE'
 let TemplatePicker = null;
@@ -38,12 +49,42 @@ async function getTemplatePicker(context) {
 }
 SOURCE;
 
+const PATCHED_SOURCE = <<<'SOURCE'
+let TemplatePicker = null;
+/**
+ *
+ * @param context
+ */
+async function getTemplatePicker(context) {
+    TemplatePickerVue ??= import('../views/TemplatePicker.vue');
+    const { default: TemplatePickerComponent } = await TemplatePickerVue;
+    if (TemplatePicker === null) {
+        // Create document root
+        const mountingPoint = document.createElement('div');
+        mountingPoint.id = 'template-picker';
+        document.body.append(mountingPoint);
+        // Init vue app
+        TemplatePicker = new Vue({
+            render: (h) => h(TemplatePickerComponent, {
+                ref: 'picker',
+                props: {
+                    parent: context,
+                },
+            }),
+            methods: { open(...args) { this.$refs.picker.open(...args); } },
+            el: mountingPoint,
+        });
+    }
+    return TemplatePicker;
+}
+SOURCE;
+
 const OLD_BUNDLE = 'tn=(0,x.$V)(()=>Promise.all([t.e(4208),t.e(7497)]).then(t.bind(t,27497)));let nn=null;';
-const NEW_BUNDLE = 'tn=(0,x.$V)(()=>Promise.all([t.e(4208),t.e(7497)]).then(t.bind(t,27497)).then(e=>(e.default.mixins=[...(e.default.mixins||[]),{mounted:ir}],e)));let nn=null,ir,ar=new Promise(e=>{ir=e});';
+const NEW_BUNDLE = 'tn=null;let nn=null;';
 const OLD_FACTORY = 'const n=async function(e){if(null===nn){const s=document.createElement("div");s.id="template-picker",document.body.appendChild(s),nn=new x.Ay({render:s=>s(tn,{ref:"picker",props:{parent:e}}),methods:{open(...e){this.$refs.picker.open(...e)}},el:s})}return nn}(s)';
-const NEW_FACTORY = 'const n=async function(e){if(null===nn){const s=document.createElement("div");s.id="template-picker",document.body.appendChild(s),nn=new x.Ay({render:s=>s(tn,{ref:"picker",props:{parent:e}}),methods:{open(...e){this.$refs.picker.open(...e)}},el:s})}if(await ar,"function"!=typeof nn?.$refs?.picker?.open)throw new Error("Template picker mounted without an open method");return nn}(s)';
+const NEW_FACTORY = 'const n=async function(e){tn||=Promise.all([t.e(4208),t.e(7497)]).then(t.bind(t,27497));const{default:i}=await tn;if(!nn){const s=document.createElement("div");s.id="template-picker",document.body.append(s),nn=new x.Ay({render:s=>s(i,{ref:"picker",props:{parent:e}}),methods:{open(...e){this.$refs.picker.open(...e)}},el:s})}return nn}(s)';
 const OLD_CONTROLLER = "\t\tUtil::addInitScript('files', 'init');";
-const NEW_CONTROLLER = "\t\tUtil::addInitScript('files', 'init-opensuite-tp1');";
+const NEW_CONTROLLER = "\t\tUtil::addInitScript('files', 'init-opensuite-tp2');";
 
 function requireCount(string $content, string $fragment, int $expected, string $label): void {
 	$actual = substr_count($content, $fragment);
@@ -69,13 +110,12 @@ function transformBundle(string $bundle): string {
 	requireCount($candidate, OLD_FACTORY, 0, 'vulnerable TemplatePicker factory after transform');
 	requireCount($candidate, NEW_BUNDLE, 1, 'patched TemplatePicker loader');
 	requireCount($candidate, NEW_FACTORY, 1, 'patched TemplatePicker factory');
-	requireCount($candidate, 'e.default.mixins=[...(e.default.mixins||[]),{mounted:ir}]', 1, 'resolved child mounted readiness mixin');
-	requireCount($candidate, 'if(await ar', 1, 'shared readiness await');
+	requireCount($candidate, 'tn||=Promise.all([t.e(4208),t.e(7497)]).then(t.bind(t,27497));const{default:i}=await tn;if(!nn)', 1, 'cached lazy import readiness before wrapper construction');
 	requireCount($candidate, 'this.$refs.picker.open', 1, 'TemplatePicker open forwarding');
 	$directives = 0;
-	$candidate = preg_replace('/\n\/\/# sourceMappingURL=files-init\.js\.map\?v=[0-9a-f]+\s*$/', "\n", $candidate, 1, $directives);
-	if ($candidate === null || $directives !== 1 || str_contains($candidate, 'sourceMappingURL=')) {
-		throw new RuntimeException('expected to remove exactly one upstream source-map directive');
+	$candidate = preg_replace('/\n\/\/# sourceMappingURL=files-init\.js\.map(\?v=[0-9a-f]+)\s*$/', "\n//# sourceMappingURL=files-init-opensuite-tp2.js.map$1\n", $candidate, 1, $directives);
+	if ($candidate === null || $directives !== 1) {
+		throw new RuntimeException('expected to replace exactly one upstream source-map directive');
 	}
 	return $candidate;
 }
@@ -109,15 +149,31 @@ $sourceMap = json_decode(readFileStrict($mapPath), true, 512, JSON_THROW_ON_ERRO
 $matches = [];
 foreach ($sourceMap['sources'] as $index => $source) {
 	if (str_ends_with($source, 'apps/files/src/newMenu/newFromTemplate.ts')) {
-		$matches[] = $sourceMap['sourcesContent'][$index];
+		$matches[] = $index;
 	}
 }
 if (count($matches) !== 1) {
 	throw new RuntimeException('expected exactly one authoritative newFromTemplate.ts source');
 }
-requireCount($matches[0], VULNERABLE_SOURCE, 1, 'authoritative vulnerable NC34 source');
+$sourceIndex = $matches[0];
+$authoritativeSource = $sourceMap['sourcesContent'][$sourceIndex];
+requireCount($authoritativeSource, OLD_IMPORT, 1, 'authoritative defineAsyncComponent import');
+requireCount($authoritativeSource, OLD_SOURCE_LOADER, 1, 'authoritative lazy wrapper loader');
+requireCount($authoritativeSource, VULNERABLE_SOURCE, 1, 'authoritative vulnerable NC34 source');
+$sourceMap['sourcesContent'][$sourceIndex] = str_replace(
+	[OLD_IMPORT, OLD_SOURCE_LOADER, VULNERABLE_SOURCE],
+	[NEW_IMPORT, NEW_SOURCE_LOADER, PATCHED_SOURCE],
+	$authoritativeSource,
+);
+requireCount($sourceMap['sourcesContent'][$sourceIndex], 'defineAsyncComponent', 0, 'patched authoritative source async wrapper');
+requireCount($sourceMap['sourcesContent'][$sourceIndex], 'await TemplatePickerVue', 1, 'patched authoritative source import await');
+$sourceMap['file'] = 'files-init-opensuite-tp2.js';
+// Do not retain misleading generated positions after transforming the pinned
+// minified bundle. The corrected authoritative source remains available.
+$sourceMap['mappings'] = '';
 
-$patchedPath = "{$dist}/files-init-opensuite-tp1.js";
+$patchedPath = "{$dist}/files-init-opensuite-tp2.js";
+$patchedMapPath = "{$dist}/files-init-opensuite-tp2.js.map";
 $temporaryPath = "{$patchedPath}.tmp";
 if (file_put_contents($temporaryPath, transformBundle(readFileStrict($bundlePath))) === false
 		|| !rename($temporaryPath, $patchedPath)) {
@@ -125,6 +181,10 @@ if (file_put_contents($temporaryPath, transformBundle(readFileStrict($bundlePath
 }
 if (hash_file('sha256', $patchedPath) !== PATCHED_BUNDLE_SHA256) {
 	throw new RuntimeException('patched TemplatePicker bundle hash mismatch');
+}
+$encodedMap = json_encode($sourceMap, JSON_UNESCAPED_SLASHES | JSON_THROW_ON_ERROR);
+if (file_put_contents($patchedMapPath, $encodedMap) === false) {
+	throw new RuntimeException('could not publish patched TemplatePicker source map');
 }
 
 $controller = readFileStrict($controllerPath);

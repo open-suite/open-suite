@@ -80,8 +80,8 @@ jobs:
           bash ci/test-nextcloud-whiteboard.sh
           node --test images/nextcloud/test-template-picker-readiness.mjs
           npm install --prefix /tmp/vue-compat-test --no-audit --no-fund --silent \
-            @vue/compat@3.5.34 jsdom@26.1.0
-          VUE_COMPAT_MODULE_ROOT=/tmp/vue-compat-test \
+            vue@2.7.16 jsdom@26.1.0
+          VUE_MODULE_ROOT=/tmp/vue-compat-test \
             node images/nextcloud/test-template-picker-vue-compat.mjs
 
       - name: Build and verify the amd64 image artifact
@@ -91,6 +91,28 @@ jobs:
             --build-arg "NEXTCLOUD_BASE=registry-1.docker.io/library/nextcloud:${NEXTCLOUD_TAG}" \
             --tag opensuite-nextcloud:whiteboard-test .
           bash test-image-whiteboard.sh opensuite-nextcloud:whiteboard-test
+
+      - name: Verify candidate image TemplatePicker in a browser
+        run: |
+          trap 'docker rm -f opensuite-nextcloud-browser >/dev/null 2>&1 || true' EXIT
+          docker run -d --name opensuite-nextcloud-browser -p 127.0.0.1:18080:80 \
+            -e SQLITE_DATABASE=opensuite-browser \
+            -e NEXTCLOUD_ADMIN_USER=admin \
+            -e NEXTCLOUD_ADMIN_PASSWORD=opensuite-browser-test \
+            opensuite-nextcloud:whiteboard-test
+          for attempt in $(seq 1 90); do
+            curl -fsS http://127.0.0.1:18080/status.php | grep -q '"installed":true' && break
+            test "${attempt}" -lt 90
+            sleep 2
+          done
+          docker exec -u www-data opensuite-nextcloud-browser php occ app:enable richdocuments
+          npm install --prefix /tmp/template-picker-browser --no-audit --no-fund --silent playwright@1.54.2
+          /tmp/template-picker-browser/node_modules/.bin/playwright install --with-deps chromium
+          NEXTCLOUD_URL=http://127.0.0.1:18080 \
+            NEXTCLOUD_ADMIN_USER=admin \
+            NEXTCLOUD_ADMIN_PASSWORD=opensuite-browser-test \
+            PLAYWRIGHT_MODULE_ROOT=/tmp/template-picker-browser \
+            node images/nextcloud/test-template-picker-browser.mjs
 
       - uses: docker/setup-qemu-action@v3
       - uses: docker/setup-buildx-action@v3

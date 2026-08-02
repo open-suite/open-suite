@@ -23,10 +23,12 @@ touch \
   "${tmp}/stage/meetcal/fixture" \
   "${tmp}/stage/user_oidc/fixture" \
   "${tmp}/stage/whiteboard/fixture"
-printf 'patched bundle\n' > "${tmp}/core/dist/files-init-opensuite-tp1.js"
+printf 'patched bundle\n' > "${tmp}/core/dist/files-init-opensuite-tp2.js"
+printf 'patched source map\n' > "${tmp}/core/dist/files-init-opensuite-tp2.js.map"
 printf 'pinned picker chunk\n' > "${tmp}/core/dist/7497-7497.js"
 printf 'patched controller\n' > "${tmp}/core/apps/files/lib/Controller/ViewController.php"
-printf 'stale bundle\n' > "${tmp}/nextcloud/dist/files-init-opensuite-tp1.js"
+printf 'stale bundle\n' > "${tmp}/nextcloud/dist/files-init-opensuite-tp2.js"
+printf 'stale source map\n' > "${tmp}/nextcloud/dist/files-init-opensuite-tp2.js.map"
 cp "${tmp}/core/dist/7497-7497.js" "${tmp}/nextcloud/dist/7497-7497.js"
 printf 'stale controller\n' > "${tmp}/nextcloud/apps/files/lib/Controller/ViewController.php"
 cat > "${tmp}/nextcloud/custom_apps/richdocuments/appinfo/info.xml" <<'XML'
@@ -45,8 +47,10 @@ run_sync
 grep -Fq '<version>11.0.1</version>' \
   "${tmp}/nextcloud/custom_apps/richdocuments/appinfo/info.xml"
 test ! -e "${tmp}/nextcloud/custom_apps/richdocuments/stale-11.0.0-file"
-cmp "${tmp}/core/dist/files-init-opensuite-tp1.js" \
-  "${tmp}/nextcloud/dist/files-init-opensuite-tp1.js"
+cmp "${tmp}/core/dist/files-init-opensuite-tp2.js" \
+  "${tmp}/nextcloud/dist/files-init-opensuite-tp2.js"
+cmp "${tmp}/core/dist/files-init-opensuite-tp2.js.map" \
+  "${tmp}/nextcloud/dist/files-init-opensuite-tp2.js.map"
 cmp "${tmp}/core/apps/files/lib/Controller/ViewController.php" \
   "${tmp}/nextcloud/apps/files/lib/Controller/ViewController.php"
 
@@ -57,13 +61,23 @@ find "${tmp}/nextcloud/custom_apps/richdocuments" -type f -print0 \
   | sort -z | xargs -0 sha256sum > "${tmp}/second-sync.sha256"
 cmp "${tmp}/first-sync.sha256" "${tmp}/second-sync.sha256"
 
-first_core="$(find "${tmp}/nextcloud/dist/files-init-opensuite-tp1.js" \
+first_core="$(find "${tmp}/nextcloud/dist/files-init-opensuite-tp2.js" \
+  "${tmp}/nextcloud/dist/files-init-opensuite-tp2.js.map" \
   "${tmp}/nextcloud/apps/files/lib/Controller/ViewController.php" \
   -type f -print0 | sort -z | xargs -0 sha256sum | sha256sum)"
 run_sync
-second_core="$(find "${tmp}/nextcloud/dist/files-init-opensuite-tp1.js" \
+second_core="$(find "${tmp}/nextcloud/dist/files-init-opensuite-tp2.js" \
+  "${tmp}/nextcloud/dist/files-init-opensuite-tp2.js.map" \
   "${tmp}/nextcloud/apps/files/lib/Controller/ViewController.php" \
   -type f -print0 | sort -z | xargs -0 sha256sum | sha256sum)"
 test "${first_core}" = "${second_core}"
+
+printf 'mismatched installed picker chunk\n' > "${tmp}/nextcloud/dist/7497-7497.js"
+if run_sync 2>"${tmp}/mismatched-chunk.stderr"; then
+  echo "ERROR: app sync accepted a mismatched installed TemplatePicker chunk" >&2
+  exit 1
+fi
+grep -Fq 'installed Nextcloud TemplatePicker chunk does not match the pinned image' \
+  "${tmp}/mismatched-chunk.stderr"
 
 echo "richdocuments and pinned NC34 core override PVC sync is idempotent"

@@ -22,11 +22,12 @@ Pinned upstream Nextcloud plus:
   for opcache (`validate_timestamps=0`).
 - `patch-template-picker.php` — verifies the exact Nextcloud 34.0.0 Files
   bundle, source map, and controller preimages, then publishes a separately
-  named Files init bundle whose shared Promise resolves only when the lazy
-  TemplatePicker child has mounted. The startup hook copies that bundle and
-  its exact controller registration onto existing same-version PVCs before
-  Apache starts. The renamed URL avoids reusing the immutable upstream asset;
-  the transformed bundle intentionally has no misleading source-map pointer.
+  named Files init bundle that caches and awaits the TemplatePicker import
+  before synchronously constructing its Vue wrapper. The startup hook copies
+  that bundle, its matching corrected source map, and its exact controller
+  registration onto existing same-version PVCs before Apache starts. The
+  renamed URL avoids reusing the immutable upstream asset. This is pinned
+  Nextcloud 34 production behavior and must be reverified on image upgrades.
 - `hooks/20-opensuite-whiteboard.sh` — after upgrades, strictly enables
   Whiteboard and reconciles its backend URL and shared JWT secret before
   Apache starts, including on existing-volume and ordinary restart paths.

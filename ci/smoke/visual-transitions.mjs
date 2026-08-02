@@ -569,46 +569,98 @@ async function createOfficeLifecycleFixture({ page, check }, fixture) {
   check("unique DOCX fixture path is unused", absentStatus === 404, true, `status=${absentStatus}`);
   if (absentStatus !== 404) throw new Error("refusing to replace an existing DOCX fixture path");
 
-  await page.getByRole("button", { name: "New", exact: true }).click();
-  await page.locator('[role="menuitem"], .v-popper__popper button, .v-popper__popper li')
-    .filter({ hasText: /^\s*Document\s*$/ }).first().click();
-  const dialog = page.locator("[data-cy-files-new-node-dialog]").first();
-  await dialog.waitFor({ state: "visible" });
-  await dialog.getByRole("textbox", { name: /name/i }).fill(fixture.name.slice(0, -".docx".length));
-  fixture.cleanupRequired = true;
-  const creationResponsePromise = page.waitForResponse((response) => {
+  const templatePickerChunk = (urlLike) => {
+    const url = new URL(typeof urlLike === "string" ? urlLike : urlLike.url());
+    return url.origin === `https://nextcloud.${domain}`
+      && url.pathname === "/dist/7497-7497.js"
+      && /^[0-9a-f]+$/.test(url.searchParams.get("v") || "");
+  };
+  let releaseChunk;
+  let chunkReleased = false;
+  let interceptedChunks = 0;
+  const heldChunk = new Promise((resolve) => { releaseChunk = resolve; });
+  const chunkRoute = async (route) => {
+    interceptedChunks += 1;
+    await heldChunk;
+    await route.continue();
+  };
+  const pageErrors = [];
+  const recordPageError = (error) => pageErrors.push(error.message);
+  let creationPosts = 0;
+  const recordCreationPost = (response) => {
     const url = new URL(response.url());
-    return response.request().method() === "POST"
-      && url.origin === `https://nextcloud.${domain}`
-      && url.pathname === "/ocs/v2.php/apps/files/api/v1/templates/create";
-  }, { timeout: 30_000 });
-  const [, creationResponse] = await Promise.all([
-    dialog.getByRole("button", { name: "Create", exact: true }).click(),
-    creationResponsePromise,
-  ]);
-  check("supported UI template creation request succeeds", creationResponse.status() === 200, true,
-    `status=${creationResponse.status()}`);
-  if (creationResponse.status() !== 200) throw new Error("DOCX template creation request failed");
+    if (response.request().method() === "POST"
+        && url.origin === `https://nextcloud.${domain}`
+        && url.pathname === "/ocs/v2.php/apps/files/api/v1/templates/create") {
+      creationPosts += 1;
+    }
+  };
+  await page.route("**/dist/7497-7497.js*", chunkRoute);
+  page.on("pageerror", recordPageError);
+  page.on("response", recordCreationPost);
+  try {
+    try {
+      const chunkRequestPromise = page.waitForRequest(templatePickerChunk, { timeout: 30_000 });
+      await page.getByRole("button", { name: "New", exact: true }).click();
+      await page.locator('[role="menuitem"], .v-popper__popper button, .v-popper__popper li')
+        .filter({ hasText: /^\s*Document\s*$/ }).first().click();
+      const chunkRequest = await chunkRequestPromise;
+      check("one Document initiation holds the exact generated TemplatePicker chunk",
+        templatePickerChunk(chunkRequest) && interceptedChunks === 1 && pageErrors.length === 0, true,
+        `url=${chunkRequest.url()},interceptions=${interceptedChunks},pageErrors=${pageErrors.join(" | ")}`);
+      chunkReleased = true;
+      releaseChunk();
+    } finally {
+      if (!chunkReleased) releaseChunk();
+      await page.unroute("**/dist/7497-7497.js*", chunkRoute);
+    }
 
-  const created = await page.evaluate(async (fileName) => {
-    const uid = OC.getCurrentUser().uid;
-    const response = await fetch(
-      `/remote.php/dav/files/${encodeURIComponent(uid)}/${encodeURIComponent(fileName)}`,
-      { method: "HEAD", headers: { requesttoken: OC.requestToken } },
-    );
-    return {
-      status: response.status,
-      contentType: response.headers.get("content-type")?.split(";", 1)[0] || "",
-      length: Number.parseInt(response.headers.get("content-length") || "0", 10),
-    };
-  }, fixture.name);
-  const valid = created.status === 200
-    && created.contentType === "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
-    && created.length > 0;
-  check("supported UI creates an ordinary valid DOCX fixture", valid, true,
-    `status=${created.status},type=${created.contentType},length=${created.length}`);
-  if (!valid) throw new Error("created DOCX fixture failed DAV validation");
-  fixture.created = true;
+    const dialog = page.locator("[data-cy-files-new-node-dialog]").first();
+    await dialog.waitFor({ state: "visible" });
+    await dialog.getByRole("textbox", { name: /name/i }).fill(fixture.name.slice(0, -".docx".length));
+    fixture.cleanupRequired = true;
+    const creationResponsePromise = page.waitForResponse((response) => {
+      const url = new URL(response.url());
+      return response.request().method() === "POST"
+        && url.origin === `https://nextcloud.${domain}`
+        && url.pathname === "/ocs/v2.php/apps/files/api/v1/templates/create";
+    }, { timeout: 30_000 });
+    await dialog.getByRole("button", { name: "Create", exact: true }).click();
+    const creationResponse = await creationResponsePromise;
+    check("one supported UI template creation request succeeds",
+      creationResponse.status() === 200 && creationPosts === 1, true,
+      `status=${creationResponse.status()},posts=${creationPosts}`);
+    if (creationResponse.status() !== 200) throw new Error("DOCX template creation request failed");
+
+    const created = await page.evaluate(async (fileName) => {
+      const uid = OC.getCurrentUser().uid;
+      const response = await fetch(
+        `/remote.php/dav/files/${encodeURIComponent(uid)}/${encodeURIComponent(fileName)}`,
+        { method: "HEAD", headers: { requesttoken: OC.requestToken } },
+      );
+      return {
+        status: response.status,
+        contentType: response.headers.get("content-type")?.split(";", 1)[0] || "",
+        length: Number.parseInt(response.headers.get("content-length") || "0", 10),
+      };
+    }, fixture.name);
+    const valid = created.status === 200
+      && created.contentType === "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+      && created.length > 0;
+    check("supported UI creates an ordinary valid DOCX fixture", valid, true,
+      `status=${created.status},type=${created.contentType},length=${created.length}`);
+    if (!valid) throw new Error("created DOCX fixture failed DAV validation");
+    check("held-chunk creation reaches valid DAV state without a page error",
+      pageErrors.length === 0 && creationPosts === 1, true,
+      `posts=${creationPosts},pageErrors=${pageErrors.join(" | ")}`);
+    if (pageErrors.length > 0 || creationPosts !== 1) {
+      throw new Error("held-chunk template creation browser contract failed");
+    }
+    fixture.created = true;
+  } finally {
+    page.off("pageerror", recordPageError);
+    page.off("response", recordCreationPost);
+  }
 
   const editor = await waitForCollaboraFrame(page);
   await waitForDocumentLoaded(page);

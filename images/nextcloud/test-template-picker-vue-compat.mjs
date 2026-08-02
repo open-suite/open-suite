@@ -1,8 +1,8 @@
 import assert from "node:assert/strict";
 import { createRequire } from "node:module";
 
-const moduleRoot = process.env.VUE_COMPAT_MODULE_ROOT;
-if (!moduleRoot) throw new Error("VUE_COMPAT_MODULE_ROOT is required");
+const moduleRoot = process.env.VUE_MODULE_ROOT;
+if (!moduleRoot) throw new Error("VUE_MODULE_ROOT is required");
 const require = createRequire(`${moduleRoot}/package.json`);
 const { JSDOM } = require("jsdom");
 
@@ -12,43 +12,32 @@ const dom = new JSDOM('<!doctype html><html><body><div id="mount"></div></body><
 for (const name of ["window", "document", "Element", "SVGElement", "Node", "HTMLElement"]) {
   globalThis[name] = dom.window[name];
 }
-const VueModule = require("@vue/compat/dist/vue.cjs.js");
-const Vue = VueModule.default || VueModule;
-VueModule.configureCompat({ MODE: 2 });
+const Vue = require("vue/dist/vue.common.js");
 
-let resolveModule;
-let resolvePickerReady;
-const pickerReady = new Promise((resolve) => { resolvePickerReady = resolve; });
-const upstreamMounted = [];
-const TemplatePicker = VueModule.defineAsyncComponent(() => new Promise((resolve) => {
-  resolveModule = () => resolve({
+let releaseImport;
+const importedComponent = new Promise((resolve) => {
+  releaseImport = () => resolve({
     __esModule: true,
     default: {
-      mixins: [{ mounted() { upstreamMounted.push("upstream"); } }],
       methods: { open(name) { return `opened:${name}`; } },
       render(h) { return h("div", "ready"); },
     },
   });
-}).then((module) => {
-  module.default.mixins = [
-    ...(module.default.mixins || []),
-    { mounted: resolvePickerReady },
-  ];
-  return module;
-}));
+});
 
+let TemplatePickerVue;
 let wrapper;
+let constructions = 0;
 async function getTemplatePicker() {
+  TemplatePickerVue ??= importedComponent;
+  const { default: TemplatePickerComponent } = await TemplatePickerVue;
   if (!wrapper) {
+    constructions += 1;
     wrapper = new Vue({
-      render: (h) => h(TemplatePicker, { ref: "picker" }),
+      render: (h) => h(TemplatePickerComponent, { ref: "picker" }),
       methods: { open(...args) { return this.$refs.picker.open(...args); } },
       el: document.querySelector("#mount"),
     });
-  }
-  await pickerReady;
-  if (typeof wrapper?.$refs?.picker?.open !== "function") {
-    throw new Error("Template picker mounted without an open method");
   }
   return wrapper;
 }
@@ -58,11 +47,13 @@ const first = getTemplatePicker().then((value) => { settled = true; return value
 const second = getTemplatePicker();
 await Promise.resolve();
 assert.equal(settled, false);
-assert.equal(typeof wrapper.$refs.picker?.open, "undefined");
+assert.equal(wrapper, undefined);
+assert.equal(constructions, 0);
 
-resolveModule();
+releaseImport();
 const [firstWrapper, secondWrapper] = await Promise.all([first, second]);
 assert.equal(firstWrapper, secondWrapper);
-assert.deepEqual(upstreamMounted, ["upstream"]);
+assert.equal(constructions, 1);
+assert.equal(typeof firstWrapper.$refs.picker.open, "function");
 assert.equal(firstWrapper.open("fixture"), "opened:fixture");
-console.log("Vue compat lazy TemplatePicker child readiness verified");
+console.log(`Vue ${Vue.version} import-before-wrapper TemplatePicker readiness verified`);
