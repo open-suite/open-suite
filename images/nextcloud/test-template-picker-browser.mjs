@@ -53,6 +53,13 @@ async function initiateDocument() {
     id: item.id,
     dataCy: item.getAttribute("data-cy-files-new-node-menu-entry"),
   }))))}`);
+  console.log(`initiating Office action=${JSON.stringify(await documentItem.evaluate((item) => ({
+    text: item.textContent?.trim(),
+    tag: item.tagName.toLowerCase(),
+    role: item.getAttribute("role"),
+    id: item.id,
+    dataCy: item.getAttribute("data-cy-files-new-node-menu-entry"),
+  })))}`);
   await documentItem.click();
 }
 
@@ -107,9 +114,9 @@ try {
       finishAbort();
     }
   });
-  const exactAbortedChunk = page.waitForRequest(chunkRequest, { timeout: 30_000 });
-  await initiateDocument();
-  assert.equal(chunkRequest(await waitForExactChunk(exactAbortedChunk)), true,
+  const exactAbortedChunk = waitForExactChunk(page.waitForRequest(chunkRequest, { timeout: 30_000 }));
+  const [, abortedChunkRequest] = await Promise.all([initiateDocument(), exactAbortedChunk]);
+  assert.equal(chunkRequest(abortedChunkRequest), true,
     `observed dist requests=${JSON.stringify(distRequests)}`);
   await abortFinished;
   assert.equal(aborted, 1);
@@ -132,11 +139,10 @@ try {
       finishContinuation();
     }
   });
-  const exactChunk = page.waitForRequest(chunkRequest, { timeout: 30_000 });
+  const exactChunk = waitForExactChunk(page.waitForRequest(chunkRequest, { timeout: 30_000 }));
   const pageErrors = [];
   page.on("pageerror", (error) => pageErrors.push(error.message));
-  await initiateDocument();
-  await waitForExactChunk(exactChunk);
+  await Promise.all([initiateDocument(), exactChunk]);
   assert.equal(intercepted, 1);
   assert.deepEqual(pageErrors, []);
   const dialog = page.locator("[data-cy-files-new-node-dialog]").first();
