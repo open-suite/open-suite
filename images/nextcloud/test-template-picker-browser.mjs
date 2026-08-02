@@ -31,7 +31,7 @@ page.on("console", (message) => {
   if (message.type() === "error") diagnosticErrors.push(`console: ${message.text()}`);
 });
 
-async function openFiles() {
+async function login() {
   await page.goto(new URL("/login", baseUrl).href);
   if (await page.locator("#user").isVisible().catch(() => false)) {
     await page.locator("#user").fill(process.env.NEXTCLOUD_ADMIN_USER);
@@ -42,6 +42,9 @@ async function openFiles() {
       password.press("Enter"),
     ]);
   }
+}
+
+async function openFiles() {
   await page.goto(new URL("/apps/files/files", baseUrl).href, { waitUntil: "domcontentloaded" });
   await page.locator("#app-content-files, .files-list, [data-testid='files-list']").first()
     .waitFor({ state: "visible", timeout: 45_000 });
@@ -112,16 +115,12 @@ async function dav(method) {
 }
 
 try {
-  await openFiles();
-  assert.equal((await dav("HEAD")).status, 404);
-  const providers = await page.evaluate(() => OCP.InitialState.loadState("files", "templates", []));
-  const documents = providers.filter((provider) => provider.app === "richdocuments"
-    && provider.label === "Document" && provider.extension === ".docx");
-  assert.equal(documents.length, 1, `template providers=${JSON.stringify(providers)}`);
+  await login();
   const templateDirectory = await page.evaluate(async () => {
     const response = await fetch("/ocs/v2.php/apps/files/api/v1/templates/path?format=json", {
       method: "POST",
       headers: {
+        Accept: "application/json",
         "Content-Type": "application/json",
         "OCS-APIRequest": "true",
         requesttoken: OC.requestToken,
@@ -141,6 +140,13 @@ try {
     message: "OK",
   });
   assert.equal(templateDirectory.body.ocs.data.template_path, "IntegrationTemplates");
+  assert.ok(Array.isArray(templateDirectory.body.ocs.data.templates));
+  await openFiles();
+  assert.equal((await dav("HEAD")).status, 404);
+  const providers = await page.evaluate(() => OCP.InitialState.loadState("files", "templates", []));
+  const documents = providers.filter((provider) => provider.app === "richdocuments"
+    && provider.label === "Document" && provider.extension === ".docx");
+  assert.equal(documents.length, 1, `template providers=${JSON.stringify(providers)}`);
   assert.deepEqual(templateDirectory.body.ocs.data.templates, providers);
   const templates = await page.evaluate(async () => {
     const response = await fetch("/ocs/v2.php/apps/files/api/v1/templates?format=json", {
