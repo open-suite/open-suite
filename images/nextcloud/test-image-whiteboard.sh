@@ -16,7 +16,7 @@ test "$(sha256sum "${tmp}/files-init-opensuite-tp2.js" | cut -d ' ' -f 1)" \
 grep -Fq 'sourceMappingURL=files-init-opensuite-tp2.js.map?v=' \
   "${tmp}/files-init-opensuite-tp2.js"
 
-docker run --rm --pull=never --entrypoint sh "${image}" -exc '
+docker run --rm --pull=never --entrypoint sh "${image}" -ec '
   source=/usr/src/opensuite/whiteboard
   target=/var/www/html/custom_apps/whiteboard
 
@@ -31,7 +31,7 @@ docker run --rm --pull=never --entrypoint sh "${image}" -exc '
   test "$(sha256sum /usr/src/nextcloud/dist/7497-7497.js | cut -d " " -f 1)" = 0400acc742f52d27ad940a2fdc3cb216b1181e35d05882e7797ad24e991d9710
   grep -Fq "tn||=Promise.all([t.e(4208),t.e(7497)]).then(t.bind(t,27497));const{default:i}=await tn;if(!nn)" /usr/src/nextcloud/dist/files-init-opensuite-tp2.js
   grep -Fq "TemplatePickerVue ??= import('"'"'../views/TemplatePicker.vue'"'"');" /usr/src/nextcloud/dist/files-init-opensuite-tp2.js.map
-  grep -Fq '"mappings":""' /usr/src/nextcloud/dist/files-init-opensuite-tp2.js.map
+  grep -Fq "\"mappings\":\"\"" /usr/src/nextcloud/dist/files-init-opensuite-tp2.js.map
   ! grep -Fq "const TemplatePickerVue = defineAsyncComponent(() => import('"'"'../views/TemplatePicker.vue'"'"'));" /usr/src/nextcloud/dist/files-init-opensuite-tp2.js.map
   grep -Fq "Util::addInitScript('"'"'files'"'"', '"'"'init-opensuite-tp2'"'"');" \
     /usr/src/nextcloud/apps/files/lib/Controller/ViewController.php
