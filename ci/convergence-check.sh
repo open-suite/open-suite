@@ -143,13 +143,33 @@ probe_apex_redirect() {
 }
 
 probe_networking() {
-  local ns
+  local ns component policy selector destination_namespace destination_component port
   kubectl -n kube-system get cm coredns-custom >/dev/null 2>&1 || { echo 0; return; }
   for ns in mb-keycloak mb-grist mb-element mb-collabora mb-nextcloud \
-            mb-livekit mb-meet mb-docs mb-bureaublad; do
+            mb-livekit mb-meet mb-docs mb-messages mb-bureaublad; do
     kubectl -n "${ns}" get networkpolicy allow-egress-traefik >/dev/null 2>&1 \
       || { echo 0; return; }
   done
+  while read -r ns component; do
+    policy="allow-egress-keycloak-backchannel"
+    selector="$(kubectl -n "${ns}" get networkpolicy "${policy}" \
+      -o jsonpath='{.spec.podSelector.matchLabels.app\.kubernetes\.io/component}' 2>/dev/null)"
+    destination_namespace="$(kubectl -n "${ns}" get networkpolicy "${policy}" \
+      -o jsonpath='{.spec.egress[0].to[0].namespaceSelector.matchLabels.kubernetes\.io/metadata\.name}' 2>/dev/null)"
+    destination_component="$(kubectl -n "${ns}" get networkpolicy "${policy}" \
+      -o jsonpath='{.spec.egress[0].to[0].podSelector.matchLabels.app\.kubernetes\.io/component}' 2>/dev/null)"
+    port="$(kubectl -n "${ns}" get networkpolicy "${policy}" \
+      -o jsonpath='{.spec.egress[0].ports[0].port}' 2>/dev/null)"
+    [ "${selector}" = "${component}" ] \
+      && [ "${destination_namespace}" = "mb-keycloak" ] \
+      && [ "${destination_component}" = "keycloak" ] \
+      && [ "${port}" = "8080" ] || { echo 0; return; }
+  done <<'EOF'
+mb-bureaublad bureaublad-backend
+mb-docs backend
+mb-meet meet-backend
+mb-messages backend
+EOF
   echo 1
 }
 
