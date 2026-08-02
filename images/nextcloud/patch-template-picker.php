@@ -10,7 +10,7 @@ const TEMPLATE_PICKER_CHUNK_MAP_SHA256 = 'fdce7694964d98df40e135d37a26d92d3d7a2e
 const TEMPLATE_PICKER_MAP_FILE = '7497-7497.js?v=4c13f30ae7ab10413c2e';
 const TEMPLATE_PICKER_RUNTIME_URL = '7497-7497.js?v=94a5bd32402d33b444dc';
 const VIEW_CONTROLLER_SHA256 = '809cb4156b66c9460ca20137ca3b8768ea241c2968e2accd5f72a4417eb82c79';
-const PATCHED_BUNDLE_SHA256 = 'd0c0c4e579d36ccdcbccccb9bdcd483c04e945a2bcc71c99524431bd9df88f3c';
+const PATCHED_BUNDLE_SHA256 = 'd391378ea51e3495a9a1f480597758dc9504f1dfd33fd5229324a5a9b2729dff';
 
 const OLD_IMPORT = "import Vue, { defineAsyncComponent } from 'vue';";
 const NEW_IMPORT = "import Vue from 'vue';";
@@ -82,7 +82,7 @@ async function getTemplatePicker(context) {
 SOURCE;
 
 const OLD_BUNDLE = 'tn=(0,x.$V)(()=>Promise.all([t.e(4208),t.e(7497)]).then(t.bind(t,27497)));let nn=null;';
-const NEW_BUNDLE = 'tn=null;let nn=null;';
+const NEW_BUNDLE = 'tn=null,opensuiteTemplatePickerLoader=()=>Promise.all([t.e(4208),t.e(7497)]).then(t.bind(t,27497));let nn=null;';
 const OLD_FACTORY = 'const n=async function(e){if(null===nn){const s=document.createElement("div");s.id="template-picker",document.body.appendChild(s),nn=new x.Ay({render:s=>s(tn,{ref:"picker",props:{parent:e}}),methods:{open(...e){this.$refs.picker.open(...e)}},el:s})}return nn}(s)';
 const NEW_FACTORY = 'const n=async function(e){tn||=Promise.all([t.e(4208),t.e(7497)]).then(t.bind(t,27497));const{default:i}=await tn;if(!nn){const s=document.createElement("div");s.id="template-picker",document.body.append(s),nn=new x.Ay({render:s=>s(i,{ref:"picker",props:{parent:e}}),methods:{open(...e){this.$refs.picker.open(...e)}},el:s})}return nn}(s)';
 const OLD_CONTROLLER = "\t\tUtil::addInitScript('files', 'init');";
@@ -118,7 +118,12 @@ function transformBundle(string $bundle): string {
 	requireCount($candidate, OLD_FACTORY, 0, 'vulnerable TemplatePicker factory after transform');
 	requireCount($candidate, NEW_BUNDLE, 1, 'patched TemplatePicker loader');
 	requireCount($candidate, NEW_FACTORY, 1, 'patched TemplatePicker factory');
-	requireCount($candidate, 'tn||=Promise.all([t.e(4208),t.e(7497)]).then(t.bind(t,27497));const{default:i}=await tn;if(!nn)', 1, 'cached lazy import readiness before wrapper construction');
+	$candidate = str_replace(
+		'tn||=Promise.all([t.e(4208),t.e(7497)]).then(t.bind(t,27497))',
+		'tn||=opensuiteTemplatePickerLoader()',
+		$candidate,
+	);
+	requireCount($candidate, 'tn||=opensuiteTemplatePickerLoader();const{default:i}=await tn;if(!nn)', 1, 'cached lazy import readiness before wrapper construction');
 	requireCount($candidate, 'this.$refs.picker.open', 1, 'TemplatePicker open forwarding');
 	$directives = 0;
 	$candidate = preg_replace('/\n\/\/# sourceMappingURL=files-init\.js\.map(\?v=[0-9a-f]+)\s*$/', "\n//# sourceMappingURL=files-init-opensuite-tp2.js.map$1\n", $candidate, 1, $directives);

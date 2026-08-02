@@ -72,3 +72,23 @@ test("candidate import failure rejects every concurrent caller", async () => {
   assert.equal(imports, 1);
   assert.equal(constructions, 0);
 });
+
+test("generated lazy loader retains module-scope Webpack runtime when the handler shadows t", async () => {
+  const loadedChunks = [];
+  const modules = new Map([[27497, { default: "TemplatePicker" }]]);
+  const t = (moduleId) => modules.get(moduleId);
+  t.e = async (chunkId) => { loadedChunks.push(chunkId); };
+  t.bind = Function.prototype.bind;
+  let tn = null;
+  const opensuiteTemplatePickerLoader = () => Promise.all([t.e(4208), t.e(7497)]).then(t.bind(t, 27497));
+
+  async function generatedHandler(e, t) {
+    assert.equal(e, "provider");
+    assert.equal(t, 3);
+    tn ||= opensuiteTemplatePickerLoader();
+    return (await tn).default;
+  }
+
+  assert.equal(await generatedHandler("provider", 3), "TemplatePicker");
+  assert.deepEqual(loadedChunks, [4208, 7497]);
+});

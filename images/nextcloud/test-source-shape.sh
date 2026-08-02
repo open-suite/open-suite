@@ -52,13 +52,15 @@ require_literal "${template_picker_patch}" "const TEMPLATE_PICKER_MAP_FILE = '74
 require_literal "${template_picker_patch}" "const TEMPLATE_PICKER_RUNTIME_URL = '7497-7497.js?v=94a5bd32402d33b444dc';"
 require_literal "${template_picker_patch}" "str_ends_with(\$source, 'apps/files/src/views/TemplatePicker.vue')"
 require_literal "${template_picker_patch}" "throw new RuntimeException('expected exactly one physical NC34 TemplatePicker source map');"
-require_literal "${template_picker_patch}" "const PATCHED_BUNDLE_SHA256 = 'd0c0c4e579d36ccdcbccccb9bdcd483c04e945a2bcc71c99524431bd9df88f3c';"
-require_literal "${template_picker_patch}" 'tn||=Promise.all([t.e(4208),t.e(7497)]).then(t.bind(t,27497))'
+require_literal "${template_picker_patch}" "const PATCHED_BUNDLE_SHA256 = 'd391378ea51e3495a9a1f480597758dc9504f1dfd33fd5229324a5a9b2729dff';"
+require_literal "${template_picker_patch}" 'opensuiteTemplatePickerLoader=()=>Promise.all([t.e(4208),t.e(7497)]).then(t.bind(t,27497))'
+require_literal "${template_picker_patch}" 'tn||=opensuiteTemplatePickerLoader()'
 require_literal "${template_picker_patch}" 'const{default:i}=await tn;if(!nn)'
 require_literal "${template_picker_patch}" "const NEW_CONTROLLER = \"\\t\\tUtil::addInitScript('files', 'init-opensuite-tp2');\";"
 require_literal "${template_picker_test}" 'NC34 immediate wrapper reproduces the unresolved lazy child open race'
 require_literal "${template_picker_test}" 'candidate holds wrapper construction on one cached import for concurrent callers'
 require_literal "${template_picker_test}" 'candidate import failure rejects every concurrent caller'
+require_literal "${template_picker_test}" 'generated lazy loader retains module-scope Webpack runtime when the handler shadows t'
 require_literal "${template_picker_vue_test}" 'const { default: TemplatePickerComponent } = await TemplatePickerVue;'
 require_literal "${template_picker_vue_test}" 'assert.equal(wrapper, undefined);'
 require_literal "${template_picker_browser_test}" 'url.pathname === "/dist/7497-7497.js"'
