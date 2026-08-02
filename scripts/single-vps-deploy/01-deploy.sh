@@ -22,9 +22,9 @@ MEET_TAG="${MEET_TAG:-sha-bdd09c6}"
 # Pinned Open Suite Nextcloud build with suite-managed apps.
 NEXTCLOUD_TAG="${NEXTCLOUD_TAG:-sha-693c013}"
 # Open Suite Element Web image tag: pinned immutable suite build.
-ELEMENT_TAG="${ELEMENT_TAG:-sha-20c68fa}"
+ELEMENT_TAG="${ELEMENT_TAG:-sha-dbca029}"
 # Open Suite Collabora CODE build with the SmartMenus lifecycle fix.
-COLLABORA_TAG="${COLLABORA_TAG:-sha-6cbf822}"
+COLLABORA_TAG="${COLLABORA_TAG:-sha-8a7faae}"
 # TLS mode: letsencrypt (default; needs public DNS + ports) or selfsigned
 # (local VMs: every chart generates its own cert, no cert-manager, no ACME).
 OPEN_SUITE_TLS_MODE="${OPEN_SUITE_TLS_MODE:-letsencrypt}"

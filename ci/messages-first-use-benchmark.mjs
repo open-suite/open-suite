@@ -78,7 +78,7 @@ const browser = await chromium.launch({
   ] : [],
 });
 record("browser-launched", { version: browser.version() });
-const context = await browser.newContext({ ignoreHTTPSErrors: true });
+let context = await browser.newContext({ ignoreHTTPSErrors: true });
 let page = await context.newPage();
 observePage(page, "mail");
 const results = {};
@@ -157,11 +157,13 @@ try {
       const networkChanged = String(error?.message ?? "").includes("ERR_NETWORK_CHANGED");
       if (!networkChanged || attempt >= MAIL_ATTEMPTS) throw error;
       record("network-change-retry", { attempt, error: String(error.message).split("\n")[0] });
-      // Closing the page rejects the orphaned response waiter immediately;
-      // settle it before restarting so no pending listener leaks into retry.
+      // The aborted one-time OIDC callback can leave app-local browser state
+      // stuck in "authentication in progress". Restart the exact-error retry
+      // in a fresh context, not merely a fresh page with stale local storage.
       const pendingMailboxResponse = mailboxThreadsLoaded?.catch(() => null);
-      await page.close().catch(() => null);
+      await context.close().catch(() => null);
       await pendingMailboxResponse;
+      context = await browser.newContext({ ignoreHTTPSErrors: true });
       page = await context.newPage();
       observePage(page, "mail");
     }

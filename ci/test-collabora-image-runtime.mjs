@@ -19,8 +19,8 @@ const upstreamBundleSha256 =
 const patchedBundleSha256 =
     "ba6299744f74e55c6ba646d6fae7ca48200f60e4908966c39d58fe133fa02f60";
 const bundlePath = "/usr/share/coolwsd/browser/dist/bundle.js";
-// Immutable tag published by the image workflow from PR #246's main merge.
-const openSuiteImageTag = "sha-6cbf822";
+// Immutable tag published by the image workflow from the Wave 1 main merge.
+const openSuiteImageTag = "sha-8a7faae";
 
 const dockerfile = fs.readFileSync("images/collabora/Dockerfile", "utf8");
 const sourcePatch = fs.readFileSync(
