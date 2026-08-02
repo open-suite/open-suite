@@ -216,6 +216,7 @@ collect_diagnostics() {
 kube-system deployment/traefik
 mb-bureaublad deployment/opensuite-auth-gate
 mb-keycloak statefulset/keycloak-keycloak
+mb-docs deployment/docs-backend
 mb-messages deployment/messages-frontend
 mb-messages deployment/messages-backend
 LOG_TARGETS
