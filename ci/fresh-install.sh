@@ -360,11 +360,68 @@ assert_complete_stack() {
   kubectl get deployment,statefulset -A -o wide
 }
 
+provision_docs_smoke_user() {
+  kubectl -n mb-docs exec -i deployment/docs-backend -- python manage.py shell <<'PY'
+from django.db import transaction
+
+from core.models import User
+
+email = "johndoe@example.com"
+with transaction.atomic():
+    if User.objects.filter(email__iexact=email).exists():
+        raise RuntimeError("refusing to reuse an existing Docs smoke user")
+    user = User(
+        email=email,
+        full_name="John Doe",
+        short_name="John",
+        is_staff=False,
+        is_superuser=False,
+    )
+    user.set_unusable_password()
+    user.save()
+PY
+}
+
+cleanup_docs_smoke_user() {
+  kubectl -n mb-docs exec -i deployment/docs-backend -- python manage.py shell <<'PY'
+from django.db import transaction
+
+from core.models import Document, User
+
+email = "johndoe@example.com"
+with transaction.atomic():
+    user = User.objects.get(email__iexact=email)
+    Document.objects.filter(creator=user).delete()
+    user.delete()
+PY
+}
+
 local_conformance() {
-  local label="$1"
+  local label="$1" smoke_rc=0 cleanup_rc=0
   wait_for_cluster "${label}"
   assert_complete_stack
-  SMOKE_INSECURE=1 bash "${REPO}/ci/smoke/smoke.sh" "${DOMAIN}"
+  SMOKE_INSECURE=1 SMOKE_DOCS_COLLABORATION_BOUNDARY=1 \
+    bash "${REPO}/ci/smoke/smoke.sh" "${DOMAIN}"
+
+  if [ "${label}" = "final" ]; then
+    # Use the fresh install's generated test-user credentials without placing
+    # either value on the command line or in output. The smoke owns and removes
+    # its uniquely named document after the final raw Helmfile convergence.
+    provision_docs_smoke_user
+    SMOKE_DOMAIN="${DOMAIN}" \
+      SMOKE_USER="$(cat /etc/mijnbureau/demo-username)" \
+      SMOKE_PASS="$(cat /etc/mijnbureau/demo-password)" \
+      SMOKE_INSECURE=1 \
+      SMOKE_DOCS_TITLE_ONLY=1 \
+      node "${REPO}/ci/smoke/authenticated.mjs" || smoke_rc=$?
+    cleanup_docs_smoke_user || cleanup_rc=$?
+    if [ "${smoke_rc}" -ne 0 ]; then
+      return "${smoke_rc}"
+    fi
+    if [ "${cleanup_rc}" -ne 0 ]; then
+      return "${cleanup_rc}"
+    fi
+  fi
 }
 
 run_bounded() {

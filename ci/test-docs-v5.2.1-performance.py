@@ -188,8 +188,26 @@ def validate_rendered_chart(infra, scratch):
         """
     ).rstrip()
     override.write_text(
-        "cluster:\n  ingress:\n    type: nginx\n" +
-        "\n".join(f"{name}:\n{textwrap.indent(value, '  ')}\n" for name, value in values.items())
+        textwrap.dedent(
+            """
+            cluster:
+              routingMode: ingress
+              ingress:
+                type: traefik
+            ingress:
+              enabled: true
+              hostname: docs.example.test
+              annotations:
+                traefik.ingress.kubernetes.io/router.middlewares: mb-docs-hsts-header@kubernetescrd,mb-bureaublad-opensuite-auth-gate@kubernetescrd
+            ingressCollaborationApi:
+              enabled: true
+              hostname: docs.example.test
+              path: /collaboration/api/
+              annotations:
+                traefik.ingress.kubernetes.io/router.middlewares: mb-docs-hsts-header@kubernetescrd
+            """
+        ).lstrip()
+        + "\n".join(f"{name}:\n{textwrap.indent(value, '  ')}\n" for name, value in values.items())
     )
 
     for component, expected in EXPECTED_PROBES.items():
@@ -216,6 +234,36 @@ def validate_rendered_chart(infra, scratch):
             path=expected["startup_path"], delay=10, period=10, timeout=5,
             failures=3,
         )
+
+    collaboration_ingress = run(
+        "helm", "template", "docs", str(chart), "-f", str(override),
+        "--namespace", "mb-docs",
+        "--show-only", "templates/ingress-collaboration-api.yaml",
+    )
+    assert re.search(r"(?m)^\s*- host:\s+docs\.example\.test\s*$", collaboration_ingress)
+    assert re.search(
+        r"(?ms)^\s*- path:\s+/collaboration/api/\s*$.*?"
+        r"^\s+name:\s+docs-y-provider\s*$.*?^\s+name:\s+http\s*$",
+        collaboration_ingress,
+    )
+    collaboration_annotations = yaml_block(collaboration_ingress, "annotations")
+    assert "mb-docs-hsts-header@kubernetescrd" in collaboration_annotations
+    assert "opensuite-auth-gate" not in collaboration_annotations
+
+    browser_ingress = run(
+        "helm", "template", "docs", str(chart), "-f", str(override),
+        "--namespace", "mb-docs",
+        "--show-only", "templates/ingress.yaml",
+    )
+    assert re.search(r"(?m)^\s*- host:\s+docs\.example\.test\s*$", browser_ingress)
+    assert re.search(
+        r"(?ms)^\s*- path:\s+/\s*$.*?"
+        r"^\s+name:\s+docs-frontend\s*$.*?^\s+name:\s+http\s*$",
+        browser_ingress,
+    )
+    browser_annotations = yaml_block(browser_ingress, "annotations")
+    assert "mb-docs-hsts-header@kubernetescrd" in browser_annotations
+    assert "mb-bureaublad-opensuite-auth-gate@kubernetescrd" in browser_annotations
 
     rendered_jobs = run(
         "helm", "template", "docs", str(chart), "-f", str(override),
