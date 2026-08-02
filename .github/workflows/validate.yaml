@@ -75,6 +75,8 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - uses: azure/setup-helm@v4
+        with:
+          version: v3.18.4
       - name: Apply infra patch series
         run: |
           ref=$(cat UPSTREAM_REF)
@@ -94,13 +96,37 @@ jobs:
         run: python3 ci/test-docs-v5.2.1-performance.py --infra-source /tmp/infra
       - name: Validate Element preflight cache middleware
         run: |
-          helm dependency build /tmp/infra/helmfile/apps/element/charts/synapse
-          helm template synapse /tmp/infra/helmfile/apps/element/charts/synapse \
-            --namespace mb-element \
-            --set cluster.ingress.type=traefik \
-            --set cluster.routingMode=ingress \
-            --set ingress.enabled=true > /tmp/synapse-rendered.yaml
-          node ci/test-element-quick-wins.mjs --verify-infra /tmp/infra
+          curl -fsSL https://github.com/helmfile/helmfile/releases/download/v1.1.7/helmfile_1.1.7_linux_amd64.tar.gz \
+            | tar -xz -C /tmp helmfile
+          python3 - <<'PY'
+          from pathlib import Path
+
+          rendered = Path('helmfile/demo-values.yaml.tmpl').read_text()
+          values = {
+              'DOMAIN': 'example.test',
+              'TLS_SELF_SIGNED': 'true',
+              'INGRESS_ANNOTATIONS': '',
+              'NEXTCLOUD_TAG': '34.0.0-apache',
+              'PORTAL_SHA': '34512e5',
+              'MEET_TAG': 'v1.20.0',
+              'ELEMENT_TAG': 'sha-test',
+              'COLLABORA_TAG': 'sha-test',
+              'KC_BACKCHANNEL': 'http://keycloak-keycloak.mb-keycloak',
+          }
+          for name, value in values.items():
+              rendered = rendered.replace('${' + name + '}', value)
+          destination = Path('/tmp/infra/helmfile/environments/demo/mijnbureau.yaml.gotmpl')
+          destination.parent.mkdir(parents=True, exist_ok=True)
+          destination.write_text(rendered)
+          PY
+          (
+            cd /tmp/infra
+            PATH="/tmp:${PATH}" \
+              MIJNBUREAU_MASTER_PASSWORD=test-password \
+              MIJNBUREAU_CREATE_NAMESPACES=false \
+              /tmp/helmfile -e demo --selector name=synapse template --skip-needs \
+              > /tmp/synapse-rendered.yaml
+          )
           node ci/test-element-quick-wins.mjs --verify-rendered /tmp/synapse-rendered.yaml
       - name: Assemble patched Meet source
         run: |
