@@ -16,6 +16,7 @@ const chunkRequest = (request) => {
 
 const browser = await chromium.launch({ headless: true });
 const page = await browser.newPage();
+let release;
 let createPosts = 0;
 page.on("request", (request) => {
   const url = new URL(request.url());
@@ -75,7 +76,6 @@ try {
 
   await page.unrouteAll({ behavior: "wait" });
   await page.reload({ waitUntil: "domcontentloaded" });
-  let release;
   let finishContinuation;
   let intercepted = 0;
   const held = new Promise((resolve) => { release = resolve; });
