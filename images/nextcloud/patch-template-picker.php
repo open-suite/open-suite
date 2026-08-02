@@ -7,6 +7,8 @@ const FILES_INIT_SHA256 = 'b70e746da0f331f19e8deaf494f806baea2decd4de9964d1f2c99
 const FILES_INIT_MAP_SHA256 = '208945a2b732e8e863915e98544bac78ea6958898d149c3f23ab756897362ea8';
 const TEMPLATE_PICKER_CHUNK_SHA256 = '0400acc742f52d27ad940a2fdc3cb216b1181e35d05882e7797ad24e991d9710';
 const TEMPLATE_PICKER_CHUNK_MAP_SHA256 = 'fdce7694964d98df40e135d37a26d92d3d7a2e167da6697c0f4b88e3e1fe7ecc';
+const TEMPLATE_PICKER_MAP_FILE = '7497-7497.js?v=4c13f30ae7ab10413c2e';
+const TEMPLATE_PICKER_RUNTIME_URL = '7497-7497.js?v=94a5bd32402d33b444dc';
 const VIEW_CONTROLLER_SHA256 = '809cb4156b66c9460ca20137ca3b8768ea241c2968e2accd5f72a4417eb82c79';
 const PATCHED_BUNDLE_SHA256 = 'd0c0c4e579d36ccdcbccccb9bdcd483c04e945a2bcc71c99524431bd9df88f3c';
 
@@ -102,8 +104,14 @@ function readFileStrict(string $path): string {
 }
 
 function transformBundle(string $bundle): string {
+	[$runtimeBasename, $runtimeVersion] = explode('?v=', TEMPLATE_PICKER_RUNTIME_URL, 2);
+	if ($runtimeBasename !== explode('?', TEMPLATE_PICKER_MAP_FILE, 2)[0]) {
+		throw new RuntimeException('NC34 TemplatePicker runtime and source-map basenames differ');
+	}
 	requireCount($bundle, OLD_BUNDLE, 1, 'NC34 TemplatePicker loader preimage');
 	requireCount($bundle, OLD_FACTORY, 1, 'NC34 vulnerable TemplatePicker factory');
+	requireCount($bundle, 'a.u=e=>e+"-"+e+".js?v="+', 1, 'NC34 physical chunk URL builder');
+	requireCount($bundle, "7497:\"{$runtimeVersion}\"", 1, 'NC34 TemplatePicker physical chunk URL version');
 	requireCount($bundle, NEW_BUNDLE, 0, 'patched TemplatePicker loader before transform');
 	requireCount($bundle, NEW_FACTORY, 0, 'patched TemplatePicker factory before transform');
 	$candidate = str_replace([OLD_BUNDLE, OLD_FACTORY], [NEW_BUNDLE, NEW_FACTORY], $bundle);
@@ -129,8 +137,32 @@ $root = rtrim($argv[1], '/');
 $dist = "{$root}/dist";
 $bundlePath = "{$dist}/files-init.js";
 $mapPath = "{$dist}/files-init.js.map";
-$chunkPath = "{$dist}/7497-7497.js";
-$chunkMapPath = "{$dist}/7497-7497.js.map";
+$pickerMaps = [];
+foreach (glob("{$dist}/*.js.map") ?: [] as $candidateMapPath) {
+	$candidateMapContent = readFileStrict($candidateMapPath);
+	if (!str_contains($candidateMapContent, 'apps/files/src/views/TemplatePicker.vue')) {
+		continue;
+	}
+	$candidateMap = json_decode($candidateMapContent, true, 512, JSON_THROW_ON_ERROR);
+	foreach ($candidateMap['sources'] ?? [] as $source) {
+		if (str_ends_with($source, 'apps/files/src/views/TemplatePicker.vue')) {
+			$pickerMaps[] = [$candidateMapPath, $candidateMap];
+			break;
+		}
+	}
+}
+if (count($pickerMaps) !== 1) {
+	throw new RuntimeException('expected exactly one physical NC34 TemplatePicker source map');
+}
+[$chunkMapPath, $chunkMap] = $pickerMaps[0];
+if (($chunkMap['file'] ?? null) !== TEMPLATE_PICKER_MAP_FILE) {
+	throw new RuntimeException('pinned NC34 TemplatePicker source-map file mismatch');
+}
+$chunkBasename = explode('?', TEMPLATE_PICKER_MAP_FILE, 2)[0];
+if (basename($chunkMapPath) !== "{$chunkBasename}.map") {
+	throw new RuntimeException('NC34 TemplatePicker source map does not match its physical JS basename');
+}
+$chunkPath = "{$dist}/{$chunkBasename}";
 $controllerPath = "{$root}/apps/files/lib/Controller/ViewController.php";
 $expected = [
 	$bundlePath => FILES_INIT_SHA256,

@@ -11,7 +11,7 @@ const chunkRequest = (request) => {
   const url = new URL(request.url());
   return url.origin === baseUrl.origin
     && url.pathname === "/dist/7497-7497.js"
-    && /^[0-9a-f]+(?:-[0-9]+)?$/.test(url.searchParams.get("v") || "");
+    && url.searchParams.get("v") === "94a5bd32402d33b444dc";
 };
 
 const browser = await chromium.launch({ headless: true });
@@ -44,22 +44,23 @@ async function openFiles() {
 
 async function initiateDocument() {
   await page.getByRole("button", { name: "New", exact: true }).click();
-  const menuItems = page.locator('[role="menuitem"]');
-  const documentItem = page.getByRole("menuitem", { name: "Document", exact: true });
+  const menuItems = page.locator('[role="menu"]:visible [role="menuitem"]');
+  const documentItem = menuItems.getByRole("menuitem", { name: "Document", exact: true });
   assert.equal(await documentItem.count(), 1, `New menu=${JSON.stringify(await menuItems.evaluateAll((items) => items.map((item) => ({
     text: item.textContent?.trim(),
     tag: item.tagName.toLowerCase(),
     role: item.getAttribute("role"),
     id: item.id,
-    dataCy: item.getAttribute("data-cy-files-new-node-menu-entry"),
+    attributes: Object.fromEntries(Array.from(item.attributes, ({ name, value }) => [name, value])),
   }))))}`);
   console.log(`initiating Office action=${JSON.stringify(await documentItem.evaluate((item) => ({
     text: item.textContent?.trim(),
     tag: item.tagName.toLowerCase(),
     role: item.getAttribute("role"),
     id: item.id,
-    dataCy: item.getAttribute("data-cy-files-new-node-menu-entry"),
+    attributes: Object.fromEntries(Array.from(item.attributes, ({ name, value }) => [name, value])),
   })))}`);
+  distRequests.length = 0;
   await documentItem.click();
 }
 
@@ -73,7 +74,7 @@ async function waitForExactChunk(requestPromise) {
         tag: item.tagName.toLowerCase(),
         role: item.getAttribute("role"),
         id: item.id,
-        dataCy: item.getAttribute("data-cy-files-new-node-menu-entry"),
+        attributes: Object.fromEntries(Array.from(item.attributes, ({ name, value }) => [name, value])),
       })));
     throw new Error(`exact TemplatePicker chunk was not requested; New menu=${JSON.stringify(menuItems)}; observed dist requests=${JSON.stringify(distRequests)}`, { cause: error });
   }
