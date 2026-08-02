@@ -28,8 +28,12 @@ async function openFiles() {
   await page.goto(new URL("/login", baseUrl).href);
   if (await page.locator("#user").isVisible().catch(() => false)) {
     await page.locator("#user").fill(process.env.NEXTCLOUD_ADMIN_USER);
-    await page.locator("#password").fill(process.env.NEXTCLOUD_ADMIN_PASSWORD);
-    await page.locator("#submit-form").click();
+    const password = page.locator("#password");
+    await password.fill(process.env.NEXTCLOUD_ADMIN_PASSWORD);
+    await Promise.all([
+      page.waitForURL((url) => url.pathname !== "/login", { timeout: 30_000 }),
+      password.press("Enter"),
+    ]);
   }
   await page.goto(new URL("/apps/files/files", baseUrl).href, { waitUntil: "domcontentloaded" });
   await page.locator("#app-content-files, .files-list, [data-testid='files-list']").first()
