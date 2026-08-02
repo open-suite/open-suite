@@ -48,6 +48,7 @@ REFRESH_SKEW = int(os.environ.get("OIDC_REFRESH_SKEW_SECONDS", "30"))
 REQUEST_ID_HEADER = "X-Open-Suite-Request-ID"
 SERVER_TIMING_HEADER = "Server-Timing"
 REQUEST_ID_PATTERN = re.compile(r"^[0-9a-f]{32}$")
+_LOG_RECORD_LOCK = threading.Lock()
 
 AUTH_ENDPOINT = f"{ISSUER}/protocol/openid-connect/auth"
 TOKEN_ENDPOINT = f"{ISSUER}/protocol/openid-connect/token"
@@ -314,6 +315,12 @@ def observed_request_id(handler: http.server.BaseHTTPRequestHandler) -> str:
     if REQUEST_ID_PATTERN.fullmatch(candidate):
         return candidate
     return secrets.token_hex(16)
+
+
+def emit_log_record(record: str) -> None:
+    """Write one complete physical log line under concurrent request load."""
+    with _LOG_RECORD_LOCK:
+        print(record, flush=True)
 
 
 def forwarded_request(handler: http.server.BaseHTTPRequestHandler) -> tuple[str, str, str] | None:
@@ -592,7 +599,7 @@ class Handler(http.server.BaseHTTPRequestHandler):
     server_version = "opensuite-auth-gate/1.0"
 
     def log_message(self, fmt: str, *args: object) -> None:
-        print(f"{self.address_string()} - {fmt % args}", flush=True)
+        emit_log_record(f"{self.address_string()} - {fmt % args}")
 
     def log_request(self, code: int | str = "-", size: int | str = "-") -> None:
         # Authorization codes, state and WOPI access tokens can appear in query
@@ -619,7 +626,7 @@ class Handler(http.server.BaseHTTPRequestHandler):
         response_headers[REQUEST_ID_HEADER] = request_id
         response_headers[SERVER_TIMING_HEADER] = f"opensuite_auth;dur={duration_ms:.1f}"
         self.send_empty(status, response_headers)
-        print(
+        emit_log_record(
             json.dumps(
                 {
                     "event": "auth_gate",
@@ -629,8 +636,7 @@ class Handler(http.server.BaseHTTPRequestHandler):
                     "duration_ms": round(duration_ms, 1),
                 },
                 separators=(",", ":"),
-            ),
-            flush=True,
+            )
         )
 
     def send_empty(self, status: int, headers: dict[str, str] | None = None) -> None:

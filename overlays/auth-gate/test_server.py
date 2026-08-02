@@ -6,6 +6,7 @@ import os
 from pathlib import Path
 import re
 import threading
+import time
 import types
 import unittest
 import urllib.error
@@ -20,13 +21,23 @@ os.environ.setdefault("COOKIE_SECRET", "cookie-secret")
 import server  # noqa: E402
 
 
-def request(path: str, headers: dict[str, str] | None = None, method: str = "GET") -> http.client.HTTPResponse:
+def request(
+    path: str,
+    headers: dict[str, str] | list[tuple[str, str]] | None = None,
+    method: str = "GET",
+) -> http.client.HTTPResponse:
     httpd = server.http.server.ThreadingHTTPServer(("127.0.0.1", 0), server.Handler)
     thread = threading.Thread(target=httpd.serve_forever)
     thread.start()
     try:
         connection = http.client.HTTPConnection("127.0.0.1", httpd.server_port)
-        connection.request(method, path, headers=headers or {})
+        if isinstance(headers, list):
+            connection.putrequest(method, path)
+            for name, value in headers:
+                connection.putheader(name, value)
+            connection.endheaders()
+        else:
+            connection.request(method, path, headers=headers or {})
         response = connection.getresponse()
         response.read()
         return response
@@ -686,14 +697,84 @@ class ObservabilityTests(unittest.TestCase):
                 self.assertNotEqual(generated, invalid)
                 self.assertNotEqual(generated, valid)
 
-    def test_duplicate_request_ids_are_replaced(self) -> None:
+    def test_duplicate_physical_request_id_headers_are_replaced(self) -> None:
         valid = "0123456789abcdef0123456789abcdef"
-        headers = mock.Mock()
-        headers.get_all.return_value = [valid, valid]
-        handler = types.SimpleNamespace(headers=headers)
 
         with mock.patch.object(server.secrets, "token_hex", return_value="f" * 32):
-            self.assertEqual(server.observed_request_id(handler), "f" * 32)
+            response = request(
+                "/auth",
+                [
+                    (server.REQUEST_ID_HEADER, valid),
+                    (server.REQUEST_ID_HEADER, valid),
+                ],
+            )
+
+        self.assertEqual(response.status, 400)
+        self.assertEqual(response.getheader(server.REQUEST_ID_HEADER), "f" * 32)
+
+    def test_concurrent_log_records_remain_exact_schema_json_lines(self) -> None:
+        class YieldingStream:
+            def __init__(self) -> None:
+                self.characters: list[str] = []
+
+            def write(self, value: str) -> int:
+                for character in value:
+                    self.characters.append(character)
+                    time.sleep(0)
+                return len(value)
+
+            def flush(self) -> None:
+                return None
+
+            def getvalue(self) -> str:
+                return "".join(self.characters)
+
+        request_count = 12
+        started = threading.Barrier(request_count)
+        statuses: list[int] = []
+        failures: list[BaseException] = []
+        output = YieldingStream()
+        httpd = server.http.server.ThreadingHTTPServer(("127.0.0.1", 0), server.Handler)
+        server_thread = threading.Thread(target=httpd.serve_forever)
+
+        def worker() -> None:
+            try:
+                started.wait(timeout=5)
+                connection = http.client.HTTPConnection("127.0.0.1", httpd.server_port)
+                connection.request("GET", "/auth")
+                response = connection.getresponse()
+                response.read()
+                statuses.append(response.status)
+                connection.close()
+            except BaseException as error:
+                failures.append(error)
+
+        with contextlib.redirect_stdout(output):
+            server_thread.start()
+            try:
+                threads = [threading.Thread(target=worker) for _ in range(request_count)]
+                for thread in threads:
+                    thread.start()
+                for thread in threads:
+                    thread.join()
+            finally:
+                httpd.shutdown()
+                httpd.server_close()
+                server_thread.join()
+
+        self.assertFalse(failures)
+        self.assertEqual(statuses, [400] * request_count)
+        lines = output.getvalue().splitlines()
+        self.assertEqual(len(lines), request_count)
+        expected_keys = {"event", "request_id", "outcome", "status", "duration_ms"}
+        for line in lines:
+            event = json.loads(line)
+            self.assertEqual(set(event), expected_keys)
+            self.assertEqual(event["event"], "auth_gate")
+            self.assertRegex(event["request_id"], self.request_id_pattern)
+            self.assertEqual(event["outcome"], "reject")
+            self.assertEqual(event["status"], 400)
+            self.assertIsInstance(event["duration_ms"], float)
 
     def test_logs_and_observability_headers_exclude_sensitive_request_data(self) -> None:
         sentinels = (
