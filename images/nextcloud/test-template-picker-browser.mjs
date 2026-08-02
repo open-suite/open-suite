@@ -118,6 +118,17 @@ try {
   const documents = providers.filter((provider) => provider.app === "richdocuments"
     && provider.label === "Document" && provider.extension === ".docx");
   assert.equal(documents.length, 1, `template providers=${JSON.stringify(providers)}`);
+  const templates = await page.evaluate(async () => {
+    const response = await fetch("/ocs/v2.php/apps/files/api/v1/templates?format=json", {
+      headers: { "OCS-APIRequest": "true", requesttoken: OC.requestToken },
+    });
+    if (!response.ok) throw new Error(`template fixture request failed: ${response.status}`);
+    return (await response.json()).ocs.data;
+  });
+  const documentTemplates = templates.find((provider) => provider.app === "richdocuments"
+    && provider.label === "Document");
+  assert.deepEqual(documentTemplates?.templates, [],
+    `candidate Document templates=${JSON.stringify(documentTemplates?.templates)}`);
 
   let aborted = 0;
   let finishAbort;

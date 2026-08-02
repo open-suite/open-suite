@@ -141,6 +141,14 @@ jobs:
             config:app:set richdocuments edit_groups --value=''
           docker exec -u www-data opensuite-nextcloud-browser php occ \
             richdocuments:activate-config --wopi-url=http://host.docker.internal:18081
+          curl --fail-with-body --silent --show-error \
+            --user admin:[REDACTED:password] \
+            --header 'OCS-APIRequest: true' \
+            --header 'Content-Type: application/json' \
+            --request POST \
+            --data '{"templatePath":"IntegrationTemplates","copySystemTemplates":false}' \
+            'http://127.0.0.1:18080/ocs/v2.php/apps/files/api/v1/templates/path?format=json' \
+            >/tmp/template-directory-response.json
           npm install --prefix /tmp/template-picker-browser --no-audit --no-fund --silent playwright@1.54.2
           /tmp/template-picker-browser/node_modules/.bin/playwright install --with-deps chromium
           NEXTCLOUD_URL=http://127.0.0.1:18080 \
