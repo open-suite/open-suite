@@ -210,13 +210,14 @@ collect_diagnostics() {
   } > "${diagnostics}/host-network.txt" 2>&1
 
   while read -r namespace resource; do
-    kubectl logs -n "${namespace}" "${resource}" --all-containers --prefix --tail=500 \
+    kubectl logs -n "${namespace}" "${resource}" --all-pods=true --all-containers --prefix --tail=500 \
       > "${diagnostics}/pod-logs/${namespace}_${resource//\//_}.log" 2>&1
   done <<'LOG_TARGETS'
 kube-system deployment/traefik
 mb-bureaublad deployment/opensuite-auth-gate
 mb-keycloak statefulset/keycloak-keycloak
 mb-docs deployment/docs-backend
+mb-docs deployment/docs-y-provider
 mb-messages deployment/messages-frontend
 mb-messages deployment/messages-backend
 LOG_TARGETS
