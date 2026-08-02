@@ -87,6 +87,8 @@ jobs:
           done
       - name: Validate Collabora chart image and Service contracts
         run: node ci/test-collabora-image-runtime.mjs --verify-infra /tmp/infra
+      - name: Validate Nextcloud CronJob resources
+        run: bash ci/test-nextcloud-cronjob-resources.sh /tmp/infra
       - name: Validate rendered Nextcloud Whiteboard backend
         run: bash ci/test-nextcloud-whiteboard.sh /tmp/infra
       - name: Validate Docs v5.2.1 performance patches
