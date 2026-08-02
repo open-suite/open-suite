@@ -35,11 +35,14 @@ body_contracts = (
     '<span>Open Suite</span>',
     'sub_filter_once on;',
 )
+delivery_contracts = (
+    'add_header X-Upstream-Header-Time "$upstream_header_time" always;',
+)
 for app, path in configs.items():
     rendered_source = path.read_text()
-    for contract in head_contracts + body_contracts:
+    for contract in head_contracts + body_contracts + delivery_contracts:
         if contract not in rendered_source:
-            raise AssertionError(f"{app} is missing first-paint contract: {contract}")
+            raise AssertionError(f"{app} is missing shared delivery contract: {contract}")
     if rendered_source.index("sub_filter '</head>'") > rendered_source.index("sub_filter '</body>'"):
         raise AssertionError(f"{app} does not initiate the canonical asset before the shell node")
 
