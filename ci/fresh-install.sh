@@ -360,10 +360,22 @@ assert_complete_stack() {
   kubectl get deployment,statefulset -A -o wide
 }
 
+assert_deck_calendar_default() {
+  local value
+  value="$(kubectl -n mb-nextcloud exec deploy/nextcloud -c nextcloud -- \
+    sh -c 'cd /var/www/html && php occ config:app:get deck calendar')"
+  if [ "${value}" != "no" ]; then
+    echo "ERROR: Deck calendar default is '${value}', expected 'no'" >&2
+    return 1
+  fi
+  echo "ok   Deck calendar default: no"
+}
+
 local_conformance() {
   local label="$1"
   wait_for_cluster "${label}"
   assert_complete_stack
+  assert_deck_calendar_default
   SMOKE_INSECURE=1 bash "${REPO}/ci/smoke/smoke.sh" "${DOMAIN}"
 }
 

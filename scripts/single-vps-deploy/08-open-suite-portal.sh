@@ -24,10 +24,11 @@ for app in calendar deck contacts; do
 done
 
 # Deck exposes every board as a virtual CalDAV calendar by default. Open Suite
-# uses Deck for Projects, not as a second calendar source; disabling this
-# optional projection keeps boards/cards intact while avoiding a DAV REPORT per
-# board whenever Calendar loads. app config is persistent, and setting the same
-# value on every deploy makes fresh installs and upgrades converge safely.
+# keeps that projection default-off unless explicit per-user/per-board choices
+# enable it. This preserves Deck and its boards/cards while avoiding a DAV
+# REPORT per projected board whenever Calendar loads. App config is persistent,
+# and setting the same default on every deploy makes fresh installs and upgrades
+# converge safely without rewriting user preferences.
 kubectl -n mb-nextcloud exec deploy/nextcloud -c nextcloud -- \
   sh -c "cd /var/www/html && php occ config:app:set deck calendar --value=no"
 
