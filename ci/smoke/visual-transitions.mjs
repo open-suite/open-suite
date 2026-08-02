@@ -576,13 +576,19 @@ async function createOfficeLifecycleFixture({ page, check }, fixture) {
       && /^[0-9a-f]+$/.test(url.searchParams.get("v") || "");
   };
   let releaseChunk;
+  let finishChunkContinuation;
   let chunkReleased = false;
   let interceptedChunks = 0;
   const heldChunk = new Promise((resolve) => { releaseChunk = resolve; });
+  const chunkContinued = new Promise((resolve) => { finishChunkContinuation = resolve; });
   const chunkRoute = async (route) => {
     interceptedChunks += 1;
-    await heldChunk;
-    await route.continue();
+    try {
+      await heldChunk;
+      await route.continue();
+    } finally {
+      finishChunkContinuation();
+    }
   };
   const pageErrors = [];
   const recordPageError = (error) => pageErrors.push(error.message);
@@ -612,6 +618,7 @@ async function createOfficeLifecycleFixture({ page, check }, fixture) {
       releaseChunk();
     } finally {
       if (!chunkReleased) releaseChunk();
+      if (interceptedChunks > 0) await chunkContinued;
       await page.unroute("**/dist/7497-7497.js*", chunkRoute);
     }
 

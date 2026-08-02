@@ -76,13 +76,19 @@ try {
   await page.unrouteAll({ behavior: "wait" });
   await page.reload({ waitUntil: "domcontentloaded" });
   let release;
+  let finishContinuation;
   let intercepted = 0;
   const held = new Promise((resolve) => { release = resolve; });
+  const continued = new Promise((resolve) => { finishContinuation = resolve; });
   await page.route("**/dist/7497-7497.js*", async (route) => {
     assert.equal(chunkRequest(route.request()), true);
     intercepted += 1;
-    await held;
-    await route.continue();
+    try {
+      await held;
+      await route.continue();
+    } finally {
+      finishContinuation();
+    }
   });
   const exactChunk = page.waitForRequest(chunkRequest, { timeout: 30_000 });
   const pageErrors = [];
@@ -92,6 +98,7 @@ try {
   assert.equal(intercepted, 1);
   assert.deepEqual(pageErrors, []);
   release();
+  await continued;
   await page.unrouteAll({ behavior: "wait" });
 
   const dialog = page.locator("[data-cy-files-new-node-dialog]").first();
