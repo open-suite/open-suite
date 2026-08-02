@@ -94,8 +94,15 @@ jobs:
 
       - name: Verify candidate image TemplatePicker in a browser
         run: |
-          trap 'status=$?; if test "$status" -ne 0; then docker logs opensuite-nextcloud-browser || true; fi; docker rm -f opensuite-nextcloud-browser >/dev/null 2>&1 || true; exit "$status"' EXIT
-          docker run -d --name opensuite-nextcloud-browser -p 127.0.0.1:18080:80 \
+          trap 'status=$?; if test "$status" -ne 0; then docker logs opensuite-nextcloud-browser || true; fi; kill "${capabilities_pid:-}" >/dev/null 2>&1 || true; docker rm -f opensuite-nextcloud-browser >/dev/null 2>&1 || true; exit "$status"' EXIT
+          mkdir -p /tmp/collabora-fixture/hosting
+          printf '%s\n' '{"productName":"Open Suite browser fixture"}' \
+            >/tmp/collabora-fixture/hosting/capabilities
+          python3 -m http.server 18081 --directory /tmp/collabora-fixture >/tmp/collabora-fixture.log 2>&1 &
+          capabilities_pid=$!
+          docker run -d --name opensuite-nextcloud-browser \
+            --add-host host.docker.internal:host-gateway \
+            -p 127.0.0.1:18080:80 \
             -e SQLITE_DATABASE=opensuite-browser \
             -e NEXTCLOUD_ADMIN_USER=admin \
             -e NEXTCLOUD_ADMIN_PASSWORD=opensuite-browser-test \
@@ -108,6 +115,16 @@ jobs:
             sleep 2
           done
           docker exec -u www-data opensuite-nextcloud-browser php occ app:enable richdocuments
+          docker exec -u www-data opensuite-nextcloud-browser php occ \
+            config:system:set allow_local_remote_servers --type=boolean --value=true
+          docker exec -u www-data opensuite-nextcloud-browser php occ \
+            config:app:set richdocuments wopi_url --value=http://host.docker.internal:18081
+          docker exec -u www-data opensuite-nextcloud-browser php occ \
+            config:app:set richdocuments public_wopi_url --value=http://host.docker.internal:18081
+          docker exec -u www-data opensuite-nextcloud-browser php occ \
+            config:app:set richdocuments use_groups --value=''
+          docker exec -u www-data opensuite-nextcloud-browser php occ \
+            config:app:set richdocuments edit_groups --value=''
           npm install --prefix /tmp/template-picker-browser --no-audit --no-fund --silent playwright@1.54.2
           /tmp/template-picker-browser/node_modules/.bin/playwright install --with-deps chromium
           NEXTCLOUD_URL=http://127.0.0.1:18080 \

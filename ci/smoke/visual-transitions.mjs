@@ -605,6 +605,7 @@ async function createOfficeLifecycleFixture({ page, check }, fixture) {
   page.on("pageerror", recordPageError);
   page.on("response", recordCreationPost);
   try {
+    let creationResponsePromise;
     try {
       const chunkRequestPromise = page.waitForRequest(templatePickerChunk, { timeout: 30_000 });
       await page.getByRole("button", { name: "New", exact: true }).click();
@@ -614,6 +615,18 @@ async function createOfficeLifecycleFixture({ page, check }, fixture) {
       check("one Document initiation holds the exact generated TemplatePicker chunk",
         templatePickerChunk(chunkRequest) && interceptedChunks === 1 && pageErrors.length === 0, true,
         `url=${chunkRequest.url()},interceptions=${interceptedChunks},pageErrors=${pageErrors.join(" | ")}`);
+
+      const dialog = page.locator("[data-cy-files-new-node-dialog]").first();
+      await dialog.waitFor({ state: "visible" });
+      await dialog.getByRole("textbox", { name: /name/i }).fill(fixture.name.slice(0, -".docx".length));
+      fixture.cleanupRequired = true;
+      creationResponsePromise = page.waitForResponse((response) => {
+        const url = new URL(response.url());
+        return response.request().method() === "POST"
+          && url.origin === `https://nextcloud.${domain}`
+          && url.pathname === "/ocs/v2.php/apps/files/api/v1/templates/create";
+      }, { timeout: 30_000 });
+      await dialog.getByRole("button", { name: "Create", exact: true }).click();
       chunkReleased = true;
       releaseChunk();
     } finally {
@@ -622,17 +635,6 @@ async function createOfficeLifecycleFixture({ page, check }, fixture) {
       await page.unroute("**/dist/7497-7497.js*", chunkRoute);
     }
 
-    const dialog = page.locator("[data-cy-files-new-node-dialog]").first();
-    await dialog.waitFor({ state: "visible" });
-    await dialog.getByRole("textbox", { name: /name/i }).fill(fixture.name.slice(0, -".docx".length));
-    fixture.cleanupRequired = true;
-    const creationResponsePromise = page.waitForResponse((response) => {
-      const url = new URL(response.url());
-      return response.request().method() === "POST"
-        && url.origin === `https://nextcloud.${domain}`
-        && url.pathname === "/ocs/v2.php/apps/files/api/v1/templates/create";
-    }, { timeout: 30_000 });
-    await dialog.getByRole("button", { name: "Create", exact: true }).click();
     const creationResponse = await creationResponsePromise;
     check("one supported UI template creation request succeeds",
       creationResponse.status() === 200 && creationPosts === 1, true,

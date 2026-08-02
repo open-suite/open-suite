@@ -18,8 +18,10 @@ const browser = await chromium.launch({ headless: true });
 const page = await browser.newPage();
 let release;
 let createPosts = 0;
+const distRequests = [];
 page.on("request", (request) => {
   const url = new URL(request.url());
+  if (url.pathname.startsWith("/dist/")) distRequests.push(`${url.pathname}${url.search}`);
   if (request.method() === "POST"
       && url.pathname === "/ocs/v2.php/apps/files/api/v1/templates/create") createPosts += 1;
 });
@@ -42,8 +44,14 @@ async function openFiles() {
 
 async function initiateDocument() {
   await page.getByRole("button", { name: "New", exact: true }).click();
-  await page.locator('[role="menuitem"], .v-popper__popper button, .v-popper__popper li')
-    .filter({ hasText: /^\s*Document\s*$/ }).first().click();
+  const menuItems = page.locator('[role="menuitem"], .v-popper__popper button, .v-popper__popper li');
+  const documentItem = menuItems.filter({ hasText: /^\s*Document\s*$/ });
+  assert.equal(await documentItem.count(), 1, `New menu=${JSON.stringify(await menuItems.evaluateAll((items) => items.map((item) => ({
+    text: item.textContent?.trim(),
+    id: item.id,
+    dataCy: item.getAttribute("data-cy-files-new-node-menu-entry"),
+  }))))}`);
+  await documentItem.click();
 }
 
 async function dav(method) {
@@ -64,6 +72,10 @@ async function dav(method) {
 try {
   await openFiles();
   assert.equal((await dav("HEAD")).status, 404);
+  const providers = await page.evaluate(() => OCP.InitialState.loadState("files", "templates", []));
+  const documents = providers.filter((provider) => provider.app === "richdocuments"
+    && provider.label === "Document" && provider.extension === ".docx");
+  assert.equal(documents.length, 1, `template providers=${JSON.stringify(providers)}`);
 
   let aborted = 0;
   let finishAbort;
@@ -79,7 +91,8 @@ try {
   });
   const exactAbortedChunk = page.waitForRequest(chunkRequest, { timeout: 30_000 });
   await initiateDocument();
-  assert.equal(chunkRequest(await exactAbortedChunk), true);
+  assert.equal(chunkRequest(await exactAbortedChunk), true,
+    `observed dist requests=${JSON.stringify(distRequests)}`);
   await abortFinished;
   assert.equal(aborted, 1);
   assert.equal(createPosts, 0);
@@ -108,10 +121,6 @@ try {
   await exactChunk;
   assert.equal(intercepted, 1);
   assert.deepEqual(pageErrors, []);
-  release();
-  await continued;
-  await page.unrouteAll({ behavior: "wait" });
-
   const dialog = page.locator("[data-cy-files-new-node-dialog]").first();
   await dialog.waitFor({ state: "visible", timeout: 30_000 });
   await dialog.getByRole("textbox", { name: /name/i }).fill(fileName.slice(0, -5));
@@ -121,6 +130,9 @@ try {
       && url.pathname === "/ocs/v2.php/apps/files/api/v1/templates/create";
   }, { timeout: 30_000 });
   await dialog.getByRole("button", { name: "Create", exact: true }).click();
+  release();
+  await continued;
+  await page.unrouteAll({ behavior: "wait" });
   assert.equal((await createdResponse).status(), 200);
   const created = await dav("HEAD");
   assert.deepEqual({ status: created.status, type: created.type }, {
