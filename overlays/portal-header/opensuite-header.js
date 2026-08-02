@@ -231,6 +231,15 @@
       // very top, which the overlay would cover — push it below the bar and
       // shrink it so nothing (room search, message composer) is hidden or cut.
       "html.ko-on-element #matrixchat{margin-top:var(" + HEADER_HEIGHT_VAR + ") !important;height:calc(100vh - var(" + HEADER_HEIGHT_VAR + ")) !important;}",
+      // Element's first-run desktop-notification toast defaults to the top-left
+      // of #matrixchat, directly over room search. Keep it to the right of the
+      // room-list rail on desktop; where there is no safe horizontal lane,
+      // place it below the search row instead.
+      "html.ko-on-element .mx_ToastContainer{position:fixed !important;left:auto !important;right:16px !important;",
+      "top:calc(var(" + HEADER_HEIGHT_VAR + ") + 12px) !important;}",
+      "@media(max-width:899px){html.ko-on-element .mx_ToastContainer{right:12px !important;",
+      "top:calc(var(" + HEADER_HEIGHT_VAR + ") + 76px) !important;",
+      "max-width:calc(100vw - 24px) !important;}}",
       // Nextcloud's native header is absolute and #content is fixed. Reserve a
       // real row for both so Calendar's navigation and controls are never under
       // the suite shell and the app still fits exactly inside the viewport.

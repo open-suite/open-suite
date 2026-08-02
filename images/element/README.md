@@ -17,9 +17,14 @@ are unchanged.
 
 The image precompresses only the content-hashed files under `bundles/` at the
 same gzip level used by nginx, then serves those copies with `gzip_static`.
+Those fingerprinted bundle paths also receive
+`Cache-Control: public, max-age=31536000, immutable`; the location requires a
+hash-led bundle directory and accepts Open Suite's build-specific suffix.
 Mutable runtime files such as `config.json` are deliberately excluded so a
 generated configuration can never be shadowed by a stale build-time `.gz`
-file. Dynamic gzip remains enabled for non-bundle textual responses.
+file or cached as immutable. Root HTML, service workers and unversioned overlay
+assets remain outside the immutable location. Dynamic gzip remains enabled for
+non-bundle textual responses.
 
 The final stage also contains only one Element application tree. Building on
 the upstream image and copying a patched `/app` over it retained both the old
