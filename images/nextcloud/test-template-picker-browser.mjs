@@ -44,14 +44,32 @@ async function openFiles() {
 
 async function initiateDocument() {
   await page.getByRole("button", { name: "New", exact: true }).click();
-  const menuItems = page.locator('[role="menuitem"], .v-popper__popper button, .v-popper__popper li');
-  const documentItem = menuItems.filter({ hasText: /^\s*Document\s*$/ });
+  const menuItems = page.locator('[role="menuitem"]');
+  const documentItem = page.getByRole("menuitem", { name: "Document", exact: true });
   assert.equal(await documentItem.count(), 1, `New menu=${JSON.stringify(await menuItems.evaluateAll((items) => items.map((item) => ({
     text: item.textContent?.trim(),
+    tag: item.tagName.toLowerCase(),
+    role: item.getAttribute("role"),
     id: item.id,
     dataCy: item.getAttribute("data-cy-files-new-node-menu-entry"),
   }))))}`);
   await documentItem.click();
+}
+
+async function waitForExactChunk(requestPromise) {
+  try {
+    return await requestPromise;
+  } catch (error) {
+    const menuItems = await page.locator('[role="menuitem"], .v-popper__popper button, .v-popper__popper li')
+      .evaluateAll((items) => items.map((item) => ({
+        text: item.textContent?.trim(),
+        tag: item.tagName.toLowerCase(),
+        role: item.getAttribute("role"),
+        id: item.id,
+        dataCy: item.getAttribute("data-cy-files-new-node-menu-entry"),
+      })));
+    throw new Error(`exact TemplatePicker chunk was not requested; New menu=${JSON.stringify(menuItems)}; observed dist requests=${JSON.stringify(distRequests)}`, { cause: error });
+  }
 }
 
 async function dav(method) {
@@ -91,7 +109,7 @@ try {
   });
   const exactAbortedChunk = page.waitForRequest(chunkRequest, { timeout: 30_000 });
   await initiateDocument();
-  assert.equal(chunkRequest(await exactAbortedChunk), true,
+  assert.equal(chunkRequest(await waitForExactChunk(exactAbortedChunk)), true,
     `observed dist requests=${JSON.stringify(distRequests)}`);
   await abortFinished;
   assert.equal(aborted, 1);
@@ -118,7 +136,7 @@ try {
   const pageErrors = [];
   page.on("pageerror", (error) => pageErrors.push(error.message));
   await initiateDocument();
-  await exactChunk;
+  await waitForExactChunk(exactChunk);
   assert.equal(intercepted, 1);
   assert.deepEqual(pageErrors, []);
   const dialog = page.locator("[data-cy-files-new-node-dialog]").first();
