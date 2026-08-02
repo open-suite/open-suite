@@ -33,15 +33,6 @@ index ce4df2c..ccf207a 100644
      {{- end }}
  
    tls: {{ .Values.global.tls.enabled | default true }}
-@@ -556,7 +556,7 @@ ingressCollaborationApi:
-     haproxy.router.openshift.io/hsts_header: max-age=31536000;includeSubDomains;preload
-     {{- end }}
-     {{- if eq .Values.cluster.ingress.type "traefik" }}
--    traefik.ingress.kubernetes.io/router.middlewares: '{{ .Release.Namespace }}-hsts-header@kubernetescrd'
-+    traefik.ingress.kubernetes.io/router.middlewares: '{{ .Release.Namespace }}-hsts-header@kubernetescrd{{ if dig "opensuite" "authGate" "enabled" false .Values }},{{ .Values.application.bureaublad.namespace }}-opensuite-auth-gate@kubernetescrd{{ end }}'
-     {{- end }}
-   tls: {{ .Values.global.tls.enabled | default true }}
-   selfSigned: {{ and .Values.global.tls.enabled .Values.global.tls.selfSigned | default false }}
 @@ -583,7 +583,7 @@ ingressCollaborationWS:
      haproxy.router.openshift.io/hsts_header: max-age=31536000;includeSubDomains;preload
      {{- end }}

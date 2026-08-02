@@ -125,6 +125,19 @@ def validate_values_source(infra):
     )
     assert backend_budget == 35, f"backend startup failure budget is {backend_budget}s"
 
+    # The backend calls this machine-to-machine endpoint with the y-provider's
+    # own Authorization secret. Sending it through the browser auth gate makes
+    # requests follow the OIDC redirect and receive HTML instead of JSON.
+    collaboration_api = root_section(source, "ingressCollaborationApi")
+    assert (
+        "traefik.ingress.kubernetes.io/router.middlewares: "
+        "'{{ .Release.Namespace }}-hsts-header@kubernetescrd'"
+    ) in collaboration_api
+    assert "opensuite-auth-gate" not in collaboration_api
+
+    browser_ingress = root_section(source, "ingress")
+    assert "opensuite-auth-gate" in browser_ingress
+
 
 def validate_infra_dependencies(infra):
     source = (infra / "helmfile/apps/docs/helmfile-child.yaml.gotmpl").read_text()

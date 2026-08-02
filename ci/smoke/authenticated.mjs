@@ -13,6 +13,8 @@
 //   - the portal calendar API answers
 //   - POST /apps/meetcal/room mints a joinable Meet room URL
 //   - Docs, Grist and Element pages load
+//   - a newly created Docs document accepts an immediate title PATCH and
+//     persists the title on a fresh GET
 //
 // Exit code 0 = pass. Failures are collected and all reported.
 
@@ -1214,6 +1216,76 @@ try {
     const r = await page.goto(`https://${host}.${DOMAIN}/`, { waitUntil: "domcontentloaded" });
     if (r && r.status() < 400) ok(`${host}: loads (HTTP ${r.status()})`);
     else fail(`${host}: load`, `HTTP ${r?.status()}`);
+  }
+
+  // Regression for the collaboration API being placed behind the browser
+  // auth gate. The backend checks that API before saving an update; if the
+  // gate intercepts it, the OIDC HTML response causes title PATCH to return
+  // 500 while the optimistic UI falsely appears updated.
+  const docsOrigin = `https://docs.${DOMAIN}`;
+  const docsReady = page.waitForResponse(
+    (response) =>
+      response.url() === `${docsOrigin}/api/v1.0/users/me/` &&
+      response.status() === 200,
+    { timeout: 30000 },
+  );
+  await Promise.all([
+    docsReady,
+    page.goto(`${docsOrigin}/`, { waitUntil: "domcontentloaded" }),
+  ]);
+
+  const csrfToken = (await ctx.cookies(`${docsOrigin}/`)).find(
+    (cookie) => cookie.name === "csrftoken",
+  )?.value;
+  if (!csrfToken) throw new Error("Docs authenticated session has no csrftoken");
+  const docsMutationHeaders = {
+    "X-CSRFToken": csrfToken,
+    Origin: docsOrigin,
+    Referer: `${docsOrigin}/`,
+  };
+
+  const docsApi = `${docsOrigin}/api/v1.0/documents/`;
+  const initialTitle = `Open Suite title persistence smoke ${Date.now()}`;
+  const updatedTitle = `${initialTitle} updated`;
+  let smokeDocumentId;
+  try {
+    const created = await page.request.post(docsApi, {
+      data: { title: initialTitle },
+      headers: docsMutationHeaders,
+    });
+    if (created.status() !== 201) {
+      fail("Docs title persistence create", `HTTP ${created.status()}`);
+    } else {
+      smokeDocumentId = (await created.json()).id;
+      const documentApi = `${docsApi}${smokeDocumentId}/`;
+
+      // Deliberately no wait between create and PATCH: this is the production
+      // window that exposed the collaboration edit-check failure.
+      const updated = await page.request.patch(documentApi, {
+        data: { title: updatedTitle },
+        headers: docsMutationHeaders,
+      });
+      const reloaded = await page.request.get(documentApi, {
+        headers: { "Cache-Control": "no-cache" },
+      });
+      const persisted = reloaded.ok() ? await reloaded.json() : {};
+
+      if (updated.status() === 200 && reloaded.status() === 200 && persisted.title === updatedTitle)
+        ok("Docs immediate title PATCH persists on reload");
+      else
+        fail(
+          "Docs immediate title PATCH persistence",
+          `PATCH ${updated.status()}, GET ${reloaded.status()}, persisted=${persisted.title === updatedTitle}`,
+        );
+    }
+  } finally {
+    if (smokeDocumentId) {
+      const cleanup = await page.request.delete(`${docsApi}${smokeDocumentId}/`, {
+        headers: docsMutationHeaders,
+      });
+      if (cleanup.status() === 204) ok("cleaned exact Docs title persistence artifact");
+      else fail("Docs title persistence cleanup", `HTTP ${cleanup.status()}`);
+    }
   }
 
 } catch (e) {
