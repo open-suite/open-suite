@@ -501,6 +501,16 @@ async function assertOfficeHeaderGeometry(page, label, portalHeaderVersion, chec
 }
 
 async function invokeFirstInsertImage(page, editor, label, contract) {
+  await editor.locator("#menu-file > a").click({ timeout: 30_000 });
+  const save = editor.locator("#menu-file > ul > #menu-save > a");
+  await save.waitFor({ state: "visible", timeout: 10_000 });
+  await editor.evaluate(() => {
+    JSDialog.RefreshScrollables();
+    return new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve)));
+  });
+  contract(`${label} first File click keeps Save visible through scrollable refresh`, await save.isVisible());
+  await page.keyboard.press("Escape");
+
   // SmartMenus animates the Insert dropdown open; Playwright's stability check
   // can time out mid-animation, and a stray hover can close the menu again.
   // Reopen the menu and retry rather than failing the whole lifecycle on one

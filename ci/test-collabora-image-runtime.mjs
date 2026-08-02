@@ -8,6 +8,8 @@ import path from "node:path";
 const collaboraSourceRef = "7d478de54b81a47d88ad4cf71180b9ceeb466848";
 const collaboraSourceSha256 =
     "f1b6cdf521dc10d1ccc501516d9c1faa85ea590c7cf5cdfddbe50d0ff5f96ad5";
+const collaboraScrollableSourceSha256 =
+    "29039c51c43598b24254381672f94377edd9992dded8c061ce84275e189b75ad";
 const collaboraRuntime =
     "registry-1.docker.io/collabora/code:26.04.1.4.1@sha256:75859dc9f9084d1877ce36cf96ec86600f495bade33289c9cbc27e0a0ee23b81";
 const patcherRuntime =
@@ -15,7 +17,7 @@ const patcherRuntime =
 const upstreamBundleSha256 =
     "d113d084c5cba8d057199dbe04196a070762065aa693b5cc27df18e8cf20e476";
 const patchedBundleSha256 =
-    "2818e5e970ce5eefb069df393f034d54b4327b935d759185a6398618556b6a5e";
+    "ba6299744f74e55c6ba646d6fae7ca48200f60e4908966c39d58fe133fa02f60";
 const bundlePath = "/usr/share/coolwsd/browser/dist/bundle.js";
 // Immutable tag published by the image workflow from PR #246's main merge.
 const openSuiteImageTag = "sha-6cbf822";
@@ -55,6 +57,8 @@ for (const fragment of [
     "this._onDocLayerInit();\n+\t\t\treturn;",
     "if ($mainMenu.data('smartmenus'))\n+\t\t\t$mainMenu.smartmenus('destroy');",
     "-\t\t$('#main-menu').smartmenus({\n+\t\t$mainMenu.smartmenus({",
+    "+\twindow.addEventListener('jsdialogrefreshscrollables', handler);",
+    "+\twindow.dispatchEvent(new Event('jsdialogrefreshscrollables'));",
 ]) {
     assert.ok(sourcePatch.includes(fragment), `missing source fix: ${fragment}`);
 }
@@ -70,6 +74,8 @@ for (const fragment of [
     "this._onDocLayerInit();return",
     '$mainMenu.data("smartmenus"))$mainMenu.smartmenus("destroy")',
     "$mainMenu.smartmenus({hideOnClick:true",
+    'window.addEventListener("jsdialogrefreshscrollables",handler)',
+    'window.dispatchEvent(new Event("jsdialogrefreshscrollables"))',
 ]) {
     assert.ok(bundlePatch.includes(fragment), `missing bundle fix: ${fragment}`);
 }
@@ -78,6 +84,7 @@ for (const fragment of [
     `COLLABORA_BASE: ${collaboraRuntime}`,
     `COLLABORA_SOURCE_REF: ${collaboraSourceRef}`,
     `COLLABORA_SOURCE_SHA256: ${collaboraSourceSha256}`,
+    `COLLABORA_SCROLLABLE_SOURCE_SHA256: ${collaboraScrollableSourceSha256}`,
     "platforms: linux/amd64,linux/arm64",
     "node ci/test-collabora-image-runtime.mjs --verify-source",
     "node ci/test-collabora-image-runtime.mjs --verify-final-image",
@@ -118,6 +125,21 @@ for (const smokeFile of [
     "ci/smoke/visual-transitions.mjs",
 ]) {
     const smoke = fs.readFileSync(smokeFile, "utf8");
+    assert.equal(
+        smoke.split('locator("#menu-file > a").click').length - 1,
+        1,
+        `${smokeFile} must click the File menu exactly once`,
+    );
+    assert.equal(
+        smoke.split('locator("#menu-file > ul > #menu-save > a")').length - 1,
+        1,
+        `${smokeFile} must require the visible Save item exactly once`,
+    );
+    assert.equal(
+        smoke.split("JSDialog.RefreshScrollables();").length - 1,
+        1,
+        `${smokeFile} must prove an internal scrollable refresh keeps File open`,
+    );
     assert.equal(
         smoke.split('locator("#menu-insert > a").click').length - 1,
         1,
@@ -190,6 +212,33 @@ function assertLifecycle(contents, compiled) {
     assert.ok(
         onRemove.indexOf(destroy) < onRemove.indexOf(remove),
         "SmartMenus must be destroyed before its container is removed",
+    );
+}
+
+function assertScrollableRefresh(contents, compiled) {
+    const listener = compiled
+        ? 'window.addEventListener("jsdialogrefreshscrollables",handler)'
+        : "window.addEventListener('jsdialogrefreshscrollables', handler);";
+    const narrowDispatch = compiled
+        ? 'window.dispatchEvent(new Event("jsdialogrefreshscrollables"))'
+        : "window.dispatchEvent(new Event('jsdialogrefreshscrollables'));";
+    const broadDispatch = compiled
+        ? 'window.dispatchEvent(new Event("resize"))'
+        : "window.dispatchEvent(new Event('resize'));";
+    assert.equal(
+        count(contents, listener),
+        2,
+        "both scrollable handlers must listen for the narrow refresh event",
+    );
+    assert.equal(
+        count(contents, narrowDispatch),
+        1,
+        "internal layout refresh must dispatch one narrow event",
+    );
+    assert.equal(
+        count(contents, broadDispatch),
+        0,
+        "internal layout refresh must not impersonate a viewport resize",
     );
 }
 
@@ -272,10 +321,13 @@ function verifyInfra(infraRoot) {
     console.log(`${infraRoot}: Collabora image, Deployment, and Service contracts verified`);
 }
 
-function verifySource(sourceFile) {
+function verifySource(sourceFile, scrollableSourceFile) {
     const source = fs.readFileSync(sourceFile, "utf8");
     assertLifecycle(source, false);
+    const scrollableSource = fs.readFileSync(scrollableSourceFile, "utf8");
+    assertScrollableRefresh(scrollableSource, false);
     console.log(`${sourceFile}: source lifecycle contract verified`);
+    console.log(`${scrollableSourceFile}: narrow scrollable refresh contract verified`);
 }
 
 function verifyFinalImage(runtime, candidate) {
@@ -317,7 +369,9 @@ function verifyFinalImage(runtime, candidate) {
         assert.equal(sha256(upstreamBundle), upstreamBundleSha256, "upstream bundle digest");
         assert.equal(sha256(candidateBundle), patchedBundleSha256, "patched bundle digest");
         execFileSync(process.execPath, ["--check", candidateBundle]);
-        assertLifecycle(fs.readFileSync(candidateBundle, "utf8"), true);
+        const candidateContents = fs.readFileSync(candidateBundle, "utf8");
+        assertLifecycle(candidateContents, true);
+        assertScrollableRefresh(candidateContents, true);
     } finally {
         fs.rmSync(temporary, { recursive: true, force: true });
     }
@@ -327,10 +381,10 @@ function verifyFinalImage(runtime, candidate) {
 if (process.argv[2] === "--verify-source") {
     assert.equal(
         process.argv.length,
-        4,
-        "usage: test-collabora-image-runtime.mjs --verify-source SOURCE_FILE",
+        5,
+        "usage: test-collabora-image-runtime.mjs --verify-source MENUBAR_SOURCE SCROLLABLE_SOURCE",
     );
-    verifySource(process.argv[3]);
+    verifySource(process.argv[3], process.argv[4]);
 } else if (process.argv[2] === "--verify-rendered-values") {
     assert.equal(
         process.argv.length,
