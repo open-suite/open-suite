@@ -1,0 +1,39 @@
+diff --git a/helmfile/apps/element/charts/synapse/templates/cors-preflight-cache-middleware.yaml b/helmfile/apps/element/charts/synapse/templates/cors-preflight-cache-middleware.yaml
+new file mode 100644
+index 0000000..3c121b1
+--- /dev/null
++++ b/helmfile/apps/element/charts/synapse/templates/cors-preflight-cache-middleware.yaml
+@@ -0,0 +1,20 @@
++{{- if eq .Values.cluster.ingress.type "traefik" }}
++# Synapse remains authoritative for the allowed CORS origins, methods and
++# headers. This middleware only lets browsers cache an already-successful
++# preflight for ten minutes; using Traefik's CORS options here would replace
++# Synapse's policy and risks widening it as the two configurations drift.
++apiVersion: traefik.io/v1alpha1
++kind: Middleware
++metadata:
++  name: matrix-cors-preflight-cache
++  namespace: {{ include "common.names.namespace" . | quote }}
++  labels: {{- include "common.labels.standard" ( dict "customLabels" .Values.commonLabels "context" $ ) | nindent 4 }}
++    app.kubernetes.io/component: synapse
++spec:
++  headers:
++    customResponseHeaders:
++      # This header has no cache effect on normal responses. A failed OPTIONS
++      # response still lacks Synapse's matching Access-Control-Allow-* policy,
++      # so browsers do not treat it as a cacheable successful preflight.
++      Access-Control-Max-Age: "600"
++{{- end }}
+diff --git a/helmfile/apps/element/values-synapse.yaml.gotmpl b/helmfile/apps/element/values-synapse.yaml.gotmpl
+index 29b3f89..f53da4b 100644
+--- a/helmfile/apps/element/values-synapse.yaml.gotmpl
++++ b/helmfile/apps/element/values-synapse.yaml.gotmpl
+@@ -176,7 +176,7 @@ ingress:
+     haproxy.router.openshift.io/hsts_header: max-age=31536000;includeSubDomains;preload
+     {{- end }}
+     {{- if eq .Values.cluster.ingress.type "traefik" }}
+-    traefik.ingress.kubernetes.io/router.middlewares: '{{ .Release.Namespace }}-hsts-header@kubernetescrd'
++    traefik.ingress.kubernetes.io/router.middlewares: '{{ .Release.Namespace }}-hsts-header@kubernetescrd,{{ .Release.Namespace }}-matrix-cors-preflight-cache@kubernetescrd'
+     {{- end }}
+ # This section builds out the service account more information can be found here: https://kubernetes.io/docs/concepts/security/service-accounts/
+ serviceAccount:
