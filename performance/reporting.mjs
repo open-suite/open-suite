@@ -26,6 +26,30 @@ export const parseNonNegativeNumber = (value, fallback, name) => {
   return parsed;
 };
 
+export const parseUpstreamHeaderTime = (value) => {
+  if (
+    typeof value !== "string" ||
+    !/^\d+(?:\.\d+)?(?:\s*,\s*\d+(?:\.\d+)?)*(?:\s*:\s*\d+(?:\.\d+)?(?:\s*,\s*\d+(?:\.\d+)?)*)*$/.test(value)
+  ) {
+    throw new Error(`invalid X-Upstream-Header-Time value: ${value}`);
+  }
+  return value
+    .split(":")
+    .map((group) => group.split(",").map((entry) => Number(entry.trim())));
+};
+
+export const assertSingleUpstreamHeaderTime = (headers) => {
+  const values = headers
+    .filter(({ name }) => name.toLowerCase() === "x-upstream-header-time")
+    .map(({ value }) => value);
+  if (values.length !== 1) {
+    throw new Error(
+      `main document returned ${values.length} X-Upstream-Header-Time fields; expected exactly one`,
+    );
+  }
+  return parseUpstreamHeaderTime(values[0]);
+};
+
 export const sanitizeUrl = (value) => {
   try {
     const url = new URL(value);

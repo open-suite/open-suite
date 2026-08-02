@@ -275,7 +275,7 @@ new file mode 100644
 index 0000000..0eae212
 --- /dev/null
 +++ b/helmfile/apps/messages/charts/messages/templates/header-configmap.yaml
-@@ -0,0 +1,73 @@
+@@ -0,0 +1,77 @@
 +# nginx config for the Open Suite header sidecar — identical to the
 +# opensuite-header-conf the other apps get via
 +# patches/local/opensuite-header-sidecar.patch, with the upstream port set to
@@ -339,6 +339,10 @@ index 0000000..0eae212
 +          proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
 +          proxy_set_header X-Forwarded-Proto $scheme;
 +          proxy_set_header Accept-Encoding "";   # so sub_filter can rewrite the body
++          # Usually numeric seconds; retries/internal redirects produce comma/colon sequences.
++          # Hide any spoofed upstream copy before adding the sidecar-owned measurement.
++          proxy_hide_header X-Upstream-Header-Time;
++          add_header X-Upstream-Header-Time "$upstream_header_time" always;
 +          proxy_read_timeout 300s;
 +          proxy_redirect off;
 +          # Match the sidecar first-paint contract: reserve the shell in head,

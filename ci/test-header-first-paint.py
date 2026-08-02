@@ -35,11 +35,141 @@ body_contracts = (
     '<span>Open Suite</span>',
     'sub_filter_once on;',
 )
+
+
+def nginx_location_blocks(source):
+    """Return each location's direct text, excluding nested location blocks."""
+    ranges = []
+    location_pattern = re.compile(
+        r"^[ \t]*location[ \t]+(?:(?:=|\^~|~\*|~)[ \t]+)?[^\n{]+[ \t]*\{[ \t]*$",
+        re.MULTILINE,
+    )
+    for match in location_pattern.finditer(source):
+        depth = 1
+        quote = None
+        escaped = False
+        comment = False
+        index = match.end()
+        while index < len(source) and depth:
+            character = source[index]
+            if comment:
+                if character == "\n":
+                    comment = False
+            elif escaped:
+                escaped = False
+            elif character == "\\":
+                escaped = True
+            elif quote:
+                if character == quote:
+                    quote = None
+            elif character == "#":
+                comment = True
+            elif character in "'\"":
+                quote = character
+            elif character == "{":
+                depth += 1
+            elif character == "}":
+                depth -= 1
+            index += 1
+        if depth:
+            raise AssertionError("unclosed nginx location block")
+        ranges.append((match.start(), index))
+
+    blocks = []
+    for start, end in ranges:
+        direct = list(source[start:end])
+        for nested_start, nested_end in ranges:
+            if start < nested_start and nested_end < end:
+                for index in range(nested_start - start, nested_end - start):
+                    if direct[index] != "\n":
+                        direct[index] = " "
+        blocks.append("".join(direct))
+    return blocks
+
+
+directive_patterns = {
+    "proxy_hide_header X-Upstream-Header-Time": (
+        r"^[ \t]*proxy_hide_header[ \t]+X-Upstream-Header-Time[ \t]*;[ \t]*$"
+    ),
+    'add_header X-Upstream-Header-Time "$upstream_header_time" always': (
+        r'^[ \t]*add_header[ \t]+X-Upstream-Header-Time[ \t]+'
+        r'"\$upstream_header_time"[ \t]+always[ \t]*;[ \t]*$'
+    ),
+}
+
+
+def assert_timed_proxy_locations(app, source):
+    proxied_locations = [
+        block for block in nginx_location_blocks(source)
+        if re.search(r"^[ \t]*proxy_pass[ \t]+", block, re.MULTILINE)
+    ]
+    if not proxied_locations:
+        raise AssertionError(f"{app} has no directly proxied locations")
+    for timed_location in proxied_locations:
+        for directive, pattern in directive_patterns.items():
+            if len(re.findall(pattern, timed_location, re.MULTILINE)) != 1:
+                raise AssertionError(
+                    f"{app} proxied location must contain exactly one active {directive}"
+                )
+
+
+valid_directives = """
+    proxy_hide_header X-Upstream-Header-Time;
+    add_header X-Upstream-Header-Time "$upstream_header_time" always;
+"""
+modifier_fixture = "\n".join(
+    f"location {modifier} /route-{index} {{\n  proxy_pass http://upstream;{valid_directives}}}"
+    for index, modifier in enumerate(("=", "^~", "~", "~*"))
+)
+assert_timed_proxy_locations("modifier fixture", modifier_fixture)
+
+invalid_delivery_fixtures = {
+    "comment-only": """
+location / {
+    proxy_pass http://upstream;
+    # proxy_hide_header X-Upstream-Header-Time;
+    # add_header X-Upstream-Header-Time "$upstream_header_time" always;
+}
+""",
+    "duplicate": f"""
+location / {{
+    proxy_pass http://upstream;
+    {valid_directives}
+    {valid_directives}
+}}
+""",
+    "sibling-wrong": f"""
+location /timed {{
+    proxy_pass http://upstream;
+}}
+location /sibling {{
+    {valid_directives}
+}}
+""",
+    "nested-wrong": f"""
+location / {{
+    proxy_pass http://upstream;
+    location ^~ /nested {{
+        {valid_directives}
+    }}
+}}
+""",
+}
+for fixture_name, fixture in invalid_delivery_fixtures.items():
+    try:
+        assert_timed_proxy_locations(fixture_name, fixture)
+    except AssertionError:
+        pass
+    else:
+        raise AssertionError(f"{fixture_name} fixture unexpectedly passed")
+
+
 for app, path in configs.items():
     rendered_source = path.read_text()
     for contract in head_contracts + body_contracts:
         if contract not in rendered_source:
-            raise AssertionError(f"{app} is missing first-paint contract: {contract}")
+            raise AssertionError(f"{app} is missing shared delivery contract: {contract}")
+    assert_timed_proxy_locations(app, rendered_source)
     if rendered_source.index("sub_filter '</head>'") > rendered_source.index("sub_filter '</body>'"):
         raise AssertionError(f"{app} does not initiate the canonical asset before the shell node")
 
