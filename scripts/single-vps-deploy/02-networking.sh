@@ -66,6 +66,39 @@ spec:
 YAML
 done
 
+echo "==> [5b.1] OIDC backchannel egress to Keycloak"
+# NetworkPolicy is enforced against the post-Service-DNAT destination in k3s:
+# select only the deployed OIDC backend pods and Keycloak pods, and allow the
+# Keycloak container's endpoint port (8080), not the Service's port 80.
+while read -r ns component; do
+kubectl get ns "${ns}" >/dev/null 2>&1 || continue
+kubectl apply -f - <<YAML
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata: { name: allow-egress-keycloak-backchannel, namespace: ${ns} }
+spec:
+  podSelector:
+    matchLabels:
+      app.kubernetes.io/component: ${component}
+  policyTypes: [Egress]
+  egress:
+    - to:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: mb-keycloak
+          podSelector:
+            matchLabels:
+              app.kubernetes.io/component: keycloak
+      ports:
+        - { port: 8080, protocol: TCP }
+YAML
+done <<'EOF'
+mb-bureaublad bureaublad-backend
+mb-docs backend
+mb-meet meet-backend
+mb-messages backend
+EOF
+
 echo "==> [5c] Set LiveKit's advertised IP so WebRTC media connects"
 # Without node_ip, LiveKit advertises its pod IP in ICE candidates, which the
 # browser can't reach, so calls get stuck on "Reconnecting". Prefer the node's

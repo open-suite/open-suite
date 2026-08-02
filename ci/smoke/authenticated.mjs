@@ -13,10 +13,13 @@
 //   - the portal calendar API answers
 //   - POST /apps/meetcal/room mints a joinable Meet room URL
 //   - Docs, Grist and Element pages load
+//   - a newly created Docs document accepts an immediate title PATCH and
+//     persists the title on a fresh GET
 //
 // Exit code 0 = pass. Failures are collected and all reported.
 
 import { createHash } from "node:crypto";
+import { appendFileSync } from "node:fs";
 import { chromium, devices } from "playwright";
 
 const DOMAIN = process.env.SMOKE_DOMAIN;
@@ -65,6 +68,41 @@ const browser = await chromium.launch();
 // SMOKE_INSECURE=1: tolerate self-signed certs (local VM deploys).
 const ctx = await browser.newContext({ ignoreHTTPSErrors: process.env.SMOKE_INSECURE === "1" });
 const page = await ctx.newPage();
+const diagnosticsPath = process.env.SMOKE_DIAGNOSTICS_PATH;
+const recordBrowserDiagnostic = (event, details) => {
+  if (!diagnosticsPath) return;
+  appendFileSync(
+    diagnosticsPath,
+    `${JSON.stringify({ timestamp: new Date().toISOString(), event, ...details })}\n`,
+    { mode: 0o600 },
+  );
+};
+const sanitizedUrl = (value) => {
+  const url = new URL(value);
+  return `${url.origin}${url.pathname}`;
+};
+page.on("framenavigated", (frame) => {
+  if (frame === page.mainFrame())
+    recordBrowserDiagnostic("main-frame-navigation", { url: sanitizedUrl(frame.url()) });
+});
+page.on("response", (response) => {
+  const url = new URL(response.url());
+  if ([DOMAIN, `auth.${DOMAIN}`, `bridge.${DOMAIN}`, `docs.${DOMAIN}`, `id.${DOMAIN}`].includes(url.hostname))
+    recordBrowserDiagnostic("response", {
+      method: response.request().method(),
+      status: response.status(),
+      url: `${url.origin}${url.pathname}`,
+    });
+});
+page.on("requestfailed", (request) => {
+  const url = new URL(request.url());
+  if ([DOMAIN, `auth.${DOMAIN}`, `bridge.${DOMAIN}`, `docs.${DOMAIN}`, `id.${DOMAIN}`].includes(url.hostname))
+    recordBrowserDiagnostic("request-failed", {
+      error: request.failure()?.errorText,
+      method: request.method(),
+      url: `${url.origin}${url.pathname}`,
+    });
+});
 await page.addInitScript(() => {
   window.__openSuiteFirstPaint = [];
   const sample = () => {
@@ -99,6 +137,112 @@ page.on("pageerror", (error) => recordElementError(error.stack || error.message)
 page.on("console", (message) => {
   if (message.type() === "error") recordElementError(message.text());
 });
+
+const verifyDocsTitlePersistence = async () => {
+  const docsOrigin = `https://docs.${DOMAIN}`;
+  const docsReady = page.waitForResponse(
+    (response) =>
+      response.url() === `${docsOrigin}/api/v1.0/users/me/` &&
+      response.status() === 200,
+    { timeout: 30000 },
+  );
+  const docsLogin = page.waitForURL(`https://id.${DOMAIN}/**`, { timeout: 30000 });
+  // Enter Docs' OIDC flow directly instead of depending on the SPA to finish
+  // its unauthenticated bootstrap and initiate the same top-level navigation.
+  await page
+    .goto(`${docsOrigin}/api/v1.0/authenticate/`, { waitUntil: "domcontentloaded" })
+    .catch(() => null);
+  const docsState = await Promise.race([
+    docsReady.then(() => "ready"),
+    docsLogin.then(() => "login"),
+  ]);
+  if (docsState === "login") {
+    await page.fill("#username", USER);
+    await page.fill("#password", PASS);
+    await page.click("#kc-login");
+    await docsReady;
+  }
+
+  const csrfToken = (await ctx.cookies(`${docsOrigin}/`)).find(
+    (cookie) => cookie.name === "csrftoken",
+  )?.value;
+  if (!csrfToken) throw new Error("Docs authenticated session has no csrftoken");
+  const docsMutationHeaders = {
+    "X-CSRFToken": csrfToken,
+    Origin: docsOrigin,
+    Referer: `${docsOrigin}/`,
+  };
+
+  const docsApi = `${docsOrigin}/api/v1.0/documents/`;
+  const initialTitle = `Open Suite title persistence smoke ${Date.now()}`;
+  const updatedTitle = `${initialTitle} updated`;
+  let smokeDocumentId;
+  try {
+    const created = await page.request.post(docsApi, {
+      data: { title: initialTitle },
+      headers: docsMutationHeaders,
+    });
+    if (created.status() !== 201) {
+      fail("Docs title persistence create", `HTTP ${created.status()}`);
+      return;
+    }
+
+    smokeDocumentId = (await created.json()).id;
+    const documentApi = `${docsApi}${smokeDocumentId}/`;
+
+    // Deliberately no wait between create and PATCH: this is the production
+    // window that exposed the collaboration edit-check failure.
+    const updated = await page.request.patch(documentApi, {
+      data: { title: updatedTitle },
+      headers: docsMutationHeaders,
+    });
+    const reloaded = await page.request.get(documentApi, {
+      headers: { "Cache-Control": "no-cache" },
+    });
+    const persisted = reloaded.ok() ? await reloaded.json() : {};
+
+    if (updated.status() === 200 && reloaded.status() === 200 && persisted.title === updatedTitle)
+      ok("Docs immediate title PATCH persists on reload");
+    else
+      fail(
+        "Docs immediate title PATCH persistence",
+        `PATCH ${updated.status()}, GET ${reloaded.status()}, persisted=${persisted.title === updatedTitle}`,
+      );
+  } finally {
+    if (smokeDocumentId) {
+      const cleanup = await page.request.delete(`${docsApi}${smokeDocumentId}/`, {
+        headers: docsMutationHeaders,
+      });
+      if (cleanup.status() === 204) ok("moved exact Docs title persistence artifact to trash");
+      else fail("Docs title persistence cleanup", `HTTP ${cleanup.status()}`);
+    }
+  }
+};
+
+if (process.env.SMOKE_DOCS_TITLE_ONLY === "1") {
+  try {
+    // Establish the edge-gate session first so verifyDocsTitlePersistence's
+    // readiness race observes Docs' own, separate OIDC flow.
+    await page.goto(`https://bridge.${DOMAIN}/`, { waitUntil: "domcontentloaded" });
+    if (page.url().includes(`id.${DOMAIN}`)) {
+      await page.fill("#username", USER);
+      await page.fill("#password", PASS);
+      await page.click("#kc-login");
+    }
+    await page.waitForURL(`https://bridge.${DOMAIN}/**`, { timeout: 30000 });
+    await verifyDocsTitlePersistence();
+  } catch (error) {
+    fail("Docs title persistence smoke", error.message);
+  } finally {
+    await browser.close();
+  }
+  if (failures.length === 0) {
+    console.log("DOCS TITLE PERSISTENCE SMOKE PASS");
+    process.exit(0);
+  }
+  console.log(`DOCS TITLE PERSISTENCE SMOKE FAIL: ${failures.join(", ")}`);
+  process.exit(1);
+}
 
 try {
   // --- SSO login through the gate ------------------------------------------
@@ -1226,6 +1370,10 @@ try {
     if (r && r.status() < 400) ok(`${host}: loads (HTTP ${r.status()})`);
     else fail(`${host}: load`, `HTTP ${r?.status()}`);
   }
+
+  // The backend checks the collaboration machine API before persisting this
+  // update; the fresh GET prevents optimistic UI state from masking a failure.
+  await verifyDocsTitlePersistence();
 
 } catch (e) {
   fail("unexpected error", e.message);
