@@ -183,6 +183,15 @@ const verifyDocsTitlePersistence = async () => {
 
 if (process.env.SMOKE_DOCS_TITLE_ONLY === "1") {
   try {
+    // Establish the edge-gate session first so verifyDocsTitlePersistence's
+    // readiness race observes Docs' own, separate OIDC flow.
+    await page.goto(`https://bridge.${DOMAIN}/`, { waitUntil: "domcontentloaded" });
+    if (page.url().includes(`id.${DOMAIN}`)) {
+      await page.fill("#username", USER);
+      await page.fill("#password", PASS);
+      await page.click("#kc-login");
+    }
+    await page.waitForURL(`https://bridge.${DOMAIN}/**`, { timeout: 30000 });
     await verifyDocsTitlePersistence();
   } catch (error) {
     fail("Docs title persistence smoke", error.message);
