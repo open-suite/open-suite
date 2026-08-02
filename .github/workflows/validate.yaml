@@ -20,6 +20,10 @@ jobs:
         run: |
           find . -type f -name '*.sh' -not -path './.git/*' -print0 | xargs -0 -n1 bash -n
           find . -type f -name '*.sh' -not -path './.git/*' -print0 | xargs -0 shellcheck --severity=warning
+      - name: Keep the k3s admin kubeconfig root-only
+        run: |
+          grep -Fq 'INSTALL_K3S_EXEC="--write-kubeconfig-mode 600"' scripts/single-vps-deploy/01-deploy.sh
+          ! grep -Eq 'write-kubeconfig-mode[ =]+0?644' scripts/single-vps-deploy/01-deploy.sh
       - name: Check Nextcloud image source contracts
         run: bash images/nextcloud/test-source-shape.sh
       - name: Check Collabora image source contracts
@@ -87,6 +91,8 @@ jobs:
           done
       - name: Validate Collabora chart image and Service contracts
         run: node ci/test-collabora-image-runtime.mjs --verify-infra /tmp/infra
+      - name: Validate Nextcloud CronJob resources
+        run: bash ci/test-nextcloud-cronjob-resources.sh /tmp/infra
       - name: Validate rendered Nextcloud Whiteboard backend
         run: bash ci/test-nextcloud-whiteboard.sh /tmp/infra
       - name: Validate Docs v5.2.1 performance patches
