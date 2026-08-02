@@ -584,8 +584,10 @@ async function createOfficeLifecycleFixture({ page, check }, fixture) {
   page.on("response", recordCreationPost);
   try {
     await page.getByRole("button", { name: "New", exact: true }).click();
-    await page.locator('[role="menuitem"]:visible')
-      .filter({ hasText: /^\s*Document\s*$/ }).click();
+    const documentItem = page.locator('[role="menuitem"]:visible')
+      .filter({ hasText: /^\s*Document\s*$/ });
+    await documentItem.waitFor({ state: "visible", timeout: 10_000 });
+    await documentItem.click();
     const dialog = page.locator("[data-cy-files-new-node-dialog]").first();
     await dialog.waitFor({ state: "visible" });
     await dialog.getByRole("textbox", { name: /name/i }).fill(fixture.name.slice(0, -".docx".length));

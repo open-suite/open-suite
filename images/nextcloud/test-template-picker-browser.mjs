@@ -51,6 +51,7 @@ async function initiateDocument() {
   await page.getByRole("button", { name: "New", exact: true }).click();
   const menuItems = page.locator('[role="menuitem"]:visible');
   const documentItem = menuItems.filter({ hasText: /^\s*Document\s*$/ });
+  await documentItem.waitFor({ state: "visible", timeout: 10_000 });
   assert.equal(await documentItem.count(), 1, `New menu=${JSON.stringify(await menuItems.evaluateAll((items) => items.map((item) => ({
     text: item.textContent?.trim(),
     tag: item.tagName.toLowerCase(),
