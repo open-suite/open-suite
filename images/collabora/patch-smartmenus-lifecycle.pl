@@ -35,6 +35,24 @@ replace_once(
 	q|}$(| . "\n" . q|"#main-menu").smartmenus({hideOnClick:true|,
 	q|}$mainMenu.smartmenus({hideOnClick:true|,
 );
+replace_once(
+	'scrollable refresh listener',
+	q|window.addEventListener("resize",handler);window.addEventListener("scroll",handler);|,
+	q|window.addEventListener("resize",handler);window.addEventListener("jsdialogrefreshscrollables",handler);| .
+		q|window.addEventListener("scroll",handler);|,
+);
+replace_once(
+	'status priority refresh listener',
+	q|app.layoutingService.appendLayoutingTask(handlerImpl)};window.addEventListener(| . "\n" .
+		q|"resize",handler)}JSDialog.MakeScrollable=|,
+	q|app.layoutingService.appendLayoutingTask(handlerImpl)};window.addEventListener(| . "\n" .
+		q|"resize",handler);window.addEventListener("jsdialogrefreshscrollables",handler)}JSDialog.MakeScrollable=|,
+);
+replace_once(
+	'narrow scrollable refresh event',
+	q|window.dispatchEvent(new Event("resize"))};JSDialog.ScrollIntoViewBlockOption=|,
+	q|window.dispatchEvent(new Event("jsdialogrefreshscrollables"))};JSDialog.ScrollIntoViewBlockOption=|,
+);
 
 open my $output, '>', $path or die "open $path: $!\n";
 print {$output} $bundle or die "write $path: $!\n";
