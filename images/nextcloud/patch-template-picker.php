@@ -10,7 +10,7 @@ const TEMPLATE_PICKER_CHUNK_MAP_SHA256 = 'fdce7694964d98df40e135d37a26d92d3d7a2e
 const TEMPLATE_PICKER_MAP_FILE = '7497-7497.js?v=4c13f30ae7ab10413c2e';
 const TEMPLATE_PICKER_RUNTIME_URL = '7497-7497.js?v=94a5bd32402d33b444dc';
 const VIEW_CONTROLLER_SHA256 = '809cb4156b66c9460ca20137ca3b8768ea241c2968e2accd5f72a4417eb82c79';
-const PATCHED_BUNDLE_SHA256 = 'd391378ea51e3495a9a1f480597758dc9504f1dfd33fd5229324a5a9b2729dff';
+const PATCHED_BUNDLE_SHA256 = 'acfadb5f2529f25b6c121b04609499cba0ed516a59b557349c65316c1499698a';
 
 const OLD_IMPORT = "import Vue, { defineAsyncComponent } from 'vue';";
 const NEW_IMPORT = "import Vue from 'vue';";
@@ -233,5 +233,10 @@ if (file_put_contents($controllerPath, $patchedController) === false) {
 }
 requireCount(readFileStrict($controllerPath), OLD_CONTROLLER, 0, 'old Files init registration after transform');
 requireCount(readFileStrict($controllerPath), NEW_CONTROLLER, 1, 'patched Files init registration');
-requireCount(readFileStrict($patchedPath), NEW_FACTORY, 1, 'persisted TemplatePicker candidate');
+requireCount(
+	readFileStrict($patchedPath),
+	'tn||=opensuiteTemplatePickerLoader();const{default:i}=await tn;if(!nn)',
+	1,
+	'persisted TemplatePicker candidate',
+);
 printf("patched NC34 TemplatePicker bundle sha256=%s\n", hash_file('sha256', $patchedPath));

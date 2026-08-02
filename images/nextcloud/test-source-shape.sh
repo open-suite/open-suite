@@ -52,7 +52,7 @@ require_literal "${template_picker_patch}" "const TEMPLATE_PICKER_MAP_FILE = '74
 require_literal "${template_picker_patch}" "const TEMPLATE_PICKER_RUNTIME_URL = '7497-7497.js?v=94a5bd32402d33b444dc';"
 require_literal "${template_picker_patch}" "str_ends_with(\$source, 'apps/files/src/views/TemplatePicker.vue')"
 require_literal "${template_picker_patch}" "throw new RuntimeException('expected exactly one physical NC34 TemplatePicker source map');"
-require_literal "${template_picker_patch}" "const PATCHED_BUNDLE_SHA256 = 'd391378ea51e3495a9a1f480597758dc9504f1dfd33fd5229324a5a9b2729dff';"
+require_literal "${template_picker_patch}" "const PATCHED_BUNDLE_SHA256 = 'acfadb5f2529f25b6c121b04609499cba0ed516a59b557349c65316c1499698a';"
 require_literal "${template_picker_patch}" 'opensuiteTemplatePickerLoader=()=>Promise.all([t.e(4208),t.e(7497)]).then(t.bind(t,27497))'
 require_literal "${template_picker_patch}" 'tn||=opensuiteTemplatePickerLoader()'
 require_literal "${template_picker_patch}" 'const{default:i}=await tn;if(!nn)'
