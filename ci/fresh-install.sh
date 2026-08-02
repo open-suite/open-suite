@@ -424,6 +424,7 @@ local_conformance() {
       SMOKE_PASS="$(cat /etc/mijnbureau/demo-password)" \
       SMOKE_INSECURE=1 \
       SMOKE_DOCS_TITLE_ONLY=1 \
+      SMOKE_DIAGNOSTICS_PATH="${ARTIFACT_DIR}/docs-title-browser-diagnostics.jsonl" \
       node "${REPO}/ci/smoke/authenticated.mjs" || smoke_rc=$?
     cleanup_docs_smoke_user || cleanup_rc=$?
     if [ "${smoke_rc}" -ne 0 ]; then

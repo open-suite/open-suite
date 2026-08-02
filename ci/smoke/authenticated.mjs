@@ -19,6 +19,7 @@
 // Exit code 0 = pass. Failures are collected and all reported.
 
 import { createHash } from "node:crypto";
+import { appendFileSync } from "node:fs";
 import { chromium, devices } from "playwright";
 
 const DOMAIN = process.env.SMOKE_DOMAIN;
@@ -67,6 +68,41 @@ const browser = await chromium.launch();
 // SMOKE_INSECURE=1: tolerate self-signed certs (local VM deploys).
 const ctx = await browser.newContext({ ignoreHTTPSErrors: process.env.SMOKE_INSECURE === "1" });
 const page = await ctx.newPage();
+const diagnosticsPath = process.env.SMOKE_DIAGNOSTICS_PATH;
+const recordBrowserDiagnostic = (event, details) => {
+  if (!diagnosticsPath) return;
+  appendFileSync(
+    diagnosticsPath,
+    `${JSON.stringify({ timestamp: new Date().toISOString(), event, ...details })}\n`,
+    { mode: 0o600 },
+  );
+};
+const sanitizedUrl = (value) => {
+  const url = new URL(value);
+  return `${url.origin}${url.pathname}`;
+};
+page.on("framenavigated", (frame) => {
+  if (frame === page.mainFrame())
+    recordBrowserDiagnostic("main-frame-navigation", { url: sanitizedUrl(frame.url()) });
+});
+page.on("response", (response) => {
+  const url = new URL(response.url());
+  if ([DOMAIN, `auth.${DOMAIN}`, `bridge.${DOMAIN}`, `docs.${DOMAIN}`, `id.${DOMAIN}`].includes(url.hostname))
+    recordBrowserDiagnostic("response", {
+      method: response.request().method(),
+      status: response.status(),
+      url: `${url.origin}${url.pathname}`,
+    });
+});
+page.on("requestfailed", (request) => {
+  const url = new URL(request.url());
+  if ([DOMAIN, `auth.${DOMAIN}`, `bridge.${DOMAIN}`, `docs.${DOMAIN}`, `id.${DOMAIN}`].includes(url.hostname))
+    recordBrowserDiagnostic("request-failed", {
+      error: request.failure()?.errorText,
+      method: request.method(),
+      url: `${url.origin}${url.pathname}`,
+    });
+});
 await page.addInitScript(() => {
   window.__openSuiteFirstPaint = [];
   const sample = () => {
@@ -111,9 +147,11 @@ const verifyDocsTitlePersistence = async () => {
     { timeout: 30000 },
   );
   const docsLogin = page.waitForURL(`https://id.${DOMAIN}/**`, { timeout: 30000 });
-  await page.goto(`${docsOrigin}/`, { waitUntil: "domcontentloaded" }).catch(() => null);
-  // Docs starts its own OIDC redirect after the SPA loads, so the initial
-  // domcontentloaded URL can still be Docs even when Keycloak is next.
+  // Enter Docs' OIDC flow directly instead of depending on the SPA to finish
+  // its unauthenticated bootstrap and initiate the same top-level navigation.
+  await page
+    .goto(`${docsOrigin}/api/v1.0/authenticate/`, { waitUntil: "domcontentloaded" })
+    .catch(() => null);
   const docsState = await Promise.race([
     docsReady.then(() => "ready"),
     docsLogin.then(() => "login"),
