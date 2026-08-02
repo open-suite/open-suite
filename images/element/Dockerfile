@@ -30,6 +30,7 @@ COPY patch-mobile-web.sh /tmp/patch-mobile-web.sh
 COPY patch-session-lock.sh /tmp/patch-session-lock.sh
 COPY patch-sso-history.sh /tmp/patch-sso-history.sh
 COPY patch-cache-bust.sh /tmp/patch-cache-bust.sh
+COPY patch-cache-headers.sh /tmp/patch-cache-headers.sh
 COPY precompress-bundles.sh /tmp/precompress-bundles.sh
 RUN sh /tmp/patch-verification-reminders.sh /app \
     && sh /tmp/patch-startup-preload.sh /app \
@@ -37,6 +38,7 @@ RUN sh /tmp/patch-verification-reminders.sh /app \
     && sh /tmp/patch-session-lock.sh /app \
     && sh /tmp/patch-sso-history.sh /app \
     && sh /tmp/patch-cache-bust.sh /app \
+    && sh /tmp/patch-cache-headers.sh /tmp/default.conf.template \
     && sh /tmp/precompress-bundles.sh /app
 
 FROM scratch

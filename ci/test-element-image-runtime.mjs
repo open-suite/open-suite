@@ -33,6 +33,8 @@ for (const fragment of [
     "COPY --from=patcher /app /app",
     "COPY patch-sso-history.sh /tmp/patch-sso-history.sh",
     "&& sh /tmp/patch-sso-history.sh /app",
+    "COPY patch-cache-headers.sh /tmp/patch-cache-headers.sh",
+    "&& sh /tmp/patch-cache-headers.sh /tmp/default.conf.template",
     "ELEMENT_WEB_PORT=80",
     "EXPOSE 8080",
     "STOPSIGNAL SIGQUIT",
@@ -312,8 +314,45 @@ async function verifyAmd64Nginx(candidateImage) {
         );
         assert.equal(typeof config, "object", "config.json must be a JSON object");
         assert.notEqual(config, null, "config.json must be a JSON object");
+
+        const cacheHeaders = runContainerEngine([
+            "exec",
+            containerName,
+            "sh",
+            "-ec",
+            `
+bundle="$(find /app/bundles -type f ! -name '*.gz' | head -1)"
+test -n "$bundle"
+for path in "/\${bundle#/app/}" /config.json /index.html; do
+    echo "PATH $path"
+    wget -S -O /dev/null "http://localhost:$ELEMENT_WEB_PORT$path" 2>&1
+done
+`,
+        ]);
+        const sections = Object.fromEntries(
+            cacheHeaders
+                .split(/^PATH /m)
+                .slice(1)
+                .map((section) => {
+                    const newline = section.indexOf("\n");
+                    return [section.slice(0, newline), section.slice(newline + 1)];
+                }),
+        );
+        const bundlePath = Object.keys(sections).find((entry) =>
+            entry.startsWith("/bundles/"),
+        );
+        assert.ok(bundlePath, "fingerprinted bundle response was not inspected");
+        assert.match(
+            sections[bundlePath],
+            /Cache-Control: public, max-age=31536000, immutable/i,
+            "fingerprinted bundle must be explicitly immutable",
+        );
+        for (const mutablePath of ["/config.json", "/index.html"]) {
+            assert.match(sections[mutablePath], /Cache-Control: no-cache/i);
+            assert.doesNotMatch(sections[mutablePath], /immutable/i);
+        }
         console.log(
-            "linux/amd64: nginx -t, image healthcheck command, and config.json verified",
+            "linux/amd64: nginx, config.json, and immutable/mutable cache boundaries verified",
         );
     } finally {
         runContainerEngine(["rm", "--force", containerName]);

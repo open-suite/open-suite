@@ -231,6 +231,41 @@
       // very top, which the overlay would cover — push it below the bar and
       // shrink it so nothing (room search, message composer) is hidden or cut.
       "html.ko-on-element #matrixchat{margin-top:var(" + HEADER_HEIGHT_VAR + ") !important;height:calc(100vh - var(" + HEADER_HEIGHT_VAR + ")) !important;}",
+      // Element's first-run desktop-notification toast defaults to the top-left
+      // of #matrixchat, directly over room search. Keep it to the right of the
+      // room-list rail on desktop; where there is no safe horizontal lane,
+      // place it below the search row instead. Bound and scroll the container
+      // inside the dynamic viewport so wrapped actions remain reachable on
+      // short or zoomed screens.
+      "html.ko-on-element .mx_ToastContainer{position:fixed !important;left:auto !important;right:16px !important;",
+      "top:calc(var(" + HEADER_HEIGHT_VAR + ") + 12px) !important;width:max-content;",
+      "max-width:calc(100vw - 32px) !important;max-height:calc(100dvh - var(" + HEADER_HEIGHT_VAR + ") - 24px) !important;",
+      "box-sizing:border-box;grid-template-rows:auto 28px 8px !important;overflow-y:auto;",
+      "overscroll-behavior:contain;scrollbar-gutter:stable;}",
+      "html.ko-on-element .mx_ToastContainer .mx_Toast_toast{box-sizing:border-box;max-width:100%;min-width:0;",
+      "grid-template-columns:20px minmax(0,1fr) auto;}",
+      "html.ko-on-element .mx_ToastContainer .mx_Toast_body,html.ko-on-element .mx_ToastContainer .mx_Toast_title,",
+      "html.ko-on-element .mx_ToastContainer .mx_Toast_title h2,html.ko-on-element .mx_IncomingCallToast_content,",
+      "html.ko-on-element .mx_IncomingLegacyCallToast_content{min-width:0;max-width:100%;}",
+      "html.ko-on-element .mx_ToastContainer .mx_Toast_title h2,html.ko-on-element .mx_ToastContainer .mx_Toast_description,",
+      "html.ko-on-element .mx_IncomingCallToast_title h2{overflow-wrap:anywhere;word-break:break-word;}",
+      "html.ko-on-element .mx_ToastContainer .mx_Toast_description{box-sizing:border-box;max-width:100% !important;}",
+      "html.ko-on-element .mx_IncomingCallToast_AvatarWithDetails{box-sizing:border-box;min-width:0;max-width:100%;}",
+      "html.ko-on-element .mx_IncomingCallToast_AvatarWithDetails>div:last-child{min-width:0;max-width:100%;}",
+      "html.ko-on-element .mx_IncomingCallToast_AvatarWithDetails>div:last-child>*{white-space:normal;overflow-wrap:anywhere;}",
+      "html.ko-on-element .mx_Toast_buttons,html.ko-on-element .mx_IncomingCallToast_buttons,",
+      "html.ko-on-element .mx_IncomingLegacyCallToast_buttons{flex-wrap:wrap;row-gap:var(--cpd-space-2x,8px);max-width:100%;}",
+      "html.ko-on-element .mx_Toast_buttons>*,html.ko-on-element .mx_IncomingCallToast_actionButton,",
+      "html.ko-on-element .mx_IncomingLegacyCallToast_button{min-width:0;max-width:100%;white-space:normal;overflow-wrap:anywhere;}",
+      "html.ko-on-element .mx_IncomingCallToast_title{grid-template-columns:auto minmax(0,1fr) auto;}",
+      "html.ko-on-element .mx_IncomingLegacyCallToast{max-width:100%;flex-wrap:wrap;}",
+      "html.ko-on-element .mx_IncomingLegacyCallToast_content{box-sizing:border-box;flex:1 1 0;",
+      "margin-inline-start:0 !important;padding-inline-start:8px;max-width:calc(100% - 60px);}",
+      "html.ko-on-element .mx_IncomingLegacyCallToast_button{flex-shrink:1;}",
+      "@media(max-width:899px){html.ko-on-element .mx_ToastContainer{right:12px !important;",
+      "top:calc(var(" + HEADER_HEIGHT_VAR + ") + 76px) !important;",
+      "max-width:calc(100vw - 24px) !important;",
+      "max-height:calc(100dvh - var(" + HEADER_HEIGHT_VAR + ") - 88px) !important;}}",
       // Nextcloud's native header is absolute and #content is fixed. Reserve a
       // real row for both so Calendar's navigation and controls are never under
       // the suite shell and the app still fits exactly inside the viewport.
