@@ -10,12 +10,14 @@ on:
     paths:
       - "images/element/**"
       - "ci/test-element-image-runtime.mjs"
+      - "ci/test-element-quick-wins.mjs"
       - ".github/workflows/element-image.yaml"
   pull_request:
     branches: [main]
     paths:
       - "images/element/**"
       - "ci/test-element-image-runtime.mjs"
+      - "ci/test-element-quick-wins.mjs"
       - ".github/workflows/element-image.yaml"
   workflow_dispatch:
 

@@ -51,6 +51,9 @@ resource:
     redis: { requests: { cpu: 25m, memory: 16Mi } }
   nextcloud:
     nextcloud: { requests: { cpu: 150m, memory: 384Mi } }
+    # Kernel OOM evidence measured ~160Mi resident for cron.php. A 256Mi limit
+    # gives 60% headroom while preserving the ordinary-run 64Mi request.
+    cronjob: { requests: { cpu: 100m, memory: 64Mi }, limits: { cpu: 200m, memory: 256Mi } }
     whiteboard: { requests: { cpu: 25m, memory: 128Mi } }
     postgresql: { requests: { cpu: 75m, memory: 96Mi } }
     redis: { requests: { cpu: 25m, memory: 16Mi } }
