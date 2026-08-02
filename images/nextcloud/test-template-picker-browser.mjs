@@ -71,9 +71,12 @@ try {
     aborted += 1;
     await route.abort("failed");
   });
-  const chunkFailure = page.waitForEvent("pageerror", { timeout: 30_000 });
+  const chunkFailure = page.waitForEvent("requestfailed", {
+    predicate: chunkRequest,
+    timeout: 30_000,
+  });
   await initiateDocument();
-  assert.match((await chunkFailure).message, /chunk|loading|failed/i);
+  assert.equal(chunkRequest(await chunkFailure), true);
   assert.equal(aborted, 1);
   assert.equal(createPosts, 0);
   assert.equal((await dav("HEAD")).status, 404);
