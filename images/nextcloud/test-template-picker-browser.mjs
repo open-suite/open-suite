@@ -44,8 +44,8 @@ async function openFiles() {
 
 async function initiateDocument() {
   await page.getByRole("button", { name: "New", exact: true }).click();
-  const menuItems = page.locator('[role="menu"]:visible [role="menuitem"]');
-  const documentItem = menuItems.getByRole("menuitem", { name: "Document", exact: true });
+  const menuItems = page.locator('[role="menuitem"]:visible');
+  const documentItem = menuItems.filter({ hasText: /^\s*Document\s*$/ });
   assert.equal(await documentItem.count(), 1, `New menu=${JSON.stringify(await menuItems.evaluateAll((items) => items.map((item) => ({
     text: item.textContent?.trim(),
     tag: item.tagName.toLowerCase(),
