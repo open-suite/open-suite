@@ -62,7 +62,10 @@ opensuite_write_state 0600 /etc/mijnbureau/demo-admin-show "${OPEN_SUITE_DEMO_AD
 HELMFILE_V=1.1.7
 
 echo "==> [1/4] Installing k3s, Helm, Helmfile"
-curl -sfL https://get.k3s.io | INSTALL_K3S_EXEC="--write-kubeconfig-mode 644" sh -
+# This kubeconfig authenticates as system:admin. Keep it root-only on every
+# install and idempotent rerun; the k3s installer rewrites both the file and
+# systemd unit from INSTALL_K3S_EXEC.
+curl -sfL https://get.k3s.io | INSTALL_K3S_EXEC="--write-kubeconfig-mode 600" sh -
 export KUBECONFIG=/etc/rancher/k3s/k3s.yaml
 
 curl -fsSL https://raw.githubusercontent.com/helm/helm/main/scripts/get-helm-3 | bash
