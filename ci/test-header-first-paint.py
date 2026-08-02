@@ -35,14 +35,66 @@ body_contracts = (
     '<span>Open Suite</span>',
     'sub_filter_once on;',
 )
-delivery_contracts = (
-    'add_header X-Upstream-Header-Time "$upstream_header_time" always;',
-)
+
+
+def nginx_location_blocks(source):
+    """Return location blocks while ignoring braces inside quoted directives."""
+    blocks = []
+    for match in re.finditer(r"\blocation\s+(?:=\s+)?[^\s{]+\s*\{", source):
+        depth = 1
+        quote = None
+        escaped = False
+        index = match.end()
+        while index < len(source) and depth:
+            character = source[index]
+            if escaped:
+                escaped = False
+            elif character == "\\":
+                escaped = True
+            elif quote:
+                if character == quote:
+                    quote = None
+            elif character in "'\"":
+                quote = character
+            elif character == "{":
+                depth += 1
+            elif character == "}":
+                depth -= 1
+            index += 1
+        if depth:
+            raise AssertionError("unclosed nginx location block")
+        blocks.append(source[match.start():index])
+    return blocks
+
+
 for app, path in configs.items():
     rendered_source = path.read_text()
-    for contract in head_contracts + body_contracts + delivery_contracts:
+    for contract in head_contracts + body_contracts:
         if contract not in rendered_source:
             raise AssertionError(f"{app} is missing shared delivery contract: {contract}")
+    proxied_locations = [
+        block for block in nginx_location_blocks(rendered_source)
+        if re.search(r"^\s*proxy_pass\s+", block, re.MULTILINE)
+    ]
+    if len(proxied_locations) != 1:
+        raise AssertionError(
+            f"{app} has {len(proxied_locations)} proxied locations; expected exactly one"
+        )
+    timed_location = proxied_locations[0]
+    directive_patterns = {
+        "proxy_hide_header X-Upstream-Header-Time": (
+            r"^[ \t]*proxy_hide_header[ \t]+X-Upstream-Header-Time[ \t]*;[ \t]*$"
+        ),
+        'add_header X-Upstream-Header-Time "$upstream_header_time" always': (
+            r'^[ \t]*add_header[ \t]+X-Upstream-Header-Time[ \t]+'
+            r'"\$upstream_header_time"[ \t]+always[ \t]*;[ \t]*$'
+        ),
+    }
+    for directive, pattern in directive_patterns.items():
+        if len(re.findall(pattern, timed_location, re.MULTILINE)) != 1:
+            raise AssertionError(
+                f"{app} proxied location must contain exactly one active {directive}"
+            )
     if rendered_source.index("sub_filter '</head>'") > rendered_source.index("sub_filter '</body>'"):
         raise AssertionError(f"{app} does not initiate the canonical asset before the shell node")
 

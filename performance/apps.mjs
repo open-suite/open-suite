@@ -4,6 +4,7 @@ import { writeFile } from "node:fs/promises";
 import { chromium } from "playwright";
 
 import {
+  assertSingleUpstreamHeaderTime,
   captureEnvironment,
   parseNonNegativeNumber,
   parsePositiveInteger,
@@ -51,6 +52,7 @@ const appDefinitions = {
   nextcloud: {
     hostname: "nextcloud.",
     workload: "portal-header-office-to-documents-result-count",
+    exposesUpstreamHeaderTime: true,
     async open(page) {
       const header = page.locator("#ko-portal-header");
       const office = header
@@ -244,6 +246,28 @@ for (const [appName, definition] of Object.entries(appDefinitions)) {
   });
   await installObservers(context);
   const page = await context.newPage();
+  const mainDocumentResponses = [];
+  page.on("response", (response) => {
+    const request = response.request();
+    if (request.isNavigationRequest() && request.frame() === page.mainFrame()) {
+      mainDocumentResponses.push({
+        url: response.url().split("#", 1)[0],
+        headers: response.headersArray(),
+      });
+    }
+  });
+  const assertCurrentDocumentTimingHeader = async () => {
+    if (!definition.exposesUpstreamHeaderTime) return null;
+    const currentUrl = page.url().split("#", 1)[0];
+    const documentResponse = mainDocumentResponses
+      .slice()
+      .reverse()
+      .find(({ url }) => url === currentUrl);
+    if (!documentResponse) {
+      throw new Error(`did not capture main-document response for ${currentUrl}`);
+    }
+    return assertSingleUpstreamHeaderTime(await documentResponse.headers);
+  };
   const cdp = await context.newCDPSession(page);
   await cdp.send("Network.enable");
   await page.goto(baseUrl, { waitUntil: "domcontentloaded" });
@@ -254,6 +278,7 @@ for (const [appName, definition] of Object.entries(appDefinitions)) {
   const bootstrapStarted = performance.now();
   await definition.open(page);
   await definition.waitUntilReady(page);
+  await assertCurrentDocumentTimingHeader();
   sessionBootstrapMs[appName] = performance.now() - bootstrapStarted;
 
   let attempts = 0;
@@ -270,6 +295,7 @@ for (const [appName, definition] of Object.entries(appDefinitions)) {
       const coldStarted = performance.now();
       await definition.open(page);
       await definition.waitUntilReady(page);
+      await assertCurrentDocumentTimingHeader();
       const coldReadyMs = performance.now() - coldStarted;
       await page.waitForTimeout(250);
       const coldMetrics = await collectMetrics(page, coldReadyMs);
@@ -277,6 +303,7 @@ for (const [appName, definition] of Object.entries(appDefinitions)) {
       const warmStarted = performance.now();
       await page.reload({ waitUntil: "domcontentloaded" });
       await definition.waitUntilReady(page);
+      await assertCurrentDocumentTimingHeader();
       const warmReadyMs = performance.now() - warmStarted;
       await page.waitForTimeout(250);
       const warmMetrics = await collectMetrics(page, warmReadyMs);
