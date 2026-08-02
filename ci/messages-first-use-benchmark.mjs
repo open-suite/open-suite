@@ -93,6 +93,20 @@ const MAIL_ATTEMPTS = 3;
 
 async function attemptMailFirstUse() {
   const mailStarted = performance.now();
+  let signalNetworkChange;
+  const networkChange = new Promise((resolve) => {
+    signalNetworkChange = resolve;
+  });
+  const detectNetworkChange = (request) => {
+    if (
+      request.isNavigationRequest() &&
+      request.frame() === page.mainFrame() &&
+      request.failure()?.errorText === "net::ERR_NETWORK_CHANGED"
+    ) {
+      signalNetworkChange(new Error("mail navigation failed: net::ERR_NETWORK_CHANGED"));
+    }
+  };
+  page.on("requestfailed", detectNetworkChange);
   mailboxThreadsLoaded = page.waitForResponse((response) => {
     const url = new URL(response.url());
     return (
@@ -101,28 +115,36 @@ async function attemptMailFirstUse() {
       url.searchParams.get("has_active") === "1"
     );
   }, { timeout: 90_000 });
-  await page.goto(`https://messages.${domain}/`, { waitUntil: "domcontentloaded" });
-  if (page.url().includes(`id.${domain}`)) {
-    await page.fill("#username", username);
-    await page.fill("#password", password);
-    await page.click("#kc-login");
+  try {
+    const navigation = (async () => {
+      await page.goto(`https://messages.${domain}/`, { waitUntil: "domcontentloaded" });
+      if (page.url().includes(`id.${domain}`)) {
+        await page.fill("#username", username);
+        await page.fill("#password", password);
+        await page.click("#kc-login");
+      }
+      await page.waitForURL(new RegExp(`^https://messages\\.${domain.replaceAll(".", "\\.")}/mailbox/`), {
+        timeout: 60_000,
+      });
+    })();
+    const navigationFailure = await Promise.race([navigation, networkChange]);
+    if (navigationFailure) throw navigationFailure;
+    const mailboxResponse = await mailboxThreadsLoaded;
+    if (!mailboxResponse.ok()) {
+      throw new Error(`first Mail thread list returned HTTP ${mailboxResponse.status()}`);
+    }
+    // An empty first-user mailbox renders .thread-view--empty without mounting
+    // the thread panel. Either state means the authenticated mailbox data has
+    // rendered; unlike translated folder text, these app-owned layout classes
+    // are locale independent.
+    await page.locator(".thread-view--empty, .thread-panel").first().waitFor({
+      state: "visible",
+      timeout: 30_000,
+    });
+    return Math.round(performance.now() - mailStarted);
+  } finally {
+    page.off("requestfailed", detectNetworkChange);
   }
-  await page.waitForURL(new RegExp(`^https://messages\\.${domain.replaceAll(".", "\\.")}/mailbox/`), {
-    timeout: 60_000,
-  });
-  const mailboxResponse = await mailboxThreadsLoaded;
-  if (!mailboxResponse.ok()) {
-    throw new Error(`first Mail thread list returned HTTP ${mailboxResponse.status()}`);
-  }
-  // An empty first-user mailbox renders .thread-view--empty without mounting
-  // the thread panel. Either state means the authenticated mailbox data has
-  // rendered; unlike translated folder text, these app-owned layout classes
-  // are locale independent.
-  await page.locator(".thread-view--empty, .thread-panel").first().waitFor({
-    state: "visible",
-    timeout: 30_000,
-  });
-  return Math.round(performance.now() - mailStarted);
 }
 
 try {
@@ -135,10 +157,11 @@ try {
       const networkChanged = String(error?.message ?? "").includes("ERR_NETWORK_CHANGED");
       if (!networkChanged || attempt >= MAIL_ATTEMPTS) throw error;
       record("network-change-retry", { attempt, error: String(error.message).split("\n")[0] });
-      // Settle the orphaned response waiter, then restart on a fresh page so
-      // no listener or pending navigation from the aborted attempt leaks in.
-      await mailboxThreadsLoaded?.catch(() => null);
+      // Closing the page rejects the orphaned response waiter immediately;
+      // settle it before restarting so no pending listener leaks into retry.
+      const pendingMailboxResponse = mailboxThreadsLoaded?.catch(() => null);
       await page.close().catch(() => null);
+      await pendingMailboxResponse;
       page = await context.newPage();
       observePage(page, "mail");
     }

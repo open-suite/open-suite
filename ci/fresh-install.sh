@@ -360,6 +360,17 @@ assert_complete_stack() {
   kubectl get deployment,statefulset -A -o wide
 }
 
+assert_deck_calendar_default() {
+  local value
+  value="$(kubectl -n mb-nextcloud exec deploy/nextcloud -c nextcloud -- \
+    sh -c 'cd /var/www/html && php occ config:app:get deck calendar')"
+  if [ "${value}" != "no" ]; then
+    echo "ERROR: Deck calendar default is '${value}', expected 'no'" >&2
+    return 1
+  fi
+  echo "ok   Deck calendar default: no"
+}
+
 assert_k3s_admin_kubeconfig_permissions() {
   local ownership
   ownership="$(stat -c '%a %U %G' /etc/rancher/k3s/k3s.yaml)"
@@ -403,6 +414,7 @@ local_conformance() {
   assert_k3s_admin_kubeconfig_permissions
   assert_complete_stack
   assert_docs_missing_static_asset_not_immutable
+  assert_deck_calendar_default
   SMOKE_INSECURE=1 bash "${REPO}/ci/smoke/smoke.sh" "${DOMAIN}"
 }
 

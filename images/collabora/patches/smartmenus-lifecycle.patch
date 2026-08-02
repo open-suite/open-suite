@@ -35,3 +35,13 @@ diff --git a/browser/src/control/Control.Menubar.ts b/browser/src/control/Contro
  			hideOnClick: true,
  			showOnClick: true,
  			hideTimeout: 0,
+diff --git a/browser/src/control/jsdialog/Util.ScrollableBar.ts b/browser/src/control/jsdialog/Util.ScrollableBar.ts
+--- a/browser/src/control/jsdialog/Util.ScrollableBar.ts
++++ b/browser/src/control/jsdialog/Util.ScrollableBar.ts
+@@ -109,0 +110 @@ function setupResizeHandler(container: Element, scrollable: Element) {
++	window.addEventListener('jsdialogrefreshscrollables', handler);
+@@ -194,0 +196 @@ function setupPriorityStatusHandler(scrollable: Element, toolItems: any[]) {
++	window.addEventListener('jsdialogrefreshscrollables', handler);
+@@ -210 +212 @@ JSDialog.RefreshScrollables = function () {
+-	window.dispatchEvent(new Event('resize'));
++	window.dispatchEvent(new Event('jsdialogrefreshscrollables'));
