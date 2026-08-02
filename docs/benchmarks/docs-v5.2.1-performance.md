@@ -265,6 +265,13 @@ before installing Docs, as required by the existing chart contract.
 - the 60-second save assertion confirmed the edit was written through the
   document content endpoint.
 
+The Open Suite frontend sidecar also gives only Next's fingerprinted
+`/_next/static/` assets an explicit one-year `immutable` cache policy. The
+existing auth-gated Ingress remains unchanged, and HTML, APIs, collaboration,
+media, `service-worker.js`, and the unversioned `/opensuite-header.js` do not
+inherit that policy. The deterministic test checks both the narrow static
+location and the unchanged `no-cache` shared-header contract.
+
 Re-run the deterministic patch/chart checks with:
 
 ```bash

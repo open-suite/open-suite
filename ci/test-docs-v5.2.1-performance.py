@@ -125,6 +125,25 @@ def validate_values_source(infra):
     )
     assert backend_budget == 35, f"backend startup failure budget is {backend_budget}s"
 
+    static_location = re.search(
+        r"(?ms)^\s*location \^~ /_next/static/ \{\n(.*?)^\s*\}", source
+    )
+    assert static_location, "Docs sidecar is missing the fingerprinted static-asset route"
+    static_config = static_location.group(1)
+    assert "proxy_pass http://127.0.0.1:8080;" in static_config
+    assert "proxy_hide_header Cache-Control;" in static_config
+    assert "proxy_hide_header Expires;" in static_config
+    assert (
+        'add_header Cache-Control "public, max-age=31536000, immutable" always;'
+        in static_config
+    )
+    dynamic_location = source.split("location / {", 1)[1]
+    assert "max-age=31536000" not in dynamic_location
+    shared_header_location = source.split("location = /opensuite-header.js {", 1)[1].split(
+        "}", 1
+    )[0]
+    assert 'add_header Cache-Control "no-cache";' in shared_header_location
+
 
 def validate_infra_dependencies(infra):
     source = (infra / "helmfile/apps/docs/helmfile-child.yaml.gotmpl").read_text()
