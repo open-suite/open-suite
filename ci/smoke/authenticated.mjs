@@ -112,6 +112,8 @@ const verifyDocsTitlePersistence = async () => {
   );
   const docsLogin = page.waitForURL(`https://id.${DOMAIN}/**`, { timeout: 30000 });
   await page.goto(`${docsOrigin}/`, { waitUntil: "domcontentloaded" }).catch(() => null);
+  // Docs starts its own OIDC redirect after the SPA loads, so the initial
+  // domcontentloaded URL can still be Docs even when Keycloak is next.
   const docsState = await Promise.race([
     docsReady.then(() => "ready"),
     docsLogin.then(() => "login"),
