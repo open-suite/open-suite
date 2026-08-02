@@ -125,6 +125,13 @@ def validate_values_source(infra):
     )
     assert backend_budget == 35, f"backend startup failure budget is {backend_budget}s"
 
+    backend_values = root_section(source, "backend")
+    assert 'COLLABORATION_API_URL: "http://docs-y-provider:80/collaboration/api/"' in backend_values
+    # v5.2.1 declares this setting as an untyped values.Value. Supplying the
+    # redundant environment override turns 120 into a string, which Redis
+    # rejects as its PX expiry; omitting it preserves the integer default.
+    assert "NO_WEBSOCKET_CACHE_TIMEOUT:" not in backend_values
+
     # The backend calls this machine-to-machine endpoint with the y-provider's
     # own Authorization secret. Sending it through the browser auth gate makes
     # requests follow the OIDC redirect and receive HTML instead of JSON.
@@ -179,12 +186,21 @@ def validate_rendered_chart(infra, scratch):
             DB_PASSWORD: app-password
             DJANGO_SECRET_KEY: django-secret
             REDIS_URL: redis://docs-redis:6379
+            COLLABORATION_API_URL: http://docs-y-provider:80/collaboration/api/
           migrateDbCredentials:
             DB_USER: postgres
             DB_PASSWORD: admin-password
           themeCustomization:
             enabled: true
             fileContent: '{}'
+        """
+    ).rstrip()
+    values["yProvider"] += textwrap.dedent(
+        """
+
+          service:
+            ports:
+              http: 80
         """
     ).rstrip()
     override.write_text(
@@ -210,11 +226,13 @@ def validate_rendered_chart(infra, scratch):
         + "\n".join(f"{name}:\n{textwrap.indent(value, '  ')}\n" for name, value in values.items())
     )
 
+    rendered_deployments = {}
     for component, expected in EXPECTED_PROBES.items():
         rendered = run(
             "helm", "template", "docs", str(chart), "-f", str(override),
             "--show-only", expected["template"],
         )
+        rendered_deployments[component] = rendered
         assert_probe(
             yaml_block(rendered, "startupProbe"),
             path=expected["startup_path"], delay=0,
@@ -234,6 +252,29 @@ def validate_rendered_chart(infra, scratch):
             path=expected["startup_path"], delay=10, period=10, timeout=5,
             failures=3,
         )
+
+    backend_deployment = rendered_deployments["backend"]
+    collaboration_api_url = re.search(
+        r'(?m)^\s*- name:\s*"?COLLABORATION_API_URL"?\s*\n'
+        r'\s*value:\s*([^\s#]+)',
+        backend_deployment,
+    )
+    assert collaboration_api_url
+    assert collaboration_api_url.group(1).strip('"') == (
+        "http://docs-y-provider:80/collaboration/api/"
+    )
+    assert "NO_WEBSOCKET_CACHE_TIMEOUT" not in backend_deployment
+
+    y_provider_service = run(
+        "helm", "template", "docs", str(chart), "-f", str(override),
+        "--show-only", "templates/yprovider-service.yaml",
+    )
+    service_port = re.search(
+        r"(?ms)^\s*ports:\s*$.*?^\s*- name:\s*http\s*$"
+        r".*?^\s*port:\s*(\d+)\s*$.*?^\s*targetPort:\s*(\d+)\s*$",
+        y_provider_service,
+    )
+    assert service_port and service_port.groups() == ("80", "4444")
 
     collaboration_ingress = run(
         "helm", "template", "docs", str(chart), "-f", str(override),
