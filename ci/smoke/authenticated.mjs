@@ -110,13 +110,18 @@ const verifyDocsTitlePersistence = async () => {
       response.status() === 200,
     { timeout: 30000 },
   );
+  const docsLogin = page.waitForURL(`https://id.${DOMAIN}/**`, { timeout: 30000 });
   await page.goto(`${docsOrigin}/`, { waitUntil: "domcontentloaded" }).catch(() => null);
-  if (page.url().includes(`id.${DOMAIN}`)) {
+  const docsState = await Promise.race([
+    docsReady.then(() => "ready"),
+    docsLogin.then(() => "login"),
+  ]);
+  if (docsState === "login") {
     await page.fill("#username", USER);
     await page.fill("#password", PASS);
     await page.click("#kc-login");
+    await docsReady;
   }
-  await docsReady;
 
   const csrfToken = (await ctx.cookies(`${docsOrigin}/`)).find(
     (cookie) => cookie.name === "csrftoken",
