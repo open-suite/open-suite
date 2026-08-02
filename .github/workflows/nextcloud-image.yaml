@@ -96,8 +96,21 @@ jobs:
         run: |
           trap 'status=$?; if test "$status" -ne 0; then docker logs opensuite-nextcloud-browser || true; fi; kill "${capabilities_pid:-}" >/dev/null 2>&1 || true; docker rm -f opensuite-nextcloud-browser >/dev/null 2>&1 || true; exit "$status"' EXIT
           mkdir -p /tmp/collabora-fixture/hosting
-          printf '%s\n' '{"productName":"Open Suite browser fixture"}' \
+          printf '%s\n' '{"productName":"Open Suite browser fixture","productVersion":"1","productVersionHash":"ci"}' \
             >/tmp/collabora-fixture/hosting/capabilities
+          cat >/tmp/collabora-fixture/hosting/discovery <<'XML'
+          <?xml version="1.0" encoding="UTF-8"?>
+          <wopi-discovery>
+            <net-zone name="external-http">
+              <app name="application/vnd.openxmlformats-officedocument.wordprocessingml.document">
+                <action name="edit" ext="docx" urlsrc="http://host.docker.internal:18081/browser/ci/cool.html?WOPISrc={WOPISrc}"/>
+              </app>
+              <app name="Capabilities">
+                <action name="view" urlsrc="http://host.docker.internal:18081/hosting/capabilities"/>
+              </app>
+            </net-zone>
+          </wopi-discovery>
+          XML
           python3 -m http.server 18081 --directory /tmp/collabora-fixture >/tmp/collabora-fixture.log 2>&1 &
           capabilities_pid=$!
           docker run -d --name opensuite-nextcloud-browser \
@@ -125,6 +138,8 @@ jobs:
             config:app:set richdocuments use_groups --value=''
           docker exec -u www-data opensuite-nextcloud-browser php occ \
             config:app:set richdocuments edit_groups --value=''
+          docker exec -u www-data opensuite-nextcloud-browser php occ \
+            richdocuments:activate-config --wopi-url=http://host.docker.internal:18081
           npm install --prefix /tmp/template-picker-browser --no-audit --no-fund --silent playwright@1.54.2
           /tmp/template-picker-browser/node_modules/.bin/playwright install --with-deps chromium
           NEXTCLOUD_URL=http://127.0.0.1:18080 \
