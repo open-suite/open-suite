@@ -19,11 +19,16 @@ const page = await browser.newPage();
 let release;
 let createPosts = 0;
 const distRequests = [];
+const diagnosticErrors = [];
 page.on("request", (request) => {
   const url = new URL(request.url());
   if (url.pathname.startsWith("/dist/")) distRequests.push(`${url.pathname}${url.search}`);
   if (request.method() === "POST"
       && url.pathname === "/ocs/v2.php/apps/files/api/v1/templates/create") createPosts += 1;
+});
+page.on("pageerror", (error) => diagnosticErrors.push(`pageerror: ${error.message}`));
+page.on("console", (message) => {
+  if (message.type() === "error") diagnosticErrors.push(`console: ${message.text()}`);
 });
 
 async function openFiles() {
@@ -53,13 +58,21 @@ async function initiateDocument() {
     id: item.id,
     attributes: Object.fromEntries(Array.from(item.attributes, ({ name, value }) => [name, value])),
   }))))}`);
-  console.log(`initiating Office action=${JSON.stringify(await documentItem.evaluate((item) => ({
-    text: item.textContent?.trim(),
-    tag: item.tagName.toLowerCase(),
-    role: item.getAttribute("role"),
-    id: item.id,
-    attributes: Object.fromEntries(Array.from(item.attributes, ({ name, value }) => [name, value])),
-  })))}`);
+  console.log(`initiating Office action=${JSON.stringify(await documentItem.evaluate((item) => {
+    const ancestors = [];
+    let parent = item.parentElement;
+    for (let depth = 0; parent && depth < 5; depth += 1, parent = parent.parentElement) {
+      ancestors.push({ tag: parent.tagName.toLowerCase(), role: parent.getAttribute("role"), class: parent.className });
+    }
+    return {
+      text: item.textContent?.trim(),
+      tag: item.tagName.toLowerCase(),
+      role: item.getAttribute("role"),
+      id: item.id,
+      attributes: Object.fromEntries(Array.from(item.attributes, ({ name, value }) => [name, value])),
+      ancestors,
+    };
+  }))}; visible New menu=${JSON.stringify(await menuItems.allTextContents())}`);
   distRequests.length = 0;
   await documentItem.click();
 }
@@ -76,7 +89,9 @@ async function waitForExactChunk(requestPromise) {
         id: item.id,
         attributes: Object.fromEntries(Array.from(item.attributes, ({ name, value }) => [name, value])),
       })));
-    throw new Error(`exact TemplatePicker chunk was not requested; New menu=${JSON.stringify(menuItems)}; observed dist requests=${JSON.stringify(distRequests)}`, { cause: error });
+    const dialogVisible = await page.locator("[data-cy-files-new-node-dialog]").first()
+      .isVisible().catch(() => false);
+    throw new Error(`exact TemplatePicker chunk was not requested; dialogVisible=${dialogVisible}; New menu=${JSON.stringify(menuItems)}; observed dist requests=${JSON.stringify(distRequests)}; errors=${JSON.stringify(diagnosticErrors)}`, { cause: error });
   }
 }
 
