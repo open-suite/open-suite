@@ -1,0 +1,13 @@
+diff --git a/helmfile/apps/nextcloud/values.yaml.gotmpl b/helmfile/apps/nextcloud/values.yaml.gotmpl
+index ba55472..75b07f2 100644
+--- a/helmfile/apps/nextcloud/values.yaml.gotmpl
++++ b/helmfile/apps/nextcloud/values.yaml.gotmpl
+@@ -50,5 +50,7 @@ runtimeClassName: {{ .Values.cluster.runtimeClassName | quote }}
+ resources: {{ .Values.resource.nextcloud.nextcloud | default dict | toYaml | nindent 2 }}
+-
++cronjob:
++  resources: {{ .Values.resource.nextcloud.cronjob | default dict | toYaml | nindent 4 }}
++
+ networkPolicy:
+   enabled: true
+   # Restrict external access - only allow specific ingress sources
