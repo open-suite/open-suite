@@ -66,8 +66,9 @@ const assertGlobalHeader = async (host) => {
 
 const browser = await chromium.launch();
 // SMOKE_INSECURE=1: tolerate self-signed certs (local VM deploys).
-const ctx = await browser.newContext({ ignoreHTTPSErrors: process.env.SMOKE_INSECURE === "1" });
-const page = await ctx.newPage();
+const contextOptions = { ignoreHTTPSErrors: process.env.SMOKE_INSECURE === "1" };
+let ctx = await browser.newContext(contextOptions);
+let page = await ctx.newPage();
 const diagnosticsPath = process.env.SMOKE_DIAGNOSTICS_PATH;
 const recordBrowserDiagnostic = (event, details) => {
   if (!diagnosticsPath) return;
@@ -81,28 +82,42 @@ const sanitizedUrl = (value) => {
   const url = new URL(value);
   return `${url.origin}${url.pathname}`;
 };
-page.on("framenavigated", (frame) => {
-  if (frame === page.mainFrame())
-    recordBrowserDiagnostic("main-frame-navigation", { url: sanitizedUrl(frame.url()) });
-});
-page.on("response", (response) => {
-  const url = new URL(response.url());
-  if ([DOMAIN, `auth.${DOMAIN}`, `bridge.${DOMAIN}`, `docs.${DOMAIN}`, `id.${DOMAIN}`].includes(url.hostname))
-    recordBrowserDiagnostic("response", {
-      method: response.request().method(),
-      status: response.status(),
-      url: `${url.origin}${url.pathname}`,
-    });
-});
-page.on("requestfailed", (request) => {
-  const url = new URL(request.url());
-  if ([DOMAIN, `auth.${DOMAIN}`, `bridge.${DOMAIN}`, `docs.${DOMAIN}`, `id.${DOMAIN}`].includes(url.hostname))
-    recordBrowserDiagnostic("request-failed", {
-      error: request.failure()?.errorText,
-      method: request.method(),
-      url: `${url.origin}${url.pathname}`,
-    });
-});
+const attachBrowserDiagnostics = (browserPage) => {
+  let resolveMainFrameNetworkChanged;
+  const mainFrameNetworkChanged = new Promise((resolve) => {
+    resolveMainFrameNetworkChanged = resolve;
+  });
+  browserPage.on("framenavigated", (frame) => {
+    if (frame === browserPage.mainFrame())
+      recordBrowserDiagnostic("main-frame-navigation", { url: sanitizedUrl(frame.url()) });
+  });
+  browserPage.on("response", (response) => {
+    const url = new URL(response.url());
+    if ([DOMAIN, `auth.${DOMAIN}`, `bridge.${DOMAIN}`, `docs.${DOMAIN}`, `id.${DOMAIN}`].includes(url.hostname))
+      recordBrowserDiagnostic("response", {
+        method: response.request().method(),
+        status: response.status(),
+        url: `${url.origin}${url.pathname}`,
+      });
+  });
+  browserPage.on("requestfailed", (request) => {
+    const error = request.failure()?.errorText;
+    if (
+      request.isNavigationRequest()
+      && request.frame() === browserPage.mainFrame()
+      && error === "net::ERR_NETWORK_CHANGED"
+    ) resolveMainFrameNetworkChanged();
+    const url = new URL(request.url());
+    if ([DOMAIN, `auth.${DOMAIN}`, `bridge.${DOMAIN}`, `docs.${DOMAIN}`, `id.${DOMAIN}`].includes(url.hostname))
+      recordBrowserDiagnostic("request-failed", {
+        error,
+        method: request.method(),
+        url: `${url.origin}${url.pathname}`,
+      });
+  });
+  return mainFrameNetworkChanged;
+};
+let mainFrameNetworkChanged = attachBrowserDiagnostics(page);
 await page.addInitScript(() => {
   window.__openSuiteFirstPaint = [];
   const sample = () => {
@@ -138,7 +153,7 @@ page.on("console", (message) => {
   if (message.type() === "error") recordElementError(message.text());
 });
 
-const verifyDocsTitlePersistence = async () => {
+const establishDocsSession = async () => {
   const docsOrigin = `https://docs.${DOMAIN}`;
   const docsReady = page.waitForResponse(
     (response) =>
@@ -153,24 +168,32 @@ const verifyDocsTitlePersistence = async () => {
   });
   // Enter Docs' OIDC flow directly instead of depending on the SPA to finish
   // its unauthenticated bootstrap and initiate the same top-level navigation.
-  await page
-    .goto(`${docsOrigin}/api/v1.0/authenticate/`, { waitUntil: "domcontentloaded" })
-    .catch(() => null);
-  const docsState = await Promise.race([
+  const docsStatePromise = Promise.race([
     docsReady.then(() => "ready"),
     docsLogin.then(() => "login"),
+  ]);
+  const [, docsState] = await Promise.all([
+    page.goto(`${docsOrigin}/api/v1.0/authenticate/`, { waitUntil: "domcontentloaded" }),
+    docsStatePromise,
   ]);
   if (docsState === "login") {
     await page.fill("#username", USER);
     await page.fill("#password", PASS);
-    await page.click("#kc-login");
-    await docsReady;
+    await Promise.all([
+      docsReady,
+      page.locator("#kc-login").click({ noWaitAfter: true }),
+    ]);
   }
 
   const csrfToken = (await ctx.cookies(`${docsOrigin}/`)).find(
     (cookie) => cookie.name === "csrftoken",
   )?.value;
   if (!csrfToken) throw new Error("Docs authenticated session has no csrftoken");
+  return csrfToken;
+};
+
+const verifyDocsTitlePersistence = async (csrfToken) => {
+  const docsOrigin = `https://docs.${DOMAIN}`;
   const docsMutationHeaders = {
     "X-CSRFToken": csrfToken,
     Origin: docsOrigin,
@@ -224,22 +247,59 @@ const verifyDocsTitlePersistence = async () => {
 };
 
 if (process.env.SMOKE_DOCS_TITLE_ONLY === "1") {
-  try {
-    // Establish the edge-gate session first so verifyDocsTitlePersistence's
-    // readiness race observes Docs' own, separate OIDC flow.
-    await page.goto(`https://bridge.${DOMAIN}/`, { waitUntil: "domcontentloaded" });
-    if (page.url().includes(`id.${DOMAIN}`)) {
-      await page.fill("#username", USER);
-      await page.fill("#password", PASS);
-      await page.click("#kc-login");
+  let csrfToken;
+  for (let attempt = 1; attempt <= 2; attempt += 1) {
+    try {
+      const setup = (async () => {
+        // Establish the edge-gate session first so establishDocsSession's
+        // readiness race observes Docs' own, separate OIDC flow.
+        await page.goto(`https://bridge.${DOMAIN}/`, { waitUntil: "domcontentloaded" });
+        if (page.url().includes(`id.${DOMAIN}`)) {
+          await page.fill("#username", USER);
+          await page.fill("#password", PASS);
+          await Promise.all([
+            page.waitForEvent("framenavigated", {
+              predicate: (frame) =>
+                frame === page.mainFrame() && new URL(frame.url()).hostname === `bridge.${DOMAIN}`,
+              timeout: 30000,
+            }),
+            page.locator("#kc-login").click({ noWaitAfter: true }),
+          ]);
+        }
+        const bridgeUrl = new URL(page.url());
+        if (bridgeUrl.origin !== `https://bridge.${DOMAIN}`)
+          throw new Error(`Edge-gate login ended at ${bridgeUrl.origin}${bridgeUrl.pathname}`);
+        return establishDocsSession();
+      })();
+      const outcome = await Promise.race([
+        setup.then((value) => ({ type: "ready", value })),
+        mainFrameNetworkChanged.then(() => ({ type: "network-changed" })),
+      ]);
+      if (outcome.type === "ready") {
+        csrfToken = outcome.value;
+        break;
+      }
+      await ctx.close();
+      if (attempt === 2) {
+        fail("Docs title persistence smoke", "main-frame net::ERR_NETWORK_CHANGED on both attempts");
+        break;
+      }
+      ctx = await browser.newContext(contextOptions);
+      page = await ctx.newPage();
+      mainFrameNetworkChanged = attachBrowserDiagnostics(page);
+    } catch (error) {
+      fail("Docs title persistence smoke", error.message);
+      break;
     }
-    await page.waitForURL(`https://bridge.${DOMAIN}/**`, { timeout: 30000 });
-    await verifyDocsTitlePersistence();
-  } catch (error) {
-    fail("Docs title persistence smoke", error.message);
-  } finally {
-    await browser.close();
   }
+  if (csrfToken) {
+    try {
+      await verifyDocsTitlePersistence(csrfToken);
+    } catch (error) {
+      fail("Docs title persistence smoke", error.message);
+    }
+  }
+  await browser.close();
   if (failures.length === 0) {
     console.log("DOCS TITLE PERSISTENCE SMOKE PASS");
     process.exit(0);
@@ -1381,7 +1441,7 @@ try {
 
   // The backend checks the collaboration machine API before persisting this
   // update; the fresh GET prevents optimistic UI state from masking a failure.
-  await verifyDocsTitlePersistence();
+  await verifyDocsTitlePersistence(await establishDocsSession());
 
 } catch (e) {
   fail("unexpected error", e.message);
