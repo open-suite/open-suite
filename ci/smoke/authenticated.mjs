@@ -146,7 +146,11 @@ const verifyDocsTitlePersistence = async () => {
       response.status() === 200,
     { timeout: 30000 },
   );
-  const docsLogin = page.waitForURL(`https://id.${DOMAIN}/**`, { timeout: 30000 });
+  const docsLogin = page.waitForEvent("framenavigated", {
+    predicate: (frame) =>
+      frame === page.mainFrame() && new URL(frame.url()).hostname === `id.${DOMAIN}`,
+    timeout: 30000,
+  });
   // Enter Docs' OIDC flow directly instead of depending on the SPA to finish
   // its unauthenticated bootstrap and initiate the same top-level navigation.
   await page
