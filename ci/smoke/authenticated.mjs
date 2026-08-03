@@ -598,7 +598,11 @@ try {
   // --- meetcal mints a joinable room ----------------------------------------
   // Needs the Nextcloud session (same browser context) + CSRF token.
   await page.goto(`https://nextcloud.${DOMAIN}/apps/calendar/`, { waitUntil: "domcontentloaded" });
-  await page.waitForURL(`https://nextcloud.${DOMAIN}/apps/calendar**`, { timeout: 30000 });
+  const calendarUrl = new URL(page.url());
+  if (
+    calendarUrl.origin !== `https://nextcloud.${DOMAIN}`
+    || !calendarUrl.pathname.startsWith("/apps/calendar")
+  ) throw new Error(`Calendar navigation ended at ${calendarUrl.origin}${calendarUrl.pathname}`);
   await page.waitForTimeout(250);
   const calendarFrames = await page.evaluate(() => window.__openSuiteFirstPaint);
   const calendarViewportHeight = page.viewportSize().height;
