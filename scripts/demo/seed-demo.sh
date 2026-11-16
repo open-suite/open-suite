@@ -1,9 +1,11 @@
 #!/usr/bin/env bash
 # Usage: ./seed-demo.sh
 #
-# Resets the stateful public-demo fixtures and refreshes the idempotent ones:
-# upcoming calendar events, La Suite Docs, a clean unread Mail inbox, a Deck
-# project board, and a fresh unread chat thread between Jane and John.
+# Resets johndoe's public-demo account to a curated, known state every day:
+# upcoming calendar events with Meet rooms, La Suite Docs, Nextcloud Files, a
+# clean unread Mail inbox, a Deck project board, and a fresh unread chat thread
+# between Jane and John. Anything visitors or tests created in those apps is
+# removed, so the portal widgets only ever show the curated fixtures.
 #
 # Requires (env or the `demo-seed` secret in mb-bureaublad):
 #   DOMAIN     e.g. suite.example.com
@@ -60,9 +62,10 @@ dav() { # method url [curl args...]
   esac
 }
 
-# Direct-access grants are enabled on the meet/docs clients only for the
-# duration of the run (needed to mint johndoe tokens) and re-disabled on exit,
-# including on failure.
+# The direct-access grant is enabled on the meet client only for the duration
+# of the run (needed to mint a johndoe token) and re-disabled on exit,
+# including on failure. The docs client is re-disabled too: earlier versions
+# of this script enabled it.
 set_direct_access() { # clientId true|false
   kubectl -n mb-keycloak exec -i keycloak-keycloak-0 -c keycloak -- sh -s -- "$1" "$2" <<'SH'
 set -e
@@ -115,19 +118,56 @@ echo "==> Enforcing one block editor (disable Nextcloud Text)"
 kubectl -n mb-nextcloud exec deploy/nextcloud -c nextcloud -- \
   sh -c "cd /var/www/html && php occ app:disable text" >/dev/null 2>&1 || true
 
-# The CI smoke proves Collabora works by creating (and then deleting) a
-# Document.docx on every run; the file goes but its create/delete activity
-# entries stay and surface in the portal's NextCloud widget. Purge them as
-# part of the daily reset so the widget only shows real demo files.
-echo "==> Purging smoke-test activity entries"
+echo "==> [1/6] Files — curated Office files only"
+# Visitors and the CI smoke create files in johndoe's home every day. Delete
+# every top-level entry that is not a curated file, empty the trash and old
+# versions, then re-upload the curated set so its content is pristine too.
+FILES_DIR="${SEED_FILES_DIR:-$(cd "$(dirname "$0")" && pwd)/files}"
+mapfile -t CURATED_FILES < <(find "${FILES_DIR}" -maxdepth 1 -type f \
+  \( -name '*.docx' -o -name '*.xlsx' -o -name '*.pptx' \) -printf '%f\n' | sort)
+[ "${#CURATED_FILES[@]}" -gt 0 ] || {
+  echo "!! seed-demo: no curated files found in ${FILES_DIR}" >&2; exit 1; }
+NC_FILES="${NC}/files/${NC_LOGIN}"
+urlquote() { python3 -c 'import sys, urllib.parse; print(urllib.parse.quote(sys.argv[1]))' "$1"; }
+listing=$(curl -fsS --max-time 20 -u "${NC_LOGIN}:${NC_PASS}" -H "Host: ${NC_HOST}" \
+  -X PROPFIND -H "Depth: 1" "${NC_FILES}/")
+mapfile -t EXISTING_FILES < <(printf '%s' "$listing" | python3 -c "import sys, urllib.parse, xml.etree.ElementTree as ET
+root = ET.fromstring(sys.stdin.read())
+for href in root.iter('{DAV:}href'):
+    name = urllib.parse.unquote(href.text.rstrip('/').rsplit('/', 1)[-1])
+    if name != sys.argv[1]:
+        print(name)" "${NC_LOGIN}")
+for name in "${EXISTING_FILES[@]}"; do
+  keep=false
+  for curated in "${CURATED_FILES[@]}"; do [ "$name" = "$curated" ] && keep=true; done
+  [ "$keep" = true ] && continue
+  code=$(curl -sS --max-time 20 -o /dev/null -w '%{http_code}' -u "${NC_LOGIN}:${NC_PASS}" \
+    -H "Host: ${NC_HOST}" -X DELETE "${NC_FILES}/$(urlquote "$name")")
+  case "$code" in
+    2*) echo "    - ${name}" ;;
+    # Someone has it open in Office right now; the next reset removes it.
+    423) echo "    ~ ${name} is locked (open in Office); skipped" ;;
+    *) echo "!! seed-demo: DELETE ${name} returned HTTP ${code}" >&2; exit 1 ;;
+  esac
+done
+occ() { kubectl -n mb-nextcloud exec deploy/nextcloud -c nextcloud -- \
+  sh -c 'cd /var/www/html && php occ "$@"' occ "$@"; }
+occ trashbin:cleanup -- "${NC_LOGIN}" >/dev/null
+occ versions:cleanup -- "${NC_LOGIN}" >/dev/null
+# The portal Files widget is the Nextcloud activity feed. Start it empty so it
+# lists exactly the uploads below (newest first), not yesterday's activity.
 NC_DB_USER=$(kubectl -n mb-nextcloud get secret nextcloud-externaldatabase -o jsonpath='{.data.username}' | base64 -d)
 NC_DB_PASS=$(kubectl -n mb-nextcloud get secret nextcloud-externaldatabase -o jsonpath='{.data.password}' | base64 -d)
-kubectl -n mb-nextcloud exec nextcloud-cluster-rw-0 -c postgresql -- \
-  env PGPASSWORD="${NC_DB_PASS}" psql -qAt -h 127.0.0.1 -U "${NC_DB_USER}" -d nextcloud \
-  -c "DELETE FROM oc_activity WHERE file ~ '/Document( \\(\\d+\\))?\\.docx$'" >/dev/null || \
-  echo "    !! activity purge failed (non-fatal)"
+echo "DELETE FROM oc_activity WHERE affecteduser = :'login';" | \
+  kubectl -n mb-nextcloud exec -i nextcloud-cluster-rw-0 -c postgresql -- \
+  env PGPASSWORD="${NC_DB_PASS}" psql -qAt -v ON_ERROR_STOP=1 -h 127.0.0.1 -U "${NC_DB_USER}" -d nextcloud \
+  -v login="${NC_LOGIN}" >/dev/null
+for curated in "${CURATED_FILES[@]}"; do
+  dav PUT "${NC_FILES}/$(urlquote "$curated")" --data-binary @"${FILES_DIR}/${curated}"
+  echo "    + ${curated}"
+done
 
-echo "==> [1/5] Calendar — upcoming events (each with a Meet link)"
+echo "==> [2/6] Calendar — upcoming events (each with a Meet link)"
 # Meet is OIDC-native; mint johndoe a token (direct-access grant on the meet
 # client) so we can create a room per event. Its URL goes in the event location,
 # which the portal surfaces as a "Join" button.
@@ -216,34 +256,124 @@ put_event demo-standup-os 1 09 1 dmo-stnd-upx "Team standup"
 put_event demo-review-os  3 14 1 dmo-rviw-qtr "Q3 deck review with Jane"
 put_event demo-1on1-os    5 11 1 dmo-oneo-one "1:1 John and Jane"
 
-echo "==> [2/5] Docs — La Suite documents"
-# La Suite Docs is OIDC-native; mint johndoe a token via Keycloak direct-access
-# grant on the docs client (ensure that grant is enabled first).
-DOCS_CID=$(kubectl -n mb-keycloak get secret keycloak-keycloak-config-cli -o jsonpath="{.data.MB_CLIENT_SECRET_DOCS}" | base64 -d)
-set_direct_access docs true
-DTOK=$(curl -fsS --max-time 20 -X POST "https://id.${DOMAIN}/realms/mijnbureau/protocol/openid-connect/token" \
-  -d grant_type=password -d client_id=docs -d client_secret="${DOCS_CID}" \
-  -d username=johndoe -d password="${DEMO_PASS}" -d scope=openid \
-  | python3 -c "import json,sys;print(json.load(sys.stdin).get('access_token',''))")
-DOCSAPI="https://docs.${DOMAIN}/api/v1.0/documents/"
-have_doc() { # title — true if a doc with that title already exists
-  curl -fsS --max-time 20 "${DOCSAPI}?page_size=100" -H "Authorization: Bearer ${DTOK}" \
-    | python3 -c "import json,sys;d=json.load(sys.stdin);print(any(x.get('title')==sys.argv[1] for x in d.get('results',[])))" "$1"
-}
-make_doc() { # title
-  if [ "$(have_doc "$1")" = "True" ]; then echo "    = $1 (exists)"; return; fi
-  curl -fsS --max-time 20 -X POST "${DOCSAPI}" -H "Authorization: Bearer ${DTOK}" \
-    -H "Content-Type: application/json" -d "{\"title\":\"$1\"}" >/dev/null && echo "    + $1"
-}
-if [ -n "${DTOK}" ]; then
-  make_doc "Welcome to Open Suite"
-  make_doc "Q3 plan"
-  make_doc "Onboarding checklist"
-else
-  echo "    !! could not obtain a Docs token — skipping"
-fi
+# Every "Start instant meeting" click by a visitor leaves a room behind, and
+# the Meet widget lists them ahead of the event rooms. Keep only the rooms
+# the events above link to.
+kubectl -n mb-meet exec -i deploy/meet-backend -- python manage.py shell <<'PY' | tail -1
+from core.models import Room, User
 
-echo "==> [3/5] Mail — reset demo inbox and add unread messages"
+KEEP = {"dmo-stnd-upx", "dmo-rviw-qtr", "dmo-oneo-one"}
+demo_users = User.objects.filter(email__istartswith="johndoe@")
+stale = Room.objects.filter(accesses__user__in=demo_users).exclude(slug__in=KEEP)
+ids = list(stale.values_list("pk", flat=True).distinct())
+Room.objects.filter(pk__in=ids).delete()
+print(f"    - removed {len(ids)} other Meet rooms")
+PY
+
+echo "==> [3/6] Docs — curated La Suite documents"
+# Hard-delete every document johndoe owns except the curated ones (including
+# the trash and any sub-pages visitors added), then reset the curated
+# documents' title and content. Runs through the Docs ORM and the converter
+# the server-to-server create endpoint uses, so no user token is needed.
+kubectl -n mb-docs exec -i deploy/docs-backend -- python manage.py shell <<'PY' | grep '^    '
+from core import models
+from core.services import mime_types
+from core.services.converter_services import Converter
+from core.utils.treebeard import create_tree_node_with_retry
+
+# Saved in this order, so the last one is the most recently updated and the
+# portal Docs widget lists it first. Docs shows the title above the content,
+# so the markdown has no H1, and paragraphs stay on one line because the
+# converter keeps soft line breaks.
+CURATED = [
+    ("Onboarding checklist", """Welcome to the team! Work through this list in your first week.
+
+- [ ] Log in once to Open Suite. Every app uses the same account.
+- [ ] Add your working hours and an emergency contact to your team profile.
+- [ ] Say hello to Jane in Chat.
+- [ ] Join the team standup from the Calendar (the event has a Meet link).
+- [ ] Open the **Open Suite website launch** board in Projects and pick a card.
+"""),
+    ("Q3 plan", """## Goals
+
+1. Launch the new Open Suite website before the end of the quarter.
+2. Move the whole team onto shared calendars, chat and video calls.
+3. Keep every file and conversation hosted in the EU.
+
+## Milestones
+
+| Month | Milestone |
+| --- | --- |
+| July | Hosting region chosen, team mail connected |
+| August | Accessibility review and onboarding guide |
+| September | Launch announcement and website go-live |
+
+## Owners
+
+John owns the launch board. Jane owns the Q3 deck and budget review.
+"""),
+    ("Welcome to Open Suite", """This is **Docs**, the collaborative editor in Open Suite. Everything here is saved automatically, and anyone you share a document with can edit it with you in real time.
+
+## Try it
+
+- Type `/` to insert headings, lists, tables, images and more.
+- Select text to format it or leave a comment.
+- Use **Share** to invite a colleague or publish a read-only link.
+
+## The rest of your workspace
+
+- **Mail** and **Chat** for conversations
+- **Meet** for video calls, linked from your Calendar events
+- **Office** for documents, spreadsheets and presentations
+- **Projects** for task boards
+
+This demo resets every morning, so feel free to experiment.
+"""),
+]
+
+johns = list(models.User.objects.filter(email__istartswith="johndoe@"))
+if len(johns) != 1:
+    raise SystemExit(f"expected one johndoe Docs user, found {len(johns)}")
+john = johns[0]
+titles = [title for title, _ in CURATED]
+
+owned_ids = models.DocumentAccess.objects.filter(
+    user=john, role=models.RoleChoices.OWNER
+).values_list("document_id", flat=True)
+owned_roots = models.Document.objects.filter(pk__in=owned_ids, depth=1).order_by("created_at")
+
+keep = {}
+remove = []
+for doc in owned_roots:
+    if doc.title in titles and doc.title not in keep and doc.deleted_at is None:
+        keep[doc.title] = doc
+    else:
+        remove.append(doc.pk)
+# Queryset delete on treebeard nodes also removes their descendants.
+models.Document.objects.filter(pk__in=remove).delete()
+print(f"    - removed {len(remove)} other documents")
+
+converter = Converter()
+for title, markdown in CURATED:
+    doc = keep.get(title)
+    if doc is None:
+        doc = create_tree_node_with_retry(
+            lambda: models.Document.add_root(title=title, creator=john)
+        )
+        models.DocumentAccess.objects.create(
+            document=doc, role=models.RoleChoices.OWNER, user=john
+        )
+    else:
+        for child in doc.get_children():
+            child.delete()
+        doc.refresh_from_db()
+    doc.title = title
+    doc.content = converter.convert(markdown, mime_types.MARKDOWN, mime_types.YJS)
+    doc.save()
+    print(f"    = {title}")
+PY
+
+echo "==> [4/6] Mail — reset demo inbox and add unread messages"
 if kubectl -n mb-messages get deploy messages-backend >/dev/null 2>&1; then
   # Delete only threads visible to the named public-demo mailboxes. This uses
   # the application's ORM so cascade and blob lifecycle rules stay intact.
@@ -348,7 +478,7 @@ else
   echo "    messages app is disabled — skipping"
 fi
 
-echo "==> [4/5] Projects — Open Suite launch board"
+echo "==> [5/6] Projects — Open Suite launch board"
 DECK_API="http://${NC_SVC}:8080/index.php/apps/deck/api/v1.0"
 DECK_OCS="http://${NC_SVC}:8080/ocs/v2.php/apps/deck/api/v1.0"
 deck_request() { # method path [JSON body] [base URL]
@@ -368,73 +498,71 @@ deck_request() { # method path [JSON body] [base URL]
 }
 
 DECK_BOARD_TITLE="Open Suite website launch"
+# Visitors move, add and delete cards, and Deck seeds a "Welcome to Nextcloud
+# Deck!" board on first login. Keep one curated board (stable ID, so links to
+# it survive), delete every other board johndoe owns, and rebuild the curated
+# board's lists and cards from scratch.
 boards=$(deck_request GET "/boards")
 board_id=$(printf '%s' "$boards" | python3 -c "import json,sys
 login, title = sys.argv[1:]
 for board in json.load(sys.stdin):
     owner = board.get('owner') or {}
-    if board.get('title') == title and owner.get('uid') == login and not board.get('archived', False):
+    if (board.get('title') == title and owner.get('uid') == login
+            and not board.get('archived', False) and not board.get('deletedAt', 0)):
         print(board['id'])
         break" "$NC_LOGIN" "$DECK_BOARD_TITLE")
+mapfile -t old_boards < <(printf '%s' "$boards" | python3 -c "import json,sys
+login, keep = sys.argv[1:]
+for board in json.load(sys.stdin):
+    owner = board.get('owner') or {}
+    if owner.get('uid') == login and not board.get('deletedAt', 0) and str(board['id']) != keep:
+        print(board['id'])" "$NC_LOGIN" "$board_id")
+for old_board in "${old_boards[@]}"; do
+  deck_request DELETE "/boards/${old_board}" >/dev/null
+done
+echo "    - removed ${#old_boards[@]} other boards"
+
 if [ -z "$board_id" ]; then
   board_id=$(deck_request POST "/boards" \
     "{\"title\":\"${DECK_BOARD_TITLE}\",\"color\":\"E85D4A\"}" |
     python3 -c "import json,sys; print(json.load(sys.stdin)['id'])")
   echo "    + ${DECK_BOARD_TITLE}"
 else
-  echo "    = ${DECK_BOARD_TITLE} (exists)"
+  echo "    = ${DECK_BOARD_TITLE} (reset)"
 fi
 
-stacks=$(deck_request GET "/boards/${board_id}/stacks")
-ensure_stack() { # title order
-  local title="$1" order="$2" id
-  id=$(printf '%s' "$stacks" | python3 -c "import json,sys
-title = sys.argv[1]
-for stack in json.load(sys.stdin):
-    if stack.get('title') == title and not stack.get('deletedAt', 0):
-        print(stack['id'])
-        break" "$title")
-  if [ -z "$id" ]; then
-    id=$(deck_request POST "/boards/${board_id}/stacks" \
-      "{\"title\":\"${title}\",\"order\":${order}}" |
-      python3 -c "import json,sys; print(json.load(sys.stdin)['id'])")
-    echo "    + ${title} list" >&2
-  fi
-  printf '%s' "$id"
+# Drop every list (and its cards), including Deck's defaults on a new board.
+mapfile -t old_stacks < <(deck_request GET "/boards/${board_id}/stacks" |
+  python3 -c "import json,sys
+for stack in json.load(sys.stdin): print(stack['id'])")
+for stack in "${old_stacks[@]}"; do
+  deck_request DELETE "/boards/${board_id}/stacks/${stack}" >/dev/null
+done
+make_stack() { # title order
+  deck_request POST "/boards/${board_id}/stacks" "{\"title\":\"$1\",\"order\":$2}" |
+    python3 -c "import json,sys; print(json.load(sys.stdin)['id'])"
 }
-todo_id=$(ensure_stack "To do" 0)
-doing_id=$(ensure_stack "In progress" 1)
-done_id=$(ensure_stack "Done" 2)
+todo_id=$(make_stack "To do" 0)
+doing_id=$(make_stack "In progress" 1)
+done_id=$(make_stack "Done" 2)
 
-# Refresh after list creation so card checks see the current server state.
-stacks=$(deck_request GET "/boards/${board_id}/stacks")
-ensure_card() { # stack id, title, description
-  local stack_id="$1" title="$2" description="$3" exists
-  exists=$(printf '%s' "$stacks" | python3 -c "import json,sys
-stack_id, title = int(sys.argv[1]), sys.argv[2]
-for stack in json.load(sys.stdin):
-    if stack.get('id') == stack_id:
-        print('yes' if any(card.get('title') == title and not card.get('deletedAt', 0) for card in stack.get('cards', [])) else 'no')
-        break
-else:
-    print('no')" "$stack_id" "$title")
-  if [ "$exists" = "yes" ]; then return; fi
-  deck_request POST "/boards/${board_id}/stacks/${stack_id}/cards" \
-    "{\"title\":\"${title}\",\"description\":\"${description}\"}" >/dev/null
-  echo "    + ${title}"
+make_card() { # stack id, title, description
+  deck_request POST "/boards/${board_id}/stacks/$1/cards" \
+    "{\"title\":\"$2\",\"description\":\"$3\"}" >/dev/null
+  echo "    + $2"
 }
-ensure_card "$todo_id" "Finalise accessibility review" "Check keyboard navigation and contrast before launch."
-ensure_card "$todo_id" "Prepare launch announcement" "Draft the public launch note for the team."
-ensure_card "$doing_id" "Review onboarding guide" "Make the first-run path clear for new colleagues."
-ensure_card "$done_id" "Choose hosting region" "EU-hosted infrastructure selected."
-ensure_card "$done_id" "Connect team mail" "Mail is available from the shared Open Suite header."
+make_card "$todo_id" "Finalise accessibility review" "Check keyboard navigation and contrast before launch."
+make_card "$todo_id" "Prepare launch announcement" "Draft the public launch note for the team."
+make_card "$doing_id" "Review onboarding guide" "Make the first-run path clear for new colleagues."
+make_card "$done_id" "Choose hosting region" "EU-hosted infrastructure selected."
+make_card "$done_id" "Connect team mail" "Mail is available from the shared Open Suite header."
 
 # Mark the final list as Deck's semantic done column. This is idempotent and
 # also marks cards in that list complete, which powers the portal progress.
 deck_request PUT "/stacks/${done_id}/done" \
   "{\"boardId\":${board_id},\"isDone\":true}" "$DECK_OCS" >/dev/null
 
-echo "==> [5/5] Chat — reset Jane ↔ John direct message"
+echo "==> [6/6] Chat — reset Jane ↔ John direct message"
 SYN=$(kubectl -n mb-element get pods -o name | grep -i "synapse-" | grep -iv keygen | head -1)
 # Mint a run-scoped Synapse admin token. Password login is disabled (OIDC-only
 # Synapse), so shared-secret registration is unusable; bootstrap a seedadmin
@@ -522,6 +650,17 @@ else
   # now, then post a fresh short thread so the demo always shows the same clean
   # 1-2 unread messages. The purge is async — poll it to completion so the new
   # messages (sent after) are never caught by it.
+  #
+  # Purging events does not decrement Synapse's per-room unread counter, so
+  # without a read receipt first the badge grew by one every day (44 by
+  # November). Mark the old history read as John, then purge.
+  LAST_EVENT=$(curl -fsS "$B/_matrix/client/v3/rooms/$RID/messages?dir=b&limit=1" -H "$AT" | python3 -c "import json,sys
+chunk = json.load(sys.stdin).get('chunk', [])
+print(chunk[0]['event_id'] if chunk else '')")
+  if [ -n "$LAST_EVENT" ]; then
+    curl -fsS -X POST "$B/_matrix/client/v3/rooms/$RID/read_markers" -H "$AT" -H "Content-Type: application/json" \
+      -d "{\"m.fully_read\":\"$LAST_EVENT\",\"m.read\":\"$LAST_EVENT\"}" >/dev/null
+  fi
   PURGE_ID=$(curl -s -X POST "$B/_synapse/admin/v1/purge_history/$RID" \
     -H "$AAT" -H "Content-Type: application/json" \
     -d "{\"purge_up_to_ts\": $(($(date +%s000) - 1000)), \"delete_local_events\": true}" \
