@@ -499,30 +499,43 @@ deck_request() { # method path [JSON body] [base URL]
 
 DECK_BOARD_TITLE="Open Suite website launch"
 # Visitors move, add and delete cards, and Deck seeds a "Welcome to Nextcloud
-# Deck!" board on first login. Delete every board johndoe owns and rebuild the
-# curated one, so the Projects widget always shows the same single board.
+# Deck!" board on first login. Keep one curated board (stable ID, so links to
+# it survive), delete every other board johndoe owns, and rebuild the curated
+# board's lists and cards from scratch.
 boards=$(deck_request GET "/boards")
-mapfile -t old_boards < <(printf '%s' "$boards" | python3 -c "import json,sys
-login = sys.argv[1]
+board_id=$(printf '%s' "$boards" | python3 -c "import json,sys
+login, title = sys.argv[1:]
 for board in json.load(sys.stdin):
     owner = board.get('owner') or {}
-    if owner.get('uid') == login and not board.get('deletedAt', 0):
-        print(board['id'])" "$NC_LOGIN")
+    if (board.get('title') == title and owner.get('uid') == login
+            and not board.get('archived', False) and not board.get('deletedAt', 0)):
+        print(board['id'])
+        break" "$NC_LOGIN" "$DECK_BOARD_TITLE")
+mapfile -t old_boards < <(printf '%s' "$boards" | python3 -c "import json,sys
+login, keep = sys.argv[1:]
+for board in json.load(sys.stdin):
+    owner = board.get('owner') or {}
+    if owner.get('uid') == login and not board.get('deletedAt', 0) and str(board['id']) != keep:
+        print(board['id'])" "$NC_LOGIN" "$board_id")
 for old_board in "${old_boards[@]}"; do
   deck_request DELETE "/boards/${old_board}" >/dev/null
 done
-echo "    - removed ${#old_boards[@]} boards"
+echo "    - removed ${#old_boards[@]} other boards"
 
-board_id=$(deck_request POST "/boards" \
-  "{\"title\":\"${DECK_BOARD_TITLE}\",\"color\":\"E85D4A\"}" |
-  python3 -c "import json,sys; print(json.load(sys.stdin)['id'])")
-echo "    + ${DECK_BOARD_TITLE}"
+if [ -z "$board_id" ]; then
+  board_id=$(deck_request POST "/boards" \
+    "{\"title\":\"${DECK_BOARD_TITLE}\",\"color\":\"E85D4A\"}" |
+    python3 -c "import json,sys; print(json.load(sys.stdin)['id'])")
+  echo "    + ${DECK_BOARD_TITLE}"
+else
+  echo "    = ${DECK_BOARD_TITLE} (reset)"
+fi
 
-# A new board comes with Deck's default lists; replace them with ours.
-mapfile -t default_stacks < <(deck_request GET "/boards/${board_id}/stacks" |
+# Drop every list (and its cards), including Deck's defaults on a new board.
+mapfile -t old_stacks < <(deck_request GET "/boards/${board_id}/stacks" |
   python3 -c "import json,sys
 for stack in json.load(sys.stdin): print(stack['id'])")
-for stack in "${default_stacks[@]}"; do
+for stack in "${old_stacks[@]}"; do
   deck_request DELETE "/boards/${board_id}/stacks/${stack}" >/dev/null
 done
 make_stack() { # title order
