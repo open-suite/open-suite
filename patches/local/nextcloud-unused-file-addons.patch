@@ -1,0 +1,18 @@
+diff --git a/helmfile/apps/nextcloud/charts/nextcloud/templates/configmap-script-post-install.yaml b/helmfile/apps/nextcloud/charts/nextcloud/templates/configmap-script-post-install.yaml
+index 5b9cd96..ca61f82 100644
+--- a/helmfile/apps/nextcloud/charts/nextcloud/templates/configmap-script-post-install.yaml
++++ b/helmfile/apps/nextcloud/charts/nextcloud/templates/configmap-script-post-install.yaml
+@@ -30,6 +30,13 @@ data:
+     php /var/www/html/occ app:disable survey_client
+     php /var/www/html/occ app:disable user_status
+     php /var/www/html/occ app:disable files_reminders
++    # Open Suite: add-ons this distribution does not use. Public share links
++    # are off (shareapi_allow_links=no), so there is nothing to limit, and
++    # the related-resources sidebar list is not used. Both load on every
++    # Files page: 476 KB and 8 requests of a 5.4 MB first load (measured
++    # 2026-11-17).
++    php /var/www/html/occ app:disable files_downloadlimit
++    php /var/www/html/occ app:disable related_resources
+ 
+     php /var/www/html/occ app:enable admin_audit
+     php /var/www/html/occ app:enable encryption
