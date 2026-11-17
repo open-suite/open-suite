@@ -1,14 +1,19 @@
 diff --git a/helmfile/apps/docs/values.yaml.gotmpl b/helmfile/apps/docs/values.yaml.gotmpl
-index ce4df2c..211c2a7 100644
+index ce4df2c..27d5570 100644
 --- a/helmfile/apps/docs/values.yaml.gotmpl
 +++ b/helmfile/apps/docs/values.yaml.gotmpl
-@@ -194,6 +194,10 @@ backend:
+@@ -193,7 +193,14 @@ backend:
+     PYTHONPATH: "/app"
      REDIS_URL: {{ $redisUrl | quote }}
      SENTRY_DSN: ""
-     SESSION_COOKIE_AGE: "43200"
-+    # Open Suite: when the 12h Docs session lapses while the Keycloak SSO
-+    # session is still alive, re-authenticate with prompt=none and return to
-+    # the same document instead of showing the "Log in" (401) page.
+-    SESSION_COOKIE_AGE: "43200"
++    # Open Suite: the Docs session must not end before the suite login does
++    # (Keycloak ssoSessionMaxLifespan, 30 days). The auth gate checks the suite
++    # login on every request and discards this session when it changes.
++    SESSION_COOKIE_AGE: "2592000"
++    # Open Suite: if the Docs session is missing while the suite login is
++    # alive, re-authenticate with prompt=none and return to the same document
++    # instead of showing the "Log in" (401) page.
 +    FRONTEND_SILENT_LOGIN_ENABLED: "true"
      SPECTACULAR_SETTINGS_ENABLE_DJANGO_DEPLOY_CHECK: "false"
      STORAGES_STATICFILES_BACKEND: "django.contrib.staticfiles.storage.StaticFilesStorage"

@@ -16,9 +16,9 @@ CLIENT_ID="opensuite-auth-gate"
 NAMESPACE="mb-bureaublad"
 # Prebuilt in CI and pulled from GHCR (ticket 3.1). Pinned to a specific build
 # (not floating :main) so a redeploy is reproducible; bump this when the gate
-# changes. sha-8a7faae adds privacy-safe request timing correlation.
+# changes. sha-2cb19df binds application sessions to the suite login.
 # Override AUTH_GATE_IMAGE to test another tag.
-IMAGE="${AUTH_GATE_IMAGE:-ghcr.io/open-suite/auth-gate:sha-8a7faae}"
+IMAGE="${AUTH_GATE_IMAGE:-ghcr.io/open-suite/auth-gate:sha-2cb19df}"
 OPEN_SUITE_TLS_MODE="${OPEN_SUITE_TLS_MODE:-letsencrypt}"
 
 echo "==> [1/5] Ensuring auth-gate secrets"

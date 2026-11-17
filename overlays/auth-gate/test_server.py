@@ -306,6 +306,157 @@ class SessionTests(unittest.TestCase):
         self.assertIn(server.unsign(cookie), server.SESSIONS)
 
 
+class SessionBindingTests(unittest.TestCase):
+    """Application state on a host belongs to exactly one suite login."""
+
+    session = {"sub": "user-1", "email": "user@example.test", "name": "User One", "oidc_sid": "keycloak-session-1"}
+
+    def auth(
+        self,
+        host: str,
+        uri: str,
+        cookies: str,
+        method: str = "GET",
+        session: dict[str, object] | None = None,
+    ) -> http.client.HTTPResponse:
+        headers = forwarded_headers(host, uri, method)
+        headers["Cookie"] = cookies
+        with mock.patch.object(server, "valid_session", return_value=session or self.session):
+            return request("/auth", headers)
+
+    def set_cookies(self, response: http.client.HTTPResponse) -> list[str]:
+        return [value for name, value in response.getheaders() if name.lower() == "set-cookie"]
+
+    def bind_cookie(self, host: str, session: dict[str, object] | None = None) -> str:
+        return f"{server.BIND_COOKIE_NAME}={server.bind_value(session or self.session, host)}"
+
+    def test_first_contact_drops_old_application_state_and_replays_the_read(self) -> None:
+        response = self.auth(
+            "docs.example.test",
+            "/docs/42?tab=1",
+            "opensuite_auth=signed; docs_sessionid=old; csrftoken=old",
+        )
+        set_cookies = self.set_cookies(response)
+
+        self.assertEqual(response.status, 302)
+        self.assertEqual(response.getheader("Location"), "https://docs.example.test/docs/42?tab=1")
+        self.assertEqual(response.getheader("Clear-Site-Data"), '"storage"')
+        self.assertEqual(response.getheader("Cache-Control"), "no-store")
+        self.assertIn("docs_sessionid=; Path=/; Max-Age=0; Secure", set_cookies)
+        self.assertIn("csrftoken=; Path=/; Max-Age=0; Secure", set_cookies)
+        self.assertFalse([header for header in set_cookies if header.startswith(f"{server.COOKIE_NAME}=")])
+        bind = [header for header in set_cookies if header.startswith(f"{server.BIND_COOKIE_NAME}=")]
+        self.assertEqual(len(bind), 1)
+        self.assertIn(server.bind_value(self.session, "docs.example.test"), bind[0])
+        self.assertIn(f"Max-Age={server.BIND_TTL}", bind[0])
+        self.assertIn("HttpOnly", bind[0])
+        self.assertNotIn("Domain=", bind[0])
+        self.assertIsNone(response.getheader("X-Open-Suite-User"))
+
+    def test_bound_host_reaches_the_application_with_the_edge_identity(self) -> None:
+        response = self.auth(
+            "docs.example.test",
+            "/docs/42",
+            f"opensuite_auth=signed; docs_sessionid=current; {self.bind_cookie('docs.example.test')}",
+        )
+
+        self.assertEqual(response.status, 204)
+        self.assertEqual(response.getheader("X-Open-Suite-User"), "user-1")
+        self.assertEqual(self.set_cookies(response), [])
+        self.assertIsNone(response.getheader("Clear-Site-Data"))
+
+    def test_state_of_another_person_is_dropped_with_its_storage(self) -> None:
+        previous = dict(self.session, sub="user-2", oidc_sid="keycloak-session-0")
+
+        response = self.auth(
+            "docs.example.test",
+            "/",
+            f"opensuite_auth=signed; docs_sessionid=theirs; {self.bind_cookie('docs.example.test', previous)}",
+        )
+
+        self.assertEqual(response.status, 302)
+        self.assertIn("docs_sessionid=; Path=/; Max-Age=0; Secure", self.set_cookies(response))
+        self.assertEqual(response.getheader("Clear-Site-Data"), '"storage"')
+
+    def test_new_login_of_the_same_person_drops_sessions_but_keeps_storage(self) -> None:
+        previous = dict(self.session, oidc_sid="keycloak-session-0")
+
+        response = self.auth(
+            "docs.example.test",
+            "/",
+            f"opensuite_auth=signed; docs_sessionid=stale; {self.bind_cookie('docs.example.test', previous)}",
+        )
+        set_cookies = self.set_cookies(response)
+
+        self.assertEqual(response.status, 302)
+        self.assertIn("docs_sessionid=; Path=/; Max-Age=0; Secure", set_cookies)
+        self.assertIn(server.bind_value(self.session, "docs.example.test"), " ".join(set_cookies))
+        self.assertIsNone(response.getheader("Clear-Site-Data"))
+
+    def test_forged_person_half_does_not_keep_storage(self) -> None:
+        response = self.auth(
+            "docs.example.test",
+            "/",
+            f"opensuite_auth=signed; {server.BIND_COOKIE_NAME}=anything.else",
+        )
+
+        self.assertEqual(response.status, 302)
+        self.assertEqual(response.getheader("Clear-Site-Data"), '"storage"')
+
+    def test_binding_does_not_carry_over_to_another_host(self) -> None:
+        response = self.auth(
+            "meet.example.test",
+            "/",
+            f"opensuite_auth=signed; sessionid=old; {self.bind_cookie('docs.example.test')}",
+        )
+
+        self.assertEqual(response.status, 302)
+        self.assertIn("sessionid=; Path=/; Max-Age=0; Secure", self.set_cookies(response))
+
+    def test_path_scoped_application_cookie_is_dropped_without_being_presented(self) -> None:
+        response = self.auth("bridge.example.test", "/", "opensuite_auth=signed")
+
+        self.assertEqual(response.status, 302)
+        self.assertIn("bureaublad_session=; Path=/api/v1; Max-Age=0; Secure", self.set_cookies(response))
+
+    def test_first_contact_write_is_refused_rather_than_replayed(self) -> None:
+        response = self.auth(
+            "docs.example.test",
+            "/api/v1.0/documents/",
+            "opensuite_auth=signed; docs_sessionid=old",
+            method="POST",
+        )
+
+        self.assertEqual(response.status, 401)
+        self.assertIsNone(response.getheader("Location"))
+        self.assertIn("docs_sessionid=; Path=/; Max-Age=0; Secure", self.set_cookies(response))
+
+    def test_unusable_cookie_names_are_never_written_back(self) -> None:
+        response = self.auth(
+            "docs.example.test",
+            "/",
+            "opensuite_auth=signed; bad name=1; =orphan; ok=1; ok=2",
+        )
+        set_cookies = self.set_cookies(response)
+
+        self.assertEqual(response.status, 302)
+        self.assertEqual(
+            [header for header in set_cookies if not header.startswith(f"{server.BIND_COOKIE_NAME}=")],
+            ["ok=; Path=/; Max-Age=0; Secure"],
+        )
+
+    def test_rebind_is_logged_as_its_own_outcome_without_request_data(self) -> None:
+        output = io.StringIO()
+
+        with contextlib.redirect_stdout(output):
+            self.auth("docs.example.test", "/secret-path", "opensuite_auth=signed; docs_sessionid=secret-value")
+
+        event = json.loads(output.getvalue().strip())
+        self.assertEqual(event["outcome"], "rebind")
+        self.assertEqual(event["status"], 302)
+        self.assertNotIn("secret", json.dumps(event))
+
+
 class LogoutCallbackTests(unittest.TestCase):
     def request_auth(self, host: str, uri: str, method: str = "GET") -> int:
         return request("/auth", forwarded_headers(host, uri, method)).status

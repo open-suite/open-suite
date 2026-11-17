@@ -1,0 +1,16 @@
+diff --git a/helmfile/apps/bureaublad/values.yaml.gotmpl b/helmfile/apps/bureaublad/values.yaml.gotmpl
+index d78c692..1c502cb 100644
+--- a/helmfile/apps/bureaublad/values.yaml.gotmpl
++++ b/helmfile/apps/bureaublad/values.yaml.gotmpl
+@@ -60,7 +60,10 @@ backend:
+     SECRET_KEY: {{ .Values.application.bureaublad.backend.secretKey | quote }}
+     ENVIRONMENT: "prod"
+     DEBUG: "false"
+-    SESSION_MAX_AGE: "7200"
++    # Open Suite: the portal session must not end before the suite login does
++    # (Keycloak ssoSessionMaxLifespan, 30 days). The auth gate checks the suite
++    # login on every request and discards this session when it changes.
++    SESSION_MAX_AGE: "2592000"
+     LOGGING_LEVEL: "DEBUG"
+     OIDC_CLIENT_ID: {{ .Values.authentication.client.bureaublad.client_id | quote }}
+     OIDC_CLIENT_SECRET: {{ .Values.authentication.client.bureaublad.client_secret | quote }}

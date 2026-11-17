@@ -57,12 +57,44 @@ jobs:
           fi
           node ci/smoke/authenticated.mjs
 
+  # One rule for every application: a person is signed in to the whole suite
+  # or to none of it. Runs after the authenticated suite, never beside it,
+  # because both drive the demo account; it runs even when that suite fails.
+  session-conformance:
+    needs: authenticated
+    if: ${{ !cancelled() && github.event_name != 'pull_request' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: Install Playwright
+        run: |
+          npm i --no-save playwright
+          npx playwright install --with-deps chromium
+      - name: Run session conformance
+        env:
+          SMOKE_USER: ${{ secrets.SMOKE_USER || 'johndoe' }}
+          SMOKE_PASS: ${{ secrets.SMOKE_PASS }}
+          SMOKE_USER2: ${{ secrets.SMOKE_USER2 || 'janedoe' }}
+          SMOKE_PASS2: ${{ secrets.SMOKE_PASS2 || secrets.SMOKE_PASS }}
+        run: |
+          if [ -z "$SMOKE_PASS" ]; then
+            echo "SMOKE_PASS secret not set — session conformance is required" >&2
+            exit 2
+          fi
+          node ci/smoke/session-conformance.mjs
+
   visual-transition-pr:
     if: >-
       github.event_name == 'pull_request' &&
       github.event.pull_request.head.repo.full_name == github.repository &&
       github.actor != 'dependabot[bot]'
-    runs-on: ubuntu-latest
+    # The pinned Playwright cannot install its browser on ubuntu-latest
+    # (26.04). A pinned browser needs a pinned OS image.
+    runs-on: ubuntu-24.04
     timeout-minutes: 20
     steps:
       - uses: actions/checkout@v4

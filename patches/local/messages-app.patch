@@ -272,7 +272,7 @@ index 0000000..dee9aec
 +      protocol: TCP
 diff --git a/helmfile/apps/messages/charts/messages/templates/header-configmap.yaml b/helmfile/apps/messages/charts/messages/templates/header-configmap.yaml
 new file mode 100644
-index 0000000..0eae212
+index 0000000..7c542d4
 --- /dev/null
 +++ b/helmfile/apps/messages/charts/messages/templates/header-configmap.yaml
 @@ -0,0 +1,77 @@
@@ -395,7 +395,7 @@ index 0000000..7bfb47f
 +{{- end }}
 diff --git a/helmfile/apps/messages/charts/messages/templates/migrate-job.yaml b/helmfile/apps/messages/charts/messages/templates/migrate-job.yaml
 new file mode 100644
-index 0000000..9808302
+index 0000000..a57b53a
 --- /dev/null
 +++ b/helmfile/apps/messages/charts/messages/templates/migrate-job.yaml
 @@ -0,0 +1,63 @@
@@ -837,7 +837,7 @@ index 0000000..280a606
 +          resources: {{ .Values.worker.resources | toYaml | nindent 12 }}
 diff --git a/helmfile/apps/messages/charts/messages/values.yaml b/helmfile/apps/messages/charts/messages/values.yaml
 new file mode 100644
-index 0000000..a20e790
+index 0000000..3231c17
 --- /dev/null
 +++ b/helmfile/apps/messages/charts/messages/values.yaml
 @@ -0,0 +1,84 @@
@@ -849,10 +849,10 @@ index 0000000..a20e790
 +  registry: "ghcr.io"
 +  backend:
 +    repository: "open-suite/messages-backend"
-+    tag: "v0.8.0-opensuite.1"
++    tag: "v0.8.0-opensuite.2"
 +  frontend:
 +    repository: "open-suite/messages-frontend"
-+    tag: "v0.8.0-opensuite.1"
++    tag: "v0.8.0-opensuite.2"
 +  mtaIn:
 +    repository: "suitenumerique/messages-mta-in"
 +    tag: "0.8.0"
@@ -1133,10 +1133,10 @@ index 0000000..33ce096
 +    size: {{ coalesce .Values.pvc.messages.redis.size .Values.pvc.default.size "1Gi" }}
 diff --git a/helmfile/apps/messages/values.yaml.gotmpl b/helmfile/apps/messages/values.yaml.gotmpl
 new file mode 100644
-index 0000000..bd224bd
+index 0000000..cb6bda8
 --- /dev/null
 +++ b/helmfile/apps/messages/values.yaml.gotmpl
-@@ -0,0 +1,158 @@
+@@ -0,0 +1,163 @@
 +{{- $releaseId := now | unixEpoch }}
 +{{- $hostname := printf "%s.%s" .Values.global.hostname.messages .Values.global.domain }}
 +{{- $sslPostfix := ternary "s" "" (.Values.global.tls.enabled | default true) }}
@@ -1193,6 +1193,11 @@ index 0000000..bd224bd
 +    # English-only for now; hides the in-app language switch.
 +    FRONTEND_FORCED_DEFAULT_LANGUAGE: "en"
 +    FRONTEND_SILENT_LOGIN_ENABLED: "true"
++    # Open Suite: the Mail session must not end before the suite login does
++    # (Keycloak ssoSessionMaxLifespan, 30 days). The auth gate checks the suite
++    # login on every request and discards this session when it changes.
++    # Read from the environment by patches/messages/session-cookie-age-env.patch.
++    SESSION_COOKIE_AGE: "2592000"
 +    LOGGING_LEVEL_HANDLERS_CONSOLE: "INFO"
 +    LOGGING_LEVEL_LOGGERS_APP: "INFO"
 +    LOGGING_LEVEL_LOGGERS_ROOT: "INFO"
@@ -1368,7 +1373,7 @@ index be0dfca..b60e686 100644
      host: "drive-redis-master"
      port: 6379
 diff --git a/helmfile/environments/default/container.yaml.gotmpl b/helmfile/environments/default/container.yaml.gotmpl
-index 469bd00..58c39fa 100644
+index 469bd00..2cc8073 100644
 --- a/helmfile/environments/default/container.yaml.gotmpl
 +++ b/helmfile/environments/default/container.yaml.gotmpl
 @@ -152,6 +152,25 @@ container:
@@ -1380,10 +1385,10 @@ index 469bd00..58c39fa 100644
 +    registry: "ghcr.io"
 +    backend:
 +      repository: "open-suite/messages-backend"
-+      tag: "v0.8.0-opensuite.1"
++      tag: "v0.8.0-opensuite.2"
 +    frontend:
 +      repository: "open-suite/messages-frontend"
-+      tag: "v0.8.0-opensuite.1"
++      tag: "v0.8.0-opensuite.2"
 +    mtaIn:
 +      repository: "suitenumerique/messages-mta-in"
 +      tag: "0.8.0"

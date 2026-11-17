@@ -1,0 +1,15 @@
+diff --git a/src/backend/messages/settings.py b/src/backend/messages/settings.py
+index 157c2e8..aebae13 100644
+--- a/src/backend/messages/settings.py
++++ b/src/backend/messages/settings.py
+@@ -909,7 +909,9 @@ class Base(Configuration):
+     # Session
+     SESSION_ENGINE = "django.contrib.sessions.backends.cache"
+     SESSION_CACHE_ALIAS = "default"
+-    SESSION_COOKIE_AGE = 60 * 60 * 12
++    SESSION_COOKIE_AGE = values.PositiveIntegerValue(
++        default=60 * 60 * 12, environ_name="SESSION_COOKIE_AGE", environ_prefix=None
++    )
+ 
+     # OIDC - Authorization Code Flow
+     OIDC_CREATE_USER = values.BooleanValue(

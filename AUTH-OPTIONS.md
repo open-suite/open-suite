@@ -2,6 +2,14 @@
 
 Status: architecture decision input, not an implementation plan.
 
+Update 2026-11-17: Option A is what runs, with the required invariant below
+now enforced at the edge instead of per application. The gate binds each
+host's application state to one Keycloak session and one person, and drops
+it on first contact under another suite login (`overlays/auth-gate/server.py`,
+`rebind_headers`). Application sessions last as long as the suite login.
+`ci/smoke/session-conformance.mjs` asserts the invariant for every
+application. Options B to D remain unbuilt.
+
 ## Executive conclusion
 
 The current deployment is not literally one application session. It is:

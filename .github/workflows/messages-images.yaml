@@ -20,7 +20,7 @@ permissions:
 env:
   MESSAGES_REPO: https://github.com/suitenumerique/messages.git
   MESSAGES_REF: v0.8.0
-  IMAGE_TAG: v0.8.0-opensuite.1
+  IMAGE_TAG: v0.8.0-opensuite.2
 
 jobs:
   verify:
