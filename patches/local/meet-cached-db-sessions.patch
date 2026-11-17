@@ -1,13 +1,20 @@
 diff --git a/helmfile/apps/meet/values.yaml.gotmpl b/helmfile/apps/meet/values.yaml.gotmpl
-index 6542bb9..bd1b718 100644
+index 6542bb9..2691231 100644
 --- a/helmfile/apps/meet/values.yaml.gotmpl
 +++ b/helmfile/apps/meet/values.yaml.gotmpl
-@@ -113,3 +113,7 @@ meet_backend:
+@@ -111,6 +111,15 @@ meet_backend:
+   pdb: {{ .Values.pdb.meet.backend | toYaml | nindent 4 }}
+ 
    runtimeClassName: {{ .Values.cluster.runtimeClassName | quote }}
--
 +  # django-lasuite backchannel logout enumerates Django's Session model.
 +  extraEnvVars:
 +    - name: SESSION_ENGINE
 +      value: django.contrib.sessions.backends.cached_db
-+
++    # Open Suite: the Meet session must not end before the suite login does
++    # (Keycloak ssoSessionMaxLifespan, 30 days). The auth gate checks the
++    # suite login on every request and discards this session when it changes.
++    - name: SESSION_COOKIE_AGE
++      value: "2592000"
+ 
    secretKey: {{ .Values.application.meet.secretKey | quote }}
+ 

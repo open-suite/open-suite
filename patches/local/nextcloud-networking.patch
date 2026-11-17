@@ -1,8 +1,8 @@
 diff --git a/helmfile/apps/nextcloud/values.yaml.gotmpl b/helmfile/apps/nextcloud/values.yaml.gotmpl
-index 706e9e2..ba9a46c 100644
+index 706e9e2..52f9559 100644
 --- a/helmfile/apps/nextcloud/values.yaml.gotmpl
 +++ b/helmfile/apps/nextcloud/values.yaml.gotmpl
-@@ -180,7 +180,21 @@ mail:
+@@ -180,7 +180,27 @@ mail:
  trustedDomains:
    - {{ .Values.global.hostname.nextcloud }}.{{ .Values.global.domain }}
  
@@ -22,10 +22,16 @@ index 706e9e2..ba9a46c 100644
 +  opensuite.config.php: |
 +    <?php
 +    $CONFIG['allow_local_remote_servers'] = true;
++    // Open Suite: the Nextcloud session must not end before the suite login
++    // does (Keycloak ssoSessionMaxLifespan, 30 days). The auth gate checks
++    // the suite login on every request and discards this session when it
++    // changes.
++    $CONFIG['session_lifetime'] = 2592000;
++    $CONFIG['remember_login_cookie_lifetime'] = 2592000;
  
  forwardedForHeaders:
    - "X-Forwarded-For"
-@@ -220,7 +234,11 @@ persistence:
+@@ -220,7 +240,11 @@ persistence:
  # The is the URL is used to connect Collabora Server with Next Cloud Office App automaticlly
  collabora:
    url: "https://{{ .Values.global.hostname.collabora | default "collabora" }}.{{ .Values.global.domain | default "example.com"  }}"

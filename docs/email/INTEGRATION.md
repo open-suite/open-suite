@@ -34,7 +34,7 @@ The MTA images are the published upstream
 `ghcr.io/suitenumerique/messages-{mta-in,mta-out}:0.8.0` images. Backend and
 frontend are reproducibly built from the pinned upstream `v0.8.0` source plus
 `patches/messages/*.patch` as
-`ghcr.io/open-suite/messages-{backend,frontend}:v0.8.0-opensuite.1`.
+`ghcr.io/open-suite/messages-{backend,frontend}:v0.8.0-opensuite.2`.
 
 Services:
 - backend — Django REST API + custom MDA (mail delivery agent). Needs Postgres,
