@@ -44,6 +44,11 @@ SESSION_TTL = int(os.environ.get("SESSION_TTL_SECONDS", "604800"))
 STATE_TTL = int(os.environ.get("STATE_TTL_SECONDS", "600"))
 VALIDATION_INTERVAL = int(os.environ.get("OIDC_VALIDATION_INTERVAL_SECONDS", "15"))
 REFRESH_SKEW = int(os.environ.get("OIDC_REFRESH_SKEW_SECONDS", "30"))
+BIND_COOKIE_NAME = os.environ.get("BIND_COOKIE_NAME", "opensuite_bind")
+# Browsers cap cookie lifetimes at 400 days. The value only ever matches one
+# Keycloak session, so a long lifetime cannot extend anything.
+BIND_TTL = 400 * 24 * 60 * 60
+COOKIE_NAME_PATTERN = re.compile(r"^[!#$%&'*+\-.^_`|~0-9A-Za-z]+$")
 
 REQUEST_ID_HEADER = "X-Open-Suite-Request-ID"
 SERVER_TIMING_HEADER = "Server-Timing"
@@ -157,6 +162,14 @@ LOGOUT_CALLBACKS = {
     f"nextcloud.{DOMAIN}": {
         "/index.php/apps/user_oidc/backchannel-logout/keycloak": frozenset({"POST"}),
     },
+}
+
+# Every observed application session cookie is host-only with Path=/, which
+# the sweep in rebind_headers() clears from the request's own Cookie header.
+# A cookie scoped below "/" is not sent with a request for another path, so
+# the sweep cannot see it: name those here.
+SCOPED_APP_COOKIES = {
+    f"bridge.{DOMAIN}": (("bureaublad_session", "/api/v1"),),
 }
 
 # Keys are cached ~10 min so a fresh JWKS fetch is not on every request's path.
@@ -285,6 +298,55 @@ def state_cookie_header(value: str, max_age: int) -> str:
 
 def clear_state_cookie_header() -> str:
     return state_cookie_header("", 0)
+
+
+def bind_value(session: dict[str, object], host: str) -> str:
+    """Name the suite login that owns the application state on one host."""
+    message = f"bind|{session.get('oidc_sid', '')}|{host}".encode("utf-8")
+    return b64url(hmac.new(COOKIE_SECRET, message, hashlib.sha256).digest())
+
+
+def bound_to_session(cookie_header_value: str | None, session: dict[str, object], host: str) -> bool:
+    cookies = parse_cookies(cookie_header_value)
+    presented = cookies.get(BIND_COOKIE_NAME).value if cookies.get(BIND_COOKIE_NAME) else ""
+    return hmac.compare_digest(presented, bind_value(session, host))
+
+
+def request_cookie_names(cookie_header_value: str | None) -> list[str]:
+    """Return the syntactically valid cookie names of a Cookie header."""
+    names: list[str] = []
+    for pair in (cookie_header_value or "").split(";"):
+        name = pair.split("=", 1)[0].strip()
+        if name and name not in names and COOKIE_NAME_PATTERN.fullmatch(name):
+            names.append(name)
+    return names
+
+
+def rebind_headers(
+    cookie_header_value: str | None,
+    session: dict[str, object],
+    host: str,
+) -> list[tuple[str, str]]:
+    """Discard one host's application state and bind it to this suite login.
+
+    Applications keep their own session next to the suite session. Whatever a
+    browser still holds for this host was created under another suite login,
+    possibly another person's, so none of it may reach the application. The
+    binding follows the Keycloak session, not the gate's in-memory record: a
+    gate restart re-authenticates silently and keeps application sessions.
+    """
+    headers = [("Cache-Control", "no-store"), ("Clear-Site-Data", '"storage"')]
+    swept = {(name, "/") for name in request_cookie_names(cookie_header_value)}
+    swept.update(SCOPED_APP_COOKIES.get(host, ()))
+    for name, path in sorted(swept):
+        if name in (COOKIE_NAME, BIND_COOKIE_NAME):
+            continue
+        # Secure is required to overwrite __Host- and __Secure- cookies.
+        headers.append(("Set-Cookie", f"{name}=; Path={path}; Max-Age=0; Secure"))
+    headers.append(
+        ("Set-Cookie", cookie_header(BIND_COOKIE_NAME, bind_value(session, host), BIND_TTL, domain=None))
+    )
+    return headers
 
 
 def json_b64(payload: dict[str, object]) -> str:
@@ -618,6 +680,7 @@ class Handler(http.server.BaseHTTPRequestHandler):
         request_id: str,
         outcome: str,
         headers: dict[str, str] | None = None,
+        repeated_headers: list[tuple[str, str]] | None = None,
     ) -> None:
         duration_ms = max(0, time.perf_counter_ns() - started_ns) / 1_000_000
         response_headers = dict(headers or {})
@@ -625,7 +688,7 @@ class Handler(http.server.BaseHTTPRequestHandler):
         # response data or copied from an unvalidated inbound header.
         response_headers[REQUEST_ID_HEADER] = request_id
         response_headers[SERVER_TIMING_HEADER] = f"opensuite_auth;dur={duration_ms:.1f}"
-        self.send_empty(status, response_headers)
+        self.send_empty(status, response_headers, repeated_headers)
         emit_log_record(
             json.dumps(
                 {
@@ -639,9 +702,16 @@ class Handler(http.server.BaseHTTPRequestHandler):
             )
         )
 
-    def send_empty(self, status: int, headers: dict[str, str] | None = None) -> None:
+    def send_empty(
+        self,
+        status: int,
+        headers: dict[str, str] | None = None,
+        repeated_headers: list[tuple[str, str]] | None = None,
+    ) -> None:
         self.send_response(status)
         for key, value in (headers or {}).items():
+            self.send_header(key, value)
+        for key, value in repeated_headers or []:
             self.send_header(key, value)
         self.end_headers()
 
@@ -768,9 +838,24 @@ class Handler(http.server.BaseHTTPRequestHandler):
                 )
                 return
 
-        cookies = parse_cookies(self.headers.get("Cookie"))
+        cookie_header_value = self.headers.get("Cookie")
+        cookies = parse_cookies(cookie_header_value)
         auth_cookie = cookies.get(COOKIE_NAME).value if cookies.get(COOKIE_NAME) else None
         session = valid_session(auth_cookie)
+        if session and not bound_to_session(cookie_header_value, session, request[0]):
+            # First contact with this host under this suite login. A read is
+            # replayed once the browser has dropped the old state; a write is
+            # refused, because its body was composed under the previous login.
+            replayable = request[2] in ("GET", "HEAD")
+            self.send_auth_response(
+                HTTPStatus.FOUND if replayable else HTTPStatus.UNAUTHORIZED,
+                started_ns,
+                request_id,
+                "rebind",
+                {"Location": request_url(request)} if replayable else None,
+                rebind_headers(cookie_header_value, session, request[0]),
+            )
+            return
         if session:
             self.send_auth_response(
                 HTTPStatus.NO_CONTENT,
