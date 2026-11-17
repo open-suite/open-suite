@@ -301,15 +301,24 @@ def clear_state_cookie_header() -> str:
 
 
 def bind_value(session: dict[str, object], host: str) -> str:
-    """Name the suite login that owns the application state on one host."""
-    message = f"bind|{session.get('oidc_sid', '')}|{host}".encode("utf-8")
-    return b64url(hmac.new(COOKIE_SECRET, message, hashlib.sha256).digest())
+    """Name the suite login, then the person, that owns one host's state."""
+
+    def digest(kind: str, value: object) -> str:
+        message = f"bind|{kind}|{value}|{host}".encode("utf-8")
+        return b64url(hmac.new(COOKIE_SECRET, message, hashlib.sha256).digest())
+
+    return f"{digest('sid', session.get('oidc_sid', ''))}.{digest('sub', session.get('sub', ''))}"
 
 
-def bound_to_session(cookie_header_value: str | None, session: dict[str, object], host: str) -> bool:
+def binding(cookie_header_value: str | None, session: dict[str, object], host: str) -> tuple[bool, bool]:
+    """Return (same suite login, same person) for one host's stored state."""
     cookies = parse_cookies(cookie_header_value)
     presented = cookies.get(BIND_COOKIE_NAME).value if cookies.get(BIND_COOKIE_NAME) else ""
-    return hmac.compare_digest(presented, bind_value(session, host))
+    expected = bind_value(session, host)
+    if hmac.compare_digest(presented, expected):
+        return True, True
+    same_person = hmac.compare_digest(presented.rpartition(".")[2], expected.rpartition(".")[2])
+    return False, same_person
 
 
 def request_cookie_names(cookie_header_value: str | None) -> list[str]:
@@ -326,16 +335,22 @@ def rebind_headers(
     cookie_header_value: str | None,
     session: dict[str, object],
     host: str,
+    same_person: bool,
 ) -> list[tuple[str, str]]:
     """Discard one host's application state and bind it to this suite login.
 
-    Applications keep their own session next to the suite session. Whatever a
-    browser still holds for this host was created under another suite login,
-    possibly another person's, so none of it may reach the application. The
-    binding follows the Keycloak session, not the gate's in-memory record: a
-    gate restart re-authenticates silently and keeps application sessions.
+    Applications keep their own session next to the suite session. The
+    cookies a browser still holds for this host were issued under another
+    suite login, so none of them may reach the application. Browser storage
+    holds credentials too (Element's and the portal's Matrix tokens) next to
+    the person's own preferences, so it is cleared only when the person
+    changed. The binding follows the Keycloak session, not the gate's
+    in-memory record: a gate restart re-authenticates silently and keeps
+    application sessions.
     """
-    headers = [("Cache-Control", "no-store"), ("Clear-Site-Data", '"storage"')]
+    headers = [("Cache-Control", "no-store")]
+    if not same_person:
+        headers.append(("Clear-Site-Data", '"storage"'))
     swept = {(name, "/") for name in request_cookie_names(cookie_header_value)}
     swept.update(SCOPED_APP_COOKIES.get(host, ()))
     for name, path in sorted(swept):
@@ -842,7 +857,8 @@ class Handler(http.server.BaseHTTPRequestHandler):
         cookies = parse_cookies(cookie_header_value)
         auth_cookie = cookies.get(COOKIE_NAME).value if cookies.get(COOKIE_NAME) else None
         session = valid_session(auth_cookie)
-        if session and not bound_to_session(cookie_header_value, session, request[0]):
+        same_login, same_person = binding(cookie_header_value, session, request[0]) if session else (True, True)
+        if session and not same_login:
             # First contact with this host under this suite login. A read is
             # replayed once the browser has dropped the old state; a write is
             # refused, because its body was composed under the previous login.
@@ -853,7 +869,7 @@ class Handler(http.server.BaseHTTPRequestHandler):
                 request_id,
                 "rebind",
                 {"Location": request_url(request)} if replayable else None,
-                rebind_headers(cookie_header_value, session, request[0]),
+                rebind_headers(cookie_header_value, session, request[0], same_person),
             )
             return
         if session:

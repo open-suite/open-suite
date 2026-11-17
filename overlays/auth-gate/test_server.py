@@ -365,7 +365,7 @@ class SessionBindingTests(unittest.TestCase):
         self.assertEqual(self.set_cookies(response), [])
         self.assertIsNone(response.getheader("Clear-Site-Data"))
 
-    def test_state_from_another_suite_login_is_dropped(self) -> None:
+    def test_state_of_another_person_is_dropped_with_its_storage(self) -> None:
         previous = dict(self.session, sub="user-2", oidc_sid="keycloak-session-0")
 
         response = self.auth(
@@ -376,6 +376,32 @@ class SessionBindingTests(unittest.TestCase):
 
         self.assertEqual(response.status, 302)
         self.assertIn("docs_sessionid=; Path=/; Max-Age=0; Secure", self.set_cookies(response))
+        self.assertEqual(response.getheader("Clear-Site-Data"), '"storage"')
+
+    def test_new_login_of_the_same_person_drops_sessions_but_keeps_storage(self) -> None:
+        previous = dict(self.session, oidc_sid="keycloak-session-0")
+
+        response = self.auth(
+            "docs.example.test",
+            "/",
+            f"opensuite_auth=signed; docs_sessionid=stale; {self.bind_cookie('docs.example.test', previous)}",
+        )
+        set_cookies = self.set_cookies(response)
+
+        self.assertEqual(response.status, 302)
+        self.assertIn("docs_sessionid=; Path=/; Max-Age=0; Secure", set_cookies)
+        self.assertIn(server.bind_value(self.session, "docs.example.test"), " ".join(set_cookies))
+        self.assertIsNone(response.getheader("Clear-Site-Data"))
+
+    def test_forged_person_half_does_not_keep_storage(self) -> None:
+        response = self.auth(
+            "docs.example.test",
+            "/",
+            f"opensuite_auth=signed; {server.BIND_COOKIE_NAME}=anything.else",
+        )
+
+        self.assertEqual(response.status, 302)
+        self.assertEqual(response.getheader("Clear-Site-Data"), '"storage"')
 
     def test_binding_does_not_carry_over_to_another_host(self) -> None:
         response = self.auth(
