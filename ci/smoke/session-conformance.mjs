@@ -132,6 +132,15 @@ const signIn = async (page, user, password) => {
   await page.fill("#password", password);
   await page.click("#kc-login");
   await page.waitForURL(`https://bridge.${DOMAIN}/**`, { timeout: 30000 });
+  // The portal completes its own sign-in after the gate's. Leaving before
+  // that interrupts it, and the portal makes one automatic attempt per tab.
+  const deadline = Date.now() + 45000;
+  while (Date.now() < deadline) {
+    const onPortal = new URL(page.url()).hostname === `bridge.${DOMAIN}`;
+    if (onPortal && (await APPS[0].identity(page).catch(() => null))) return;
+    await sleep(1000);
+  }
+  throw new Error(`the portal did not finish signing in ${user}`);
 };
 
 const expectEveryAppShows = async (page, user, otherUser, label) => {
