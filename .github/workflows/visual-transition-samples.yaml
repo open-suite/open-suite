@@ -16,7 +16,9 @@ env:
   SMOKE_DOMAIN: demo.opensuite.online
 jobs:
   samples:
-    runs-on: ubuntu-latest
+    # The pinned Playwright cannot install its browser on ubuntu-latest
+    # (26.04). A pinned browser needs a pinned OS image.
+    runs-on: ubuntu-24.04
     timeout-minutes: 120
     steps:
       - uses: actions/checkout@v4
