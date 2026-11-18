@@ -34,6 +34,49 @@ the Office file lifecycle. Chat opened, but its exact deep-link assertion
 failed in all three runs. Whiteboard lacked a fixture in all three.
 [Transition results](https://github.com/open-suite/open-suite/actions/runs/44272787881)
 
+### How much does the runner change the result?
+
+The November CI job ran in Azure West US 2. July's runner was in the
+Netherlands. To isolate network delay, we ran the same November application
+benchmark with Playwright 1.55.1 and Chromium 140 on the demo host. A
+temporary two-vCPU-limited browser pod used the live ingress and the same
+demo account throughout. Linux netem added 0, 30, then 150 ms of outbound
+packet delay on the browser pod alone. Each condition completed ten cold
+and ten warm samples per app. The 30 ms and 150 ms paths are simulations.
+Bandwidth, packet loss and July's runner hardware were not reproduced.
+
+| Ready p75 | July, Netherlands | Current, 0 ms added | Current, 30 ms added | Current, 150 ms added | Current, West US 2 |
+| --- | ---: | ---: | ---: | ---: | ---: |
+| Nextcloud cold | 2.81 s | 2.68 s | 2.22 s | 3.19 s | 4.94 s |
+| Nextcloud warm | 0.78 s | 0.88 s | 0.94 s | 1.18 s | 1.77 s |
+| Element cold | 2.89 s | 1.95 s | 2.65 s | 5.54 s | 6.05 s |
+| Element warm | 0.94 s | 0.64 s | 1.02 s | 2.09 s | 2.09 s |
+
+For Element, added latency reproduced the warm slowdown and most of the
+cold slowdown. A separate test served the July `sha-a6bbc34` and current
+`sha-dbca029` Element frontend images on loopback to the same browser.
+Across two five-sample blocks per image in July/current/current/July order,
+cold startup to the visible SSO action took 859 ms p75 in July and 822 ms
+with the current image. That comparison covers the frontend sign-in screen.
+
+Nextcloud also slowed with added delay, but 150 ms alone did not reproduce
+the original CI timings. At 30 ms the current cold journey finished faster
+than July's and transferred 2,156 KiB against July's 2,203 KiB. Warm
+readiness was 156 ms slower. In a separate ten-pair run at 30 ms we timed
+both readiness markers on each navigation. On warm reloads their median
+paired difference was under 1 ms. On five cold launches the current marker
+appeared about half a second earlier. The marker change does not explain
+the large increases. July had five samples and no preserved runner
+calibration. A release-to-release warm regression of 156 ms remains
+unresolved.
+
+A second US West CI runner measured the same deployment at 3.31 s cold and
+1.15 s warm for Nextcloud (p75). Its slowest warm reload was 1.23 s, versus
+15.93 s in the first run. Element repeated at 6.05 s cold and 2.07 s warm.
+The second Nextcloud run closely matches the 150 ms experiment. The first
+run also had substantial run-to-run variation on the unchanged deployment.
+[Repeat CI benchmark](https://github.com/open-suite/open-suite/actions/runs/44285481311)
+
 ## July 11 benchmark
 
 **Release:** Nextcloud sidecar compression `f576296`, Element startup image
