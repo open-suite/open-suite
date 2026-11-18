@@ -6,6 +6,36 @@ open and render the real Nextcloud and Element applications.
 
 ## Latest summary
 
+On November 18, 2026 the live demo ran portal `066e380` with distribution
+`5546fef`. A GitHub-hosted Ubuntu 24.04 runner measured 20 warm portal
+reloads. At p75 the shell appeared at 370 ms, the dashboard at 780 ms,
+first widget data at 981 ms, and the last required widget response at
+1,464 ms. Global spinner exposure was zero at p75.
+
+The same runner completed all ten cold/warm pairs per application on the
+first attempt. Cold clears the HTTP cache while retaining the app session.
+Warm reloads the destination in that session. Nextcloud readiness required
+the active Documents section and visible result heading. Element readiness
+required the first visible room-list item.
+
+| Journey | Ready p50 | Ready p75 | Interquartile range | Slowest |
+| --- | ---: | ---: | ---: | ---: |
+| Nextcloud Documents, cold | 3.66 s | 4.94 s | 2.00 s | 8.98 s |
+| Nextcloud Documents, warm | 1.24 s | 1.77 s | 0.60 s | 15.93 s |
+| Element room list, cold | 6.02 s | 6.05 s | 0.99 s | 6.07 s |
+| Element room list, warm | 2.09 s | 2.09 s | 0.01 s | 2.11 s |
+
+The pre-deploy dashboard run used a different runner. These measurements
+establish a new CI baseline. They cover three surfaces from the earlier
+suite-wide audit. [Post-deploy benchmark](https://github.com/open-suite/open-suite/actions/runs/44276752689)
+
+Three pre-deploy transition runs passed fresh login, Calendar, Documents and
+the Office file lifecycle. Chat opened, but its exact deep-link assertion
+failed in all three runs. Whiteboard lacked a fixture in all three.
+[Transition results](https://github.com/open-suite/open-suite/actions/runs/44272787881)
+
+## July 11 benchmark
+
 **Release:** Nextcloud sidecar compression `f576296`, Element startup image
 `sha-a6bbc34`, Synapse SSO login limits
 
