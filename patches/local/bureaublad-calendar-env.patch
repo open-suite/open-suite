@@ -23,12 +23,13 @@ index d78c692..b5f0058 100644
        {{- if .Values.ai.llm.endpoint.isInternal }}
        # AI connectivity
        - ports:
-@@ -69,7 +83,29 @@ backend:
+@@ -69,7 +83,30 @@ backend:
      OIDC_POST_LOGIN_REDIRECT_URI: {{ $baseUrl }}
      OIDC_POST_LOGOUT_REDIRECT_URI: {{ $baseUrl }}
      OIDC_TOKEN_ENDPOINT: {{ .Values.authentication.oidc.token_endpoint | quote }}
 -    OIDC_REVOCATION_ENDPOINT: {{ .Values.authentication.oidc.end_session_endpoint | quote }}
 +    OIDC_INTROSPECTION_ENDPOINT: {{ .Values.authentication.oidc.introspection_endpoint | quote }}
++    REDIRECT_TO_ACCOUNT_PAGE: {{ printf "%s/account/" (trimSuffix "/" .Values.authentication.oidc.issuer) | quote }}
 +    # Open Suite integrations consumed by the portal fork.
 +    CALENDAR_URL: "https://{{ .Values.global.hostname.nextcloud | default "nextcloud" }}.{{ .Values.global.domain }}/apps/calendar"
 +    CALENDAR_CARD: "true"
