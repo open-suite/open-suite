@@ -51,7 +51,7 @@ if (!selectedApps.size) throw new Error("BENCHMARK_APPS selected no apps");
 const appDefinitions = {
   nextcloud: {
     hostname: "nextcloud.",
-    workload: "portal-header-office-to-documents-result-count",
+    workload: "portal-header-office-to-active-documents-result-heading",
     exposesUpstreamHeaderTime: true,
     async open(page) {
       const header = page.locator("#ko-portal-header");
@@ -64,9 +64,8 @@ const appDefinitions = {
         .click();
     },
     async waitUntilReady(page) {
-      await page
-        .getByText(/Documents found/)
-        .waitFor({ state: "visible", timeout: 45_000 });
+      await page.locator('#app-navigation-vue a[aria-current="page"][title="Documents"]').waitFor({ timeout: 45_000 });
+      await page.locator("#files-section-heading").waitFor({ timeout: 45_000 });
     },
   },
   element: {
