@@ -1,0 +1,37 @@
+name: Application browser benchmark
+on: workflow_dispatch
+permissions:
+  contents: read
+concurrency:
+  group: smoke-live-demo
+  cancel-in-progress: false
+jobs:
+  benchmark:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 35
+    defaults:
+      run:
+        working-directory: performance
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - run: npm ci
+      - run: npx playwright install --with-deps chromium
+      - name: Measure live application readiness
+        env:
+          BENCHMARK_USER: johndoe
+          BENCHMARK_PASS: ${{ secrets.SMOKE_PASS }}
+          BENCHMARK_SAMPLES: 10
+          BENCHMARK_RUNNER_LABEL: github-ubuntu-24.04
+          BENCHMARK_OUTPUT: /tmp/application-benchmark.json
+        run: npm run benchmark:apps > /tmp/application-benchmark.log 2>&1
+      - name: Report aggregate measurements
+        if: always()
+        run: |
+          if test -f /tmp/application-benchmark.json; then
+            jq '.apps | map_values({workload, attempts, completedSamples, cold: .cold.summary.journey_ready_ms, warm: .warm.summary.journey_ready_ms})' /tmp/application-benchmark.json
+          else
+            rg 'TimeoutError|waiting for locator|Error:|Set BENCHMARK_' /tmp/application-benchmark.log | head -10
+          fi
