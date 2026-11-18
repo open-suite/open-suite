@@ -19,13 +19,36 @@ jobs:
           node-version: 22
       - run: npm ci
       - run: npx playwright install --with-deps chromium
+      - name: Read pinned portal revision
+        id: portal
+        run: |
+          revision=$(sed -n 's/^PORTAL_REF=.*:-\([0-9a-f]\{40\}\)}"$/\1/p' ../scripts/single-vps-deploy/01-deploy.sh)
+          test -n "$revision"
+          echo "revision=$revision" >> "$GITHUB_OUTPUT"
+      - uses: actions/checkout@v4
+        with:
+          repository: open-suite/open-suite-portal
+          ref: ${{ steps.portal.outputs.revision }}
+          path: portal
+      - name: Measure dashboard
+        working-directory: portal/performance
+        env:
+          BENCHMARK_USER: johndoe
+          BENCHMARK_PASS: ${{ secrets.SMOKE_PASS }}
+          BENCHMARK_OUTPUT: /tmp/dashboard-benchmark.json
+        run: |
+          npm ci
+          npx playwright install chromium
+          node benchmark.mjs
       - name: Measure live application readiness
+        if: ${{ !cancelled() && steps.portal.outcome == 'success' }}
         env:
           BENCHMARK_USER: johndoe
           BENCHMARK_PASS: ${{ secrets.SMOKE_PASS }}
           BENCHMARK_SAMPLES: 10
           BENCHMARK_RUNNER_LABEL: github-ubuntu-24.04
           BENCHMARK_OUTPUT: /tmp/application-benchmark.json
+          BENCHMARK_DEPLOYMENT_REVISION: ${{ steps.portal.outputs.revision }}
         run: npm run benchmark:apps > /tmp/application-benchmark.log 2>&1
       - name: Report aggregate measurements
         if: always()
