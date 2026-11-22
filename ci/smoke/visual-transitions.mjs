@@ -2,6 +2,7 @@
 // intentionally top-level and sanitized: never emit credentials, cookies,
 // storage state, response bodies, or URL query values.
 import { randomUUID } from "node:crypto";
+import { spawnSync } from "node:child_process";
 import { mkdir, rm, writeFile } from "node:fs/promises";
 import path from "node:path";
 import { chromium } from "playwright";
@@ -691,6 +692,9 @@ async function portalFilesOfficeLifecycle({ page, rawDocumentRequests, portalHea
 
   for (let attempt = 1; attempt <= 2; attempt += 1) {
     const timelineStart = timeline.length;
+    await target.evaluate((link) => link.addEventListener("click", (event) => {
+      window.__osOfficeClick = performance.timeOrigin + event.timeStamp;
+    }, { capture: true, once: true }));
     const [popup] = await Promise.all([page.waitForEvent("popup"), target.click()]);
     setPopup(popup);
     popup.setDefaultTimeout(15_000);
@@ -706,6 +710,20 @@ async function portalFilesOfficeLifecycle({ page, rawDocumentRequests, portalHea
 
     let editor = await waitForCollaboraFrame(popup);
     await waitForDocumentLoaded(popup);
+    const click = await page.evaluate(() => window.__osOfficeClick);
+    const loaded = await popup.evaluate(() => performance.timeOrigin
+      + window.__osOfficeLifecycle.find((entry) => entry.status === "Document_Loaded").at);
+    check(`Office attempt ${attempt} click to Document_Loaded`, Number.isFinite(loaded - click)
+      && loaded >= click, true, `ms=${Math.round(loaded - click)}`);
+    const editMarker = "opensuite" + randomUUID().replaceAll("-", "");
+    if (attempt === 2) {
+      const canvas = editor.locator("#document-canvas, #document-container canvas, #map, #document-container")
+        .filter({ visible: true }).first();
+      await canvas.click({ position: { x: 140, y: 135 } });
+      await popup.keyboard.press("Control+Home");
+      await popup.keyboard.type(editMarker);
+      await popup.keyboard.press("Control+s");
+    }
     await assertOfficeHeaderGeometry(popup, `Office attempt ${attempt}`, portalHeaderVersion, check, contract);
 
     if (attempt === 1) {
@@ -722,6 +740,34 @@ async function portalFilesOfficeLifecycle({ page, rawDocumentRequests, portalHea
     }
 
     await closeOfficeToFiles(popup, editor, durable.fileId, `Office attempt ${attempt}`, portalHeaderVersion, check, contract);
+
+    if (attempt === 2) {
+      // A loaded iframe can still lose the first input. Verify the exact owned
+      // file through the user's DAV session after the editor flushes its save.
+      let saved = false;
+      const deadline = Date.now() + 15000;
+      while (!saved && Date.now() < deadline) {
+        const bytes = await popup.evaluate(async (name) => {
+          const uid = encodeURIComponent(OC.getCurrentUser().uid);
+          const res = await fetch(`/remote.php/dav/files/${uid}/${encodeURIComponent(name)}`,
+            { cache: "no-store", headers: { requesttoken: OC.requestToken } });
+          if (!res.ok) throw new Error(`DAV read returned ${res.status}`);
+          return Array.from(new Uint8Array(await res.arrayBuffer()));
+        }, fixture.name);
+        const verified = spawnSync("python3", ["-c", [
+          "import io, sys, zipfile, xml.etree.ElementTree as ET",
+          "with zipfile.ZipFile(io.BytesIO(sys.stdin.buffer.read())) as doc:",
+          "    root = ET.fromstring(doc.read('word/document.xml'))",
+          "text = ''.join(n.text or '' for n in root.iter('{http://schemas.openxmlformats.org/wordprocessingml/2006/main}t'))",
+          "sys.exit(0 if sys.argv[1] in text else 1)",
+        ].join("\n"), editMarker], { input: Buffer.from(bytes), stdio: ["pipe", "ignore", "pipe"] });
+        if (verified.error) throw verified.error;
+        if (verified.stderr.length) throw new Error("Invalid saved DOCX package");
+        saved = verified.status === 0;
+        if (!saved) await popup.waitForTimeout(500);
+      }
+      contract("Office saved the typed text in the exact DOCX", saved);
+    }
 
     if (attempt === 1) {
       const history = [{ state: "closed", url: sanitizeUrl(popup.url()) }];
