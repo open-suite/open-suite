@@ -6,6 +6,34 @@ open and render the real Nextcloud and Element applications.
 
 ## Latest summary
 
+### Opening and editing a DOCX on November 22
+
+The demo's Files widget opened a newly created DOCX twice per fixture, in a
+new tab each time. The timer starts at the link click and stops when the
+active Collabora frame reports `Document_Loaded`. Runs used the same
+Playwright 1.55.1 runner pod, normal authenticated ingress, no injected
+network delay and three independent fixtures per build. Creation had already
+opened each document once. This measures reopening from the dashboard with
+a primed browser cache and a warm Office server.
+
+| Portal frontend | Click to loaded, in trial order (ms) | Median |
+| --- | --- | ---: |
+| `066e380` | 3409, 3481, 3542, 3519, 3446, 3601 | 3500 ms |
+| `8a1836e` | 3413, 3527, 3488, 3588, 3470, 3527 | 3508 ms |
+
+The search change produced no measurable Office opening improvement in this
+sample. In two additional baseline traces, Nextcloud's Files page reached
+DOMContentLoaded at 1784 and 1716 ms. Collabora's frame reached its own
+DOMContentLoaded at 367 and 383 ms from frame navigation.
+
+All three post-deploy fixtures passed the edit check. On the second open the
+driver typed a unique marker, saved, closed the editor, downloaded that exact
+DOCX through DAV, and found the marker in its Word XML. All six fixtures across
+the two builds were deleted and verified absent. The visual-transition workflow
+now records both editor-open times and checks persistence of the first edit.
+
+### Portal dashboard on November 18
+
 On November 18, 2026 the live demo ran portal `066e380` with distribution
 `5546fef`. A GitHub-hosted Ubuntu 24.04 runner measured 20 warm portal
 reloads. At p75 the shell appeared at 370 ms, the dashboard at 780 ms,
