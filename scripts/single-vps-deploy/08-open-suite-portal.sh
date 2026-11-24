@@ -57,8 +57,12 @@ spec:
     # Single-quoted YAML scalar: backslashes are literal, so the regex dots stay
     # escaped (a double-quoted scalar rejects \. as an unknown escape).
     regex: '^https?://${DOMAIN//./\.}/(.*)'
-    replacement: 'https://bridge.${DOMAIN}/\${1}'
-    permanent: true
+    # The bare domain is the public front door. On the shared demo box that
+    # is the single-server suite (opensuite-saas) at office.<domain>; this
+    # stack stays at bridge.<domain>. Set APEX_TARGET=bridge to send it here.
+    # Not permanent, so browsers don't pin the choice.
+    replacement: 'https://${APEX_TARGET:-office}.${DOMAIN}/\${1}'
+    permanent: false
 ---
 apiVersion: networking.k8s.io/v1
 kind: Ingress
