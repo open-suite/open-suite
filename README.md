@@ -1,4 +1,11 @@
-# Open Suite
+# Open Suite Classic
+
+This is Open Suite Classic, the k3s distribution. The current Open Suite is
+a single app that runs on one server without Kubernetes:
+[open-suite/opensuite-saas](https://github.com/open-suite/opensuite-saas),
+[opensuite.online](https://opensuite.online/). Classic remains available for
+organisations that need Nextcloud, La Suite and Keycloak by name; its docs are
+at [docs.opensuite.online/classic](https://docs.opensuite.online/classic/).
 
 An opinionated, self-hostable digital workplace for European public-sector and
 privacy-conscious orgs — assembled from best-in-class open-source apps (the
